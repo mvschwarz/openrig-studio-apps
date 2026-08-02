@@ -123,13 +123,18 @@ export async function buildLiveState(options = {}) {
   // A box can host more than one rig, and naming the first one found would
   // caption every seat on the box with whichever rig happened to sort first —
   // a floor reading "kernel" over eleven seats that mostly belong to another
-  // rig. Name one when there is one, name them all when there are several, and
-  // carry the list so a surface can be smarter than the caption.
+  // rig. Name one when there is one, name them all when there are several.
+  //
+  // A structured `rigs` array would let a surface be smarter than the caption,
+  // but the runtime's observe envelope is built field by field and does not
+  // carry one — emitting it here would ship a declaration that silently never
+  // arrives, which is the defect this file exists to avoid. It belongs in the
+  // envelope contract first, and that is the runtime's to add.
   const rigNames = [...new Set(nodes.map((n) => n.rigName).filter(Boolean))];
   const rig = rigNames.length === 1 ? rigNames[0]
     : rigNames.length ? rigNames.join(" · ")
     : "rig";
-  return { rig, rigs: rigNames, attached: true, reason: null, seats, queue };
+  return { rig, attached: true, reason: null, seats, queue };
 }
 
 // Safe by construction rather than by validation: the directory comes from the
