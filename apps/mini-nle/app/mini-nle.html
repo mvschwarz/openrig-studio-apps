@@ -2309,15 +2309,17 @@
     function resolvePath(p) {
       if (!p) return "";
       if (/^[a-z]+:\/\//i.test(p)) return p;
-      if (p.startsWith("/")) {
-        // absolute filesystem paths can't ride the static route — map any
-        // (macOS /Users/..., Linux /home/...) into the served bundle
-        if (location.protocol.startsWith("http")) {
-          const i = p.indexOf("/media/");
-          return i !== -1 ? p.slice(i + 1) : `media/${basename(p)}`;
-        }
-        return `file://${p}`;
+      // Project media is provider-owned, not a static child of this surface.
+      // Returning a relative ref here makes media/foo.mp4 resolve beneath
+      // /surfaces/mini-nle.html as /surfaces/media/foo.mp4, which persists a
+      // valid edit and then shows a black stage. The declared /api/media verb
+      // is the one route that can resolve both bundle-relative refs and
+      // absolute bound-root paths without leaking filesystem layout into the
+      // shell's static server.
+      if (location.protocol.startsWith("http")) {
+        return `${EXPORT_API_BASE}/api/media?path=${encodeURIComponent(p)}`;
       }
+      if (p.startsWith("/")) return `file://${p}`;
       return p;
     }
 

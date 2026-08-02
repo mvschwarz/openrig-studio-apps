@@ -63,6 +63,20 @@ function missingRoutes(manifest) {
   return requiredExact.filter((route) => !declared.has(route));
 }
 
+function resolvePathFromSurface(surface, input, protocol = "http:") {
+  const match = surface.match(/function resolvePath\(p\) \{[\s\S]*?\n    \}/);
+  assert.ok(match, "resolvePath must remain inspectable in the shipped surface");
+  const invoke = new Function(
+    "input",
+    "protocol",
+    `const EXPORT_API_BASE = "";
+     const location = { protocol };
+     function basename(p) { return String(p || "").split("/").filter(Boolean).pop() || ""; }
+     return (${match[0]})(input);`,
+  );
+  return invoke(input, protocol);
+}
+
 test("MINI-NLE declares every legitimate exact route it uses", () => {
   const { manifest } = readContract();
   assert.deepEqual(missingRoutes(manifest), []);
@@ -104,4 +118,17 @@ test("dynamic export mode resolves to concrete declared review and final routes"
   assert.ok(manifest.verbs.includes("/api/export-review"));
   assert.ok(manifest.verbs.includes("/api/export-final"));
   assert.ok(!manifest.verbs.includes("/api/export-"), "dynamic source fragment is not a route declaration");
+});
+
+test("timeline media resolves through the declared provider route, not relative to /surfaces/", () => {
+  const { surface } = readContract();
+  assert.equal(
+    resolvePathFromSurface(surface, "media/captures/qa-source.mp4"),
+    "/api/media?path=media%2Fcaptures%2Fqa-source.mp4",
+  );
+  assert.equal(
+    resolvePathFromSurface(surface, "/private/tmp/project/media/captures/qa-source.mp4"),
+    "/api/media?path=%2Fprivate%2Ftmp%2Fproject%2Fmedia%2Fcaptures%2Fqa-source.mp4",
+  );
+  assert.equal(resolvePathFromSurface(surface, "https://example.test/clip.mp4"), "https://example.test/clip.mp4");
 });
