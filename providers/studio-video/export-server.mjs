@@ -760,8 +760,8 @@ async function handleNleApi(req, res, url) {
         assets.push({ name, path: full, root: rootLabel, kind, size: stat.size, mtime: stat.mtimeMs, meta });
       }
     };
-    for (const root of roots) walk(path.join(root, "library"), path.basename(root), 0);
-    return sendJson(res, 200, { ok: true, assets, roots, note: "library/ subtrees of the configured media roots; <file>.meta.json sidecars are informational (license/credit/source) - never gates" });
+    for (const root of roots) walk(root, path.basename(root), 0);
+    return sendJson(res, 200, { ok: true, assets, roots, note: "configured media roots are scanned directly; <file>.meta.json sidecars are informational (license/credit/source) - never gates" });
   }
   if (url.pathname === "/api/library/media" && req.method === "GET") {
     // roots-only gate for library previews (library files are not in the

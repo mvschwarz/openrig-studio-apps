@@ -4,6 +4,9 @@
   "type": "module",
   "description": "The video/timeline provider for OpenRig Studio surfaces. Serves the verbs mini-nle, media-manager and canvas call. Ported from studio-box; not extracted, not rewritten.",
   "license": "Apache-2.0",
+  "scripts": {
+    "test": "node --test ../../test/mini-nle-contract.test.mjs ../../test/media-library.test.mjs"
+  },
   "engines": {
     "node": ">=18"
   },

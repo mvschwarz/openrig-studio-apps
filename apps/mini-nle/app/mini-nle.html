@@ -2104,18 +2104,19 @@
     <div id="nleNoteOverlay" class="nle-overlay" hidden>
       <div class="nle-note-panel">
         <h3>Review note <i id="nleNoteContext"></i></h3>
+        <p class="nle-safe-note">Review handoff lives in AGENTS. MINI-NLE does not inject work into a rig.</p>
         <div class="nle-note-row">
-          kind <select id="nleNoteKind"><option>general</option><option>regen</option><option>timing</option><option>audio</option><option>other</option></select>
-          to <select id="nleNoteReceiver"></select>
-          <input id="nleNoteNewReceiver" class="grow" type="text" placeholder="or type a session@rig (persists)">
+          kind <select id="nleNoteKind" disabled><option>general</option><option>regen</option><option>timing</option><option>audio</option><option>other</option></select>
+          to <select id="nleNoteReceiver" disabled><option>Use AGENTS</option></select>
+          <input id="nleNoteNewReceiver" class="grow" type="text" placeholder="Use AGENTS for review handoff" disabled>
         </div>
-        <textarea id="nleNoteText" placeholder="What should change, and why it matters at this moment"></textarea>
+        <textarea id="nleNoteText" placeholder="Use the AGENTS surface to hand review work to a seat" disabled></textarea>
         <div class="nle-note-row">
-          <button id="nleNoteAnnotate" type="button">Annotate frame...</button>
+          <button id="nleNoteAnnotate" type="button" disabled>Annotate frame...</button>
           <span id="nleNoteAnnotChip" class="nle-annot-chip"></span>
           <span class="grow"></span>
-          <button id="nleNoteSave" type="button" class="m-ib primary">Save draft</button>
-          <button id="nleNoteSend" type="button">Send all</button>
+          <button id="nleNoteSave" type="button" class="m-ib primary" disabled>Use AGENTS</button>
+          <button id="nleNoteSend" type="button" disabled>Use AGENTS</button>
           <button id="nleNoteCancel" type="button">Cancel</button>
         </div>
       </div>
@@ -5203,16 +5204,9 @@
 
     async function nleLoadReceivers() {
       const note = nleNoteState();
-      try {
-        const payload = await callExportApi("/api/receivers");
-        nleEls.nleNoteReceiver.innerHTML = (payload.receivers || []).map((receiver) =>
-          `<option value="${escapeHtml(receiver)}">${escapeHtml(receiver)}</option>`).join("");
-        note.lanes = payload.lanes || null;
-        note.receiversLoaded = true;
-      } catch {
-        nleEls.nleNoteReceiver.innerHTML = '<option value="">(no receiver configured)</option>';
-      }
-      nleApplyNoteLaneDefault();
+      nleEls.nleNoteReceiver.innerHTML = '<option value="">Use AGENTS for review handoff</option>';
+      note.lanes = null;
+      note.receiversLoaded = true;
     }
 
     function nleOpenNoteForm({ slot, timestamp, lane }) {
@@ -5306,16 +5300,10 @@
     }
 
     async function nleLoadFeedbackDrafts({ silent = true, rerenderStrip = true } = {}) {
-      try {
-        const payload = await callExportApi("/api/note");
-        nle.feedbackDrafts = (payload.drafts || []).filter((note) => note.status === "draft");
-        nleUpdateFeedbackSurfaces({ rerenderStrip });
-        return nle.feedbackDrafts;
-      } catch (error) {
-        if (!silent) nlePatchStatusShow(`Feedback drafts unavailable: ${error.message}`, "warn");
-        window.__nleFeedbackDrafts = nle.feedbackDrafts || [];
-        return nle.feedbackDrafts || [];
-      }
+      nle.feedbackDrafts = [];
+      nleUpdateFeedbackSurfaces({ rerenderStrip });
+      if (!silent) nlePatchStatusShow("Review handoff lives in AGENTS.", "warn");
+      return nle.feedbackDrafts;
     }
 
     function nleSelectedFeedbackReceiver() {
@@ -5323,23 +5311,7 @@
     }
 
     async function nleSaveFeedbackDraft({ slot, timestamp, kind, text, receiver, annotation }) {
-      const cleanText = String(text || "").trim();
-      if (!cleanText) throw new Error("Feedback text is required.");
-      const payload = await callExportApi("/api/note", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          slot,
-          timestamp,
-          kind: kind || "general",
-          text: cleanText,
-          receiver,
-          annotation,
-          status: "draft",
-        }),
-      });
-      await nleLoadFeedbackDrafts({ silent: true });
-      return payload;
+      throw new Error("Review handoff lives in AGENTS; MINI-NLE does not inject rig work.");
     }
 
     async function nleSaveNoteDraft() {
@@ -5364,16 +5336,7 @@
     }
 
     async function nleFlushFeedbackDrafts(receiver = "") {
-      const useReceiver = String(receiver || "").trim() || nleSelectedFeedbackReceiver();
-      const payload = await callExportApi("/api/note/flush", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ receiver: useReceiver }),
-      });
-      window.__nleLastFeedbackFlush = payload;
-      await nleLoadFeedbackDrafts({ silent: true });
-      nlePatchStatusShow(`Sent ${payload.draftCount} feedback draft(s) to ${payload.receiver}${payload.qitemId ? ` (${payload.qitemId})` : ""}.`, "ok");
-      return payload;
+      throw new Error("Review handoff lives in AGENTS; MINI-NLE does not inject rig work.");
     }
 
     async function nleSendNote() {
@@ -5763,14 +5726,7 @@
             try { window.parent?.postMessage({ t: "open-agent" }, "*"); } catch {}
           });
           body.querySelector("[data-cu-dismiss]").addEventListener("click", async () => {
-            for (const note of notes) {
-              try {
-                await callExportApi("/api/note/done", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: note.id, done: true }) });
-              } catch (error) { nleEditStatusShow(`Dismiss failed: ${error.message}`, "error"); return; }
-            }
-            await nleLoadFeedbackDrafts({ silent: true, rerenderStrip: false });
-            nle.catchup.asked = (nle.feedbackDrafts || []).filter((note) => note.slot);
-            nleRenderCatchup();
+            nleEditStatusShow("Review handoff lives in AGENTS; MINI-NLE does not close rig work.", "warn");
           });
           wrap.appendChild(node);
         }
@@ -6235,7 +6191,6 @@
         <div class="p">${escapeHtml(asset.path)}</div>
         <div class="nle-fields">
           <button type="button" id="nleCopyPath">Copy path</button>
-          <button type="button" id="nleReveal">Reveal in Finder</button>
           ${nle.swapTarget && (asset.media_type === "video" || asset.media_type === "image") ? `<button type="button" id="nleUseForSwap" class="primary">Use for ${escapeHtml(nle.swapTarget)}</button>` : ""}
         </div>`;
       const useForSwap = document.getElementById("nleUseForSwap");
@@ -6283,14 +6238,6 @@
       document.getElementById("nleCopyPath").addEventListener("click", async () => {
         await navigator.clipboard.writeText(asset.path);
         nlePatchStatusShow(`Copied path: ${asset.path}`, "ok");
-      });
-      document.getElementById("nleReveal").addEventListener("click", async () => {
-        try {
-          await callExportApi("/api/reveal-file", { method: "POST", body: JSON.stringify({ path: asset.path }), headers: { "content-type": "application/json" } });
-          nlePatchStatusShow(`Revealed in Finder: ${asset.path}`, "ok");
-        } catch (error) {
-          nlePatchStatusShow(error.message, "error");
-        }
       });
     }
 

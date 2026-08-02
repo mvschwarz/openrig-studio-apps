@@ -44,6 +44,15 @@ say this. **If there is a field for it, nobody inlines it.**
 A manifest authored on a machine that already has everything installed will
 always under-declare. Test one by installing it somewhere that has nothing.
 
+The video provider's app-contract and media-root regressions run after its
+dependencies are installed:
+
+```sh
+cd providers/studio-video
+npm ci
+npm test
+```
+
 ## Provenance
 
 Ported from the frozen `studio-box` spike, then de-bespoked: the original
