@@ -4,17 +4,37 @@
   "name": "AGENTS",
   "summary": "Talk to the seats on this box. The rig roster, live, with a way to actually say something.",
   "category": "system",
-  "maker": { "name": "OpenRig", "url": "https://github.com/mvschwarz" },
+  "maker": {
+    "name": "OpenRig",
+    "url": "https://github.com/mvschwarz"
+  },
   "surface": {
     "entry": "app/agents.html",
     "path": "/surfaces/agents.html",
-    "glyph": "◇",
+    "glyph": "\u25c7",
     "hint": "the seats on this box, and a way to talk to them"
   },
-  "requires": {
-    "host_capabilities": ["seats.list", "seats.send", "seats.capture"],
-    "_note": "ULTRALIGHT. No provider, no vendor, no roots. It rides verbs the STUDIO serves, which is the point of this app existing — it is the smallest thing that proves an app can drop onto the rail and work."
-  },
-  "verbs": ["/api/seats", "/api/seats/send", "/api/seats/capture"],
-  "vendor": []
+  "verbs": [
+    "/api/seats",
+    "/api/seats/send",
+    "/api/seats/capture"
+  ],
+  "vendor": [],
+  "provider": {
+    "package": "@openrig/studio-host",
+    "required": true,
+    "run": {
+      "entry": "host-server.mjs",
+      "args": [
+        "--port",
+        "{{port}}",
+        "--root",
+        "{{root:project}}",
+        "--root",
+        "{{root:media}}"
+      ],
+      "_note": "Root KINDS, bound at install. The box supplies the paths; this provider never names one."
+    },
+    "_note": "These verbs were special-cased as requires.host_capabilities and served by a private box, so this app installed onto a public studio and rendered an EMPTY PANE. It is an ordinary provider now."
+  }
 }

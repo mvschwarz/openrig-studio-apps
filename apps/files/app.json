@@ -35,11 +35,21 @@
   "vendor": [
     "marked"
   ],
-  "requires": {
-    "host_capabilities": [
-      "files.read",
-      "files.write"
-    ],
-    "_note": "Ultralight: this app has no backend of its own. It rides verbs the STUDIO serves. Declaring that is the difference between 'no provider' and 'provider forgotten'."
+  "provider": {
+    "package": "@openrig/studio-host",
+    "required": true,
+    "run": {
+      "entry": "host-server.mjs",
+      "args": [
+        "--port",
+        "{{port}}",
+        "--root",
+        "{{root:project}}",
+        "--root",
+        "{{root:media}}"
+      ],
+      "_note": "Root KINDS, bound at install. The box supplies the paths; this provider never names one."
+    },
+    "_note": "These verbs were special-cased as requires.host_capabilities and served by a private box, so this app installed onto a public studio and rendered an EMPTY PANE. It is an ordinary provider now."
   }
 }
