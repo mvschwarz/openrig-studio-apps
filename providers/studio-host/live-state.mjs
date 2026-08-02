@@ -120,7 +120,16 @@ export async function buildLiveState(options = {}) {
       title: q.summary ? String(q.summary).split(/(?<=\.)\s/)[0].slice(0, 120) : q.qitemId,
     }));
 
-  return { rig: nodes[0]?.rigName || "rig", attached: true, reason: null, seats, queue };
+  // A box can host more than one rig, and naming the first one found would
+  // caption every seat on the box with whichever rig happened to sort first —
+  // a floor reading "kernel" over eleven seats that mostly belong to another
+  // rig. Name one when there is one, name them all when there are several, and
+  // carry the list so a surface can be smarter than the caption.
+  const rigNames = [...new Set(nodes.map((n) => n.rigName).filter(Boolean))];
+  const rig = rigNames.length === 1 ? rigNames[0]
+    : rigNames.length ? rigNames.join(" · ")
+    : "rig";
+  return { rig, rigs: rigNames, attached: true, reason: null, seats, queue };
 }
 
 // Safe by construction rather than by validation: the directory comes from the
