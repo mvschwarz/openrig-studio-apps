@@ -70,7 +70,7 @@ const stateOf = (n) => {
 // like a quiet one.
 export async function buildLiveState(options = {}) {
   const runRig = options.runRig || run;
-  const psResult = await runRig(["ps", "--nodes", "--json"]);
+  const psResult = await runRig(["ps", "--nodes", "-A", "--json"]);
   if (!psResult.ok) {
     return { rig: null, attached: false, reason: psResult.reason, seats: [], queue: [],
       detail: psResult.detail };
