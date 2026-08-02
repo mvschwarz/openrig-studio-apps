@@ -53,14 +53,21 @@ const minutesSince = (ts) => {
   return Number.isFinite(t) ? Math.max(0, Math.round((Date.now() - t) / 60000)) : null;
 };
 
-// agentActivity can be an object ({state:"unknown"}) when the daemon-ingest
-// link is down for a runtime. Report what it says rather than defaulting to
+// LIVENESS is lifecycleState's to report; agentActivity only says what a LIVE
+// seat is doing. The order matters and it used to be the other way round: a
+// known-but-stale activity could out-vote a lifecycle that had already gone
+// unhealthy, so a dead seat could still be rendered as working. Activity must
+// never be able to claim a seat is alive.
+//
+// agentActivity can also be an object ({state:"unknown"}) when the daemon
+// ingest link is down for a runtime. Report unknown rather than defaulting to
 // "idle", which would invent a fact about a live seat.
 const stateOf = (n) => {
+  const life = n.lifecycleState || "unknown";
+  if (life !== "running") return life;
   const a = n.agentActivity;
   const s = typeof a === "string" ? a : a?.state;
-  if (s && s !== "unknown") return s;
-  return n.lifecycleState === "running" ? "unknown" : (n.lifecycleState || "unknown");
+  return s && s !== "unknown" ? s : "unknown";
 };
 
 // The three no-rig cases are genuinely different and an app can act on the
