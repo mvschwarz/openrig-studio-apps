@@ -33,8 +33,18 @@ const ONCE = argv.includes("--once");
 const run = (args) =>
   new Promise((resolve) => {
     execFile("rig", args, { timeout: 6000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
-      if (err) return resolve(null);
-      try { resolve(JSON.parse(stdout)); } catch { resolve(null); }
+      if (err?.code === "ENOENT") {
+        return resolve({ ok: false, reason: "no-rig-cli", detail: "the rig executable was not found on this box" });
+      }
+      if (err) {
+        const outcome = err.killed ? "timed out" : `failed with ${err.code || "an unknown error"}`;
+        return resolve({ ok: false, reason: "rig-error", detail: `rig ${args[0]} ${outcome}` });
+      }
+      try {
+        resolve({ ok: true, value: JSON.parse(stdout) });
+      } catch {
+        resolve({ ok: false, reason: "rig-error", detail: `rig ${args[0]} returned invalid JSON` });
+      }
     });
   });
 
@@ -58,12 +68,14 @@ const stateOf = (n) => {
 // and reports no rigs (stand one up), or the CLI errored (say so, do not claim
 // emptiness). Collapsing them into one empty list is what made a dead tab look
 // like a quiet one.
-export async function buildLiveState() {
-  const psRaw = await run(["ps", "--nodes", "--json"]);
-  if (psRaw === null) {
-    return { rig: null, attached: false, reason: "no-rig-cli", seats: [], queue: [],
-      detail: "the rig CLI is not installed or did not answer on this box" };
+export async function buildLiveState(options = {}) {
+  const runRig = options.runRig || run;
+  const psResult = await runRig(["ps", "--nodes", "--json"]);
+  if (!psResult.ok) {
+    return { rig: null, attached: false, reason: psResult.reason, seats: [], queue: [],
+      detail: psResult.detail };
   }
+  const psRaw = psResult.value;
   const nodes = Array.isArray(psRaw) ? psRaw : psRaw.nodes || [];
   if (!nodes.length) {
     return { rig: null, attached: false, reason: "no-rig", seats: [], queue: [],
@@ -84,7 +96,8 @@ export async function buildLiveState() {
     };
   });
 
-  const qRaw = await run(["queue", "list", "-a", "--full", "--json"]);
+  const qResult = await runRig(["queue", "list", "-a", "--full", "--json"]);
+  const qRaw = qResult.ok ? qResult.value : [];
   const queue = (Array.isArray(qRaw) ? qRaw : [])
     .filter((q) => q.state !== "done")
     .slice(0, 20)

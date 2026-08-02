@@ -81,22 +81,38 @@
   function renderNoRig(state) {
     seats = []; selected = null; clearInterval(pollTimer);
     const cliMissing = state.reason === "no-rig-cli";
-    const title = cliMissing ? "Could not confirm rig attachment" : "No rig is running on this box";
-    const detail = state.detail || (cliMissing
+    const rigFailed = state.reason === "rig-error";
+    const title = rigFailed ? "Rig status could not be confirmed"
+      : cliMissing ? "Could not confirm rig attachment"
+      : "No rig is running on this box";
+    const detail = state.detail || (rigFailed
+      ? "OpenRig answered with an error, so this studio cannot safely infer that no rig exists."
+      : cliMissing
       ? "OpenRig is not available on this box yet."
       : "This box is ready for a rig, but none is attached.");
-    $("sub").textContent = cliMissing ? "rig tooling unavailable" : "no rig attached";
+    const actionLabel = rigFailed ? "Diagnose rig connection" : "Stand up a rig";
+    const guidance = rigFailed
+      ? "Repair or reuse the existing rig connection. Do not create a parallel rig while discovery is failing."
+      : "The setup flow will check for an existing rig, reuse it when found, and create one only when needed.";
+    $("sub").textContent = rigFailed ? "rig discovery failed" : cliMissing ? "rig tooling unavailable" : "no rig attached";
     $("roster").innerHTML = `<div class="setup"><strong>${esc(title)}</strong>
       <p>${esc(detail)}</p>
-      <p>The setup flow will check for an existing rig, reuse it when found, and create one only when needed.</p>
-      <button type="button" id="standUpRig">Stand up a rig</button></div>`;
-    $("paneTitle").textContent = "rig setup";
+      <p>${esc(guidance)}</p>
+      <button type="button" id="rigAction">${esc(actionLabel)}</button></div>`;
+    $("paneTitle").textContent = rigFailed ? "rig diagnosis" : "rig setup";
     $("paneNote").textContent = "";
-    $("capture").textContent = "Stand up or attach a rig before talking to seats.";
+    $("capture").textContent = rigFailed
+      ? "Restore the existing rig connection before talking to seats."
+      : "Stand up or attach a rig before talking to seats.";
     $("msg").disabled = true; $("send").disabled = true;
-    setStatus("This is an honest no-rig state, not an empty roster.");
-    $("standUpRig").addEventListener("click", () => {
-      parent.postMessage({ type: "open-agent", prompt: "Stand up OpenRig on this box. Check for an existing rig first, reuse it if found, and create one only if none exists. Report what you changed." }, "*");
+    setStatus(rigFailed
+      ? "Rig discovery failed. This is not evidence that the box has no rig."
+      : "This is an honest no-rig state, not an empty roster.");
+    $("rigAction").addEventListener("click", () => {
+      const prompt = rigFailed
+        ? "Diagnose the existing OpenRig connection on this box. Check the current rig and repair or reuse it; do not create a parallel rig. Report what failed and what you changed."
+        : "Stand up OpenRig on this box. Check for an existing rig first, reuse it if found, and create one only if none exists. Report what you changed.";
+      parent.postMessage({ type: "open-agent", prompt }, "*");
     });
   }
 

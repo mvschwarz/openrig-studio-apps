@@ -19,5 +19,8 @@ test("AGENTS turns explicit no-rig state into an honest setup action", () => {
 test("AGENTS keeps failed attachment discovery distinct from an empty rig", () => {
   const surface = fs.readFileSync(SURFACE, "utf8");
   assert.match(surface, /no-rig-cli/);
+  assert.match(surface, /rig-error/);
+  assert.match(surface, /Diagnose rig connection/i);
+  assert.match(surface, /do not create a parallel rig/i);
   assert.match(surface, /Could not confirm rig attachment|Rig status could not be confirmed/i);
 });
