@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenRig Media Manager</title>
+<style>
+  /* dark value ladder . Semantic
+     token names kept from the Obsidian kit so selectors are untouched:
+     --amber is now the ACTIVE accent (white, per the ladder's invert
+     convention); coral is reserved for needs-human (unused here yet).
+     Bridge-shaped: explorer rail (smart groups + TAGS), grid, one
+     contextual verb bar, modal player. License info stays DISPLAY-ONLY. */
+  :root {
+    --bg: #121214; --panel: #1b1b1e; --well: rgba(255,255,255,.05);
+    --line: rgba(255,255,255,.14); --hairline: rgba(255,255,255,.08);
+    --ink: rgba(255,255,255,.95); --dim: rgba(255,255,255,.52);
+    --amber: rgba(255,255,255,.95);
+    --mono: Helvetica, "Helvetica Neue", Arial, sans-serif;
+  }
+  body::before { content: ""; position: fixed; inset: -10%; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(42% 55% at 18% 22%, rgba(139,147,255,.08), transparent 70%),
+      radial-gradient(48% 60% at 82% 18%, rgba(255,107,90,.05), transparent 70%),
+      radial-gradient(55% 65% at 60% 85%, rgba(120,160,255,.06), transparent 70%);
+    filter: blur(56px) saturate(1.2) brightness(.9); transform: scale(1.1); }
+  body > * { position: relative; z-index: 1; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 var(--mono); }
+  header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  header h1 { font: 600 13px var(--mono); letter-spacing: 0.08em; color: var(--amber); margin: 0; text-transform: uppercase; }
+  header .sub { color: var(--dim); font-size: 11px; }
+  .tools { display: flex; align-items: center; gap: 8px; padding: 8px 14px; flex-wrap: wrap; border-bottom: 1px solid var(--hairline); }
+  input[type="search"], select, button, input[type="text"] {
+    background: var(--well); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 2px; font: 11.5px var(--mono); padding: 4px 8px;
+  }
+  button { background: var(--panel); cursor: pointer; }
+  button:hover { border-color: var(--amber); color: var(--amber); }
+  button[aria-pressed="true"] { border-color: var(--amber); color: var(--amber); }
+
+  .body { display: grid; grid-template-columns: 200px minmax(0, 1fr); height: calc(100vh - 118px); }
+
+  /* ---- explorer rail: smart groups + tags ---- */
+  #rail { border-right: 1px solid var(--line); overflow-y: auto; padding: 10px 0; }
+  #rail h3 { margin: 8px 12px 4px; font: 600 9.5px var(--mono); letter-spacing: 0.1em;
+    color: var(--dim); text-transform: uppercase; display: flex; align-items: center; }
+  #rail h3 .add { margin-left: auto; cursor: pointer; color: var(--dim); border: 0; background: none; padding: 0 4px; font-size: 13px; }
+  #rail h3 .add:hover { color: var(--amber); }
+  .railrow { display: flex; align-items: baseline; gap: 7px; padding: 4px 12px; cursor: pointer;
+    color: var(--dim); font-size: 11.5px; border-left: 2px solid transparent; }
+  .railrow:hover { color: var(--ink); }
+  .railrow.on { color: var(--ink); border-left-color: var(--ink); background: rgba(255,255,255,.07); }
+  .railrow .g { width: 13px; text-align: center; }
+  .railrow .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .railrow .c { margin-left: auto; font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .railrow .sp { font-size: 9px; color: var(--amber); opacity: .8; }
+
+  /* ---- the contextual verb bar (selection OR active tag) ---- */
+  #ctxbar { display: none; align-items: center; gap: 8px; padding: 6px 14px;
+    border-bottom: 1px solid var(--line); background: var(--panel); }
+  #ctxbar.on { display: flex; flex-wrap: wrap; }
+  #ctxbar .n { color: var(--amber); font-size: 11px; letter-spacing: .06em; }
+  #ctxbar button { padding: 4px 10px; }
+  #ctxbar .spacer { flex: 1; }
+  .tagmenu { position: relative; display: inline-block; }
+  .tagmenu .drop { display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 30;
+    flex-direction: column; gap: 2px; background: rgba(24,24,27,.92); border: 1px solid var(--line);
+    border-radius: 2px; padding: 6px; min-width: 160px; box-shadow: 0 8px 22px rgba(0,0,0,.55);
+    backdrop-filter: blur(10px); }
+  .tagmenu .drop.open { display: flex; }
+  .tagmenu .drop button { border: 0; text-align: left; }
+  .tagmenu .drop input { margin-top: 4px; }
+
+  /* ---- grid ---- */
+  #main { display: flex; flex-direction: column; min-width: 0; }
+  .grid { flex: 1; overflow-y: auto; padding: 10px 14px; display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; align-content: start; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 2px; overflow: hidden; cursor: pointer; position: relative; }
+  .tile.sel { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+  .tile .selmark { position: absolute; top: 5px; left: 5px; z-index: 2; width: 16px; height: 16px;
+    border: 1px solid var(--line); border-radius: 2px; background: rgba(0,0,0,.55);
+    color: var(--amber); font-size: 11px; line-height: 15px; text-align: center; }
+  .tile.sel .selmark { border-color: var(--amber); }
+  .tile video, .tile img { width: 100%; height: 108px; object-fit: contain; display: block; background: #000; }
+  .tile .thumb { background: #000; height: 108px; display: grid; place-items: center; }
+  .tile .cap { padding: 5px 7px; font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile .cap b { color: var(--ink); font-weight: 500; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile .badges { display: flex; gap: 4px; padding: 0 7px 6px; flex-wrap: wrap; }
+  .badge { font-size: 9px; border: 1px solid var(--line); border-radius: 2px; padding: 0 4px; color: var(--dim); }
+  .badge.lk { border-color: var(--amber); color: var(--amber); }
+  .badge.ver { color: var(--ink); }
+  .badge.tag { cursor: pointer; }
+  .badge.tag:hover { color: var(--amber); border-color: var(--amber); }
+  .empty { color: var(--dim); padding: 40px; text-align: center; grid-column: 1 / -1; }
+  #status { padding: 5px 14px; color: var(--dim); font-size: 11px; border-top: 1px solid var(--hairline); }
+
+  /* ---- the modal player (replaces the inspector drawer) ---- */
+  #modalwrap { display: none; position: fixed; inset: 0; z-index: 50;
+    background: rgba(0,0,0,.65); align-items: center; justify-content: center; }
+  #modalwrap.open { display: flex; }
+  #modal { width: min(680px, 92vw); max-height: 90vh; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 2px; padding: 14px; }
+  #modal h2 { margin: 0 34px 8px 0; font: 600 12px var(--mono); color: var(--amber); letter-spacing: .06em; word-break: break-all; }
+  #modal .close { float: right; }
+  #modal video, #modal img { width: 100%; max-height: 46vh; object-fit: contain; background: #000;
+    border: 1px solid var(--line); border-radius: 2px; }
+  #modal .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  #modal .k { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; min-width: 64px; }
+  #modal .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+
+  /* ---- the ask modal: our prompt(), in the house style ---- */
+  #askwrap { display: none; position: fixed; inset: 0; z-index: 60;
+    background: rgba(0,0,0,.65); align-items: center; justify-content: center; }
+  #askwrap.open { display: flex; }
+  #ask { width: min(420px, 90vw); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 2px; padding: 16px; }
+  #ask h2 { margin: 0 0 12px; font: 600 11.5px var(--mono); color: var(--amber);
+    letter-spacing: .05em; line-height: 1.5; }
+  #ask input { width: 100%; padding: 8px 10px; font-size: 12px; }
+  #ask .row { display: flex; gap: 8px; margin-top: 12px; }
+  #ask .spacer { flex: 1; }
+  #ask button.primary { border-color: var(--amber); color: var(--amber); }
+</style>
+<style>
+  /* dark-scheme scrollbars without color-scheme the
+     browser paints LIGHT scrollbars on our dark surfaces */
+  html { color-scheme: dark; }
+  * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 4px; border: 2px solid transparent; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.32); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Media Manager</h1>
+  <span class="sub" id="projectName">loading...</span>
+</header>
+<div class="tools">
+  <input id="search" type="search" placeholder="filter by name, note, tag, path">
+  <button id="viewLocked" aria-pressed="true" title="each cut collapsed to its locked version (locked versions)">Locked</button>
+  <button id="viewAll" aria-pressed="false" title="every version on disk">All versions</button>
+  <button id="refresh" title="Re-list">&#8635;</button>
+  <span class="sub" id="count"></span>
+</div>
+<div id="ctxbar"></div>
+<div class="body">
+  <nav id="rail"></nav>
+  <div id="main"><div class="grid" id="grid"><div class="empty">Loading...</div></div></div>
+</div>
+<div id="status">Ready.</div>
+
+<div id="modalwrap"><div id="modal"></div></div>
+
+<div id="askwrap"><div id="ask">
+  <h2 id="askTitle"></h2>
+  <input type="text" id="askInput">
+  <div class="row"><span class="spacer"></span>
+    <button id="askCancel">cancel</button><button id="askOk" class="primary">OK</button>
+  </div>
+</div></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const VER_LABEL = { original: "ORIGINAL", light: "LIGHT", medium: "MEDIUM",
+    strong: "STRONG", locked: "TRIPOD", smoothed: "SMOOTHED" };
+  const GROUPS = [
+    { id: "all", name: "All", g: "◎" },
+    { id: "video", name: "Video", g: "▤" },
+    { id: "audio", name: "Audio", g: "♪" },
+    { id: "image", name: "Image", g: "▣" },
+    { id: "locked", name: "Locked", g: "◉" },
+    { id: "exports", name: "Exports", g: "⇥" },
+    { id: "library", name: "Library", g: "☁" },
+  ];
+  const state = { view: "locked", group: "all", tag: null,
+    assets: [], libAssets: null, exportAssets: null, curation: {}, tags: {}, byAsset: {}, sel: new Set() };
+
+  // our prompt(): house-styled, promise-shaped. resolve(null) on cancel.
+  function ask(title, placeholder = "", value = "") {
+    return new Promise((resolve) => {
+      $("askTitle").textContent = title;
+      const inp = $("askInput");
+      inp.placeholder = placeholder; inp.value = value;
+      $("askwrap").classList.add("open"); inp.focus();
+      const done = (v) => { $("askwrap").classList.remove("open");
+        inp.onkeydown = $("askOk").onclick = $("askCancel").onclick = null; resolve(v); };
+      $("askOk").onclick = () => done(inp.value.trim());
+      $("askCancel").onclick = () => done(null);
+      inp.onkeydown = (e) => {
+        if (e.key === "Enter") done(inp.value.trim());
+        if (e.key === "Escape") { e.stopPropagation(); done(null); }
+      };
+    });
+  }
+
+  async function api(pathname, opts) {
+    const res = await fetch(pathname, opts);
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    return payload;
+  }
+  const mediaUrl = (a) => a.lib ? `/api/library/media?path=${encodeURIComponent(a.path)}` : `/api/media?path=${encodeURIComponent(a.path)}`;
+
+  async function loadCuration() {
+    state.curation = {};
+    try {
+      const r = await api("/api/curation");
+      for (const c of r.cuts || []) {
+        const pick = c.pick || "original";
+        for (const v of c.versions || []) {
+          if (!v.file) continue;
+          state.curation[v.file] = { label: VER_LABEL[v.key] || v.key.toUpperCase(),
+            locked: v.key === pick, note: c.note || "", cut: c.file };
+        }
+      }
+    } catch {}
+  }
+  async function loadTags() {
+    try { const r = await api("/api/tags"); state.tags = r.tags || {}; state.byAsset = r.byAsset || {}; }
+    catch { state.tags = {}; state.byAsset = {}; }
+  }
+
+  function mapAssets(payload) {
+    return (payload.assets || [])
+      .filter((a) => a.exists !== false && ["video", "image", "audio"].includes(a.media_type))
+      .map((a) => ({ name: a.ref.split("/").pop(), path: a.path, kind: a.media_type,
+        title: a.title || a.ref, role: a.role, slot_refs: a.slot_refs || [], meta: null,
+        cur: state.curation[a.ref.split("/").pop()] || null }));
+  }
+  const dataSig = () => JSON.stringify([state.tags, state.byAsset,
+    Object.keys(state.curation).length, state.assets.map((a) => a.name + (a.cur?.locked ? "L" : "") + (a.slot_refs || []).join(""))]);
+  let pollSig = "";
+
+  async function load() {
+    $("grid").innerHTML = '<div class="empty">Loading...</div>';
+    try {
+      await Promise.all([loadCuration(), loadTags()]);
+      state.assets = mapAssets(await api("/api/project-assets"));
+      pollSig = dataSig();
+      render();
+    } catch (e) { $("grid").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+
+  // live refresh: agents tag/lock/route things from the sidebar — the grid
+  // must follow without a manual reload. Re-render ONLY when the data
+  // actually changed, and never under an open modal/menu (or mid-hover
+  // would also be rude, but hover previews survive a no-op cycle).
+  setInterval(async () => {
+    if ($("modalwrap").classList.contains("open") || document.querySelector(".drop.open")) return;
+    try {
+      await Promise.all([loadCuration(), loadTags()]);
+      state.assets = mapAssets(await api("/api/project-assets"));
+      const sig = dataSig();
+      if (sig !== pollSig) { pollSig = sig; render(); $("status").textContent = "Updated."; }
+    } catch {}
+  }, 7000);
+  async function loadLibrary() {
+    try {
+      const payload = await api("/api/library");
+      state.libAssets = (payload.assets || []).map((a) => ({ ...a, lib: true, title: a.name, cur: null, slot_refs: [] }));
+    } catch { state.libAssets = []; }
+  }
+  async function loadExports() {
+    // the exports shelf: agents render, humans watch here — never hunt disk
+    try {
+      const payload = await api("/api/exports");
+      state.exportAssets = (payload.exports || []).map((e) => ({ name: e.name, path: e.path,
+        kind: "video", title: e.rel, role: `${(e.size / 1e6).toFixed(0)}MB · ${e.mtime.slice(0, 16).replace("T", " ")}`,
+        cur: null, slot_refs: [], meta: null }));
+    } catch { state.exportAssets = []; }
+  }
+
+  function pool() {
+    if (state.group === "library") return state.libAssets || [];
+    if (state.group === "exports") return state.exportAssets || [];
+    return state.assets;
+  }
+
+  function visible() {
+    const q = $("search").value.toLowerCase();
+    return pool().filter((a) => {
+      if (state.group !== "library" && state.group !== "exports") {
+        if (state.view === "locked" && a.cur && !a.cur.locked) return false;
+        if (state.group === "locked" && !(a.cur && a.cur.locked)) return false;
+        if (["video", "audio", "image"].includes(state.group) && a.kind !== state.group) return false;
+        if (state.tag && !(state.byAsset[a.name] || []).includes(state.tag)) return false;
+      }
+      if (!q) return true;
+      return [a.name, a.path, a.title, a.role, a.cur?.note, a.cur?.label,
+        ...(state.byAsset[a.name] || []), ...(a.slot_refs || [])].join(" ").toLowerCase().includes(q);
+    });
+  }
+
+  /* ---- rail ---- */
+  function renderRail() {
+    const rail = $("rail"); rail.innerHTML = "";
+    const h1 = document.createElement("h3"); h1.textContent = "LIBRARY"; rail.appendChild(h1);
+    for (const g of GROUPS) {
+      const counts = { all: state.assets.length,
+        video: state.assets.filter((a) => a.kind === "video").length,
+        audio: state.assets.filter((a) => a.kind === "audio").length,
+        image: state.assets.filter((a) => a.kind === "image").length,
+        locked: state.assets.filter((a) => a.cur && a.cur.locked).length,
+        exports: state.exportAssets ? state.exportAssets.length : "",
+        library: state.libAssets ? state.libAssets.length : "" };
+      const d = document.createElement("div");
+      d.className = "railrow" + (state.group === g.id && !state.tag ? " on" : "");
+      d.innerHTML = `<span class="g">${g.g}</span><span class="n">${g.name}</span><span class="c">${counts[g.id]}</span>`;
+      d.onclick = async () => {
+        state.tag = null; state.group = g.id;
+        if (g.id === "library" && state.libAssets == null) { await loadLibrary(); }
+        if (g.id === "exports") { await loadExports(); }
+        render();
+      };
+      rail.appendChild(d);
+    }
+    const h2 = document.createElement("h3");
+    h2.innerHTML = `TAGS <button class="add" title="new tag (or just tell the agent)">+</button>`;
+    h2.querySelector(".add").onclick = async () => {
+      const t = await ask("New tag name (tip: tell the agent 'ceremony is scene 2' to bind it to the storyboard)", "ceremony");
+      if (t) postTags([{ op: "add", tag: t, asset: "__placeholder__" }])
+        .then(() => postTags([{ op: "remove", tag: t, asset: "__placeholder__" }]))
+        .then(refreshTags);
+    };
+    rail.appendChild(h2);
+    const names = Object.keys(state.tags).sort();
+    if (!names.length) {
+      const d = document.createElement("div"); d.className = "railrow";
+      d.innerHTML = `<span class="n" style="color:var(--dim)">none yet — select tiles → TAG, or ask the agent</span>`;
+      rail.appendChild(d);
+    }
+    for (const t of names) {
+      const v = state.tags[t];
+      const d = document.createElement("div");
+      d.className = "railrow" + (state.tag === t ? " on" : "");
+      d.innerHTML = `<span class="g">▸</span><span class="n">${esc(t)}</span>` +
+        (v.spine ? `<span class="sp" title="bound to storyboard scene ${esc(v.spine)}">→${esc(v.spine)}</span>` : "") +
+        `<span class="c">${v.count}</span>`;
+      d.onclick = () => { state.tag = state.tag === t ? null : t; state.group = "all"; render(); };
+      rail.appendChild(d);
+    }
+  }
+
+  /* ---- the contextual verb bar: selection wins, else the active tag ---- */
+  function renderCtx() {
+    const bar = $("ctxbar");
+    const selN = state.sel.size;
+    const tagActive = state.tag && state.tags[state.tag];
+    bar.classList.toggle("on", selN > 0 || !!tagActive);
+    if (!selN && !tagActive) { bar.innerHTML = ""; return; }
+    const ctxAssets = selN ? [...state.sel]
+      : visible().map((a) => a.path);
+    const label = selN ? `▸ ${selN} selected`
+      : `▸ ${esc(state.tag)} · ${ctxAssets.length} item(s)${state.tags[state.tag].spine ? ` · bound → scene ${esc(state.tags[state.tag].spine)}` : ""}`;
+    bar.innerHTML = `<span class="n">${label}</span>
+      <span class="tagmenu"><button id="tagBtn">TAG ▾</button><span class="drop" id="tagDrop"></span></span>
+      <button id="pinBtn" title="save this as a named, durable selection and hand it to the agent">PIN → AGENT</button>
+      <button id="dlM" title="download full-res masters (big files)">⇓ MASTERS</button>
+      <button id="dlP" title="download lightweight previews">⇓ PREVIEWS</button>
+      <span class="spacer"></span>` +
+      (selN ? `<button id="clearSel">✕ clear</button>` : "");
+    // TAG ▾ dropdown: existing tags + new
+    const drop = $("tagDrop");
+    for (const t of Object.keys(state.tags).sort()) {
+      const b = document.createElement("button"); b.textContent = t;
+      b.onclick = () => applyTag(t, ctxAssets);
+      drop.appendChild(b);
+    }
+    const inp = document.createElement("input");
+    inp.type = "text"; inp.placeholder = "new tag… ⏎";
+    inp.onkeydown = (e) => { if (e.key === "Enter" && inp.value.trim()) applyTag(inp.value.trim(), ctxAssets); };
+    drop.appendChild(inp);
+    $("tagBtn").onclick = (e) => { e.stopPropagation(); drop.classList.toggle("open"); if (drop.classList.contains("open")) inp.focus(); };
+    $("pinBtn").onclick = async () => {
+      const name = await ask("Name this selection (optional — e.g. 'ceremony picks')", "ceremony picks");
+      if (name === null) return;
+      await api("/api/selections", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, assets: ctxAssets, surface: "media-manager" }) });
+      try { parent.postMessage({ t: "open-agent" }, "*"); } catch {}
+      $("status").textContent = `Pinned ${ctxAssets.length} item(s)${name ? ` as "${name}"` : ""} — tell the agent what to do with them.`;
+    };
+    $("dlM").onclick = () => bulkDownload(ctxAssets, false);
+    $("dlP").onclick = () => bulkDownload(ctxAssets, true);
+    if (selN) $("clearSel").onclick = () => { state.sel.clear(); render(); reportFocus(); };
+  }
+  addEventListener("click", () => document.querySelectorAll(".drop.open").forEach((d) => d.classList.remove("open")));
+
+  async function postTags(ops) {
+    return api("/api/tags", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ops }) });
+  }
+  async function refreshTags() { await loadTags(); render(); }
+  async function applyTag(tag, paths) {
+    await postTags(paths.map((p) => ({ op: "add", tag, asset: p })));
+    $("status").textContent = `Tagged ${paths.length} item(s) → ${tag}.`;
+    state.sel.clear();
+    refreshTags();
+  }
+
+  function bulkDownload(paths, preview) {
+    let i = 0;
+    const next = () => {
+      if (i >= paths.length) { $("status").textContent = `Triggered ${paths.length} download(s).`; return; }
+      let p = paths[i++];
+      if (preview) p = p.replace(/\/renders\//, "/renders/previews/");
+      const a = document.createElement("a");
+      a.href = `/api/media?path=${encodeURIComponent(p)}&dl=1`;
+      a.download = ""; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(next, 600);
+    };
+    next();
+  }
+
+  /* ---- focus: ANY selection is focus ---- */
+  let focusTimer = null;
+  function reportFocus() {
+    clearTimeout(focusTimer);
+    focusTimer = setTimeout(() => {
+      fetch("/api/focus", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ surface: "media-manager", view: state.view + (state.tag ? `/tag:${state.tag}` : ""),
+          selection: [...state.sel] }) }).catch(() => {});
+    }, 700);
+  }
+
+  /* ---- grid ---- */
+  function render() {
+    renderRail(); renderCtx();
+    const items = visible();
+    $("count").textContent = `${items.length} asset(s)`;
+    $("grid").innerHTML = items.length ? "" :
+      '<div class="empty">Nothing here. Select tiles → TAG to organize, or ask the agent to.</div>';
+    for (const a of items) {
+      const tile = document.createElement("div");
+      const inSel = state.sel.has(a.path);
+      tile.className = "tile" + (inSel ? " sel" : "");
+      const media = a.kind === "video"
+        ? `<video src="${esc(mediaUrl(a))}" preload="metadata" muted onmouseover="this.play().catch(()=>{})" onmouseout="this.pause();this.currentTime=0"></video>`
+        : a.kind === "image" ? `<img loading="lazy" src="${esc(mediaUrl(a))}" alt="">`
+        : `<div class="thumb">♪</div>`;
+      const curB = a.cur ? `<span class="badge ver">${esc(a.cur.label)}</span>${a.cur.locked ? '<span class="badge lk" title="the locked version">◉</span>' : ""}` : "";
+      const tagB = (state.byAsset[a.name] || []).map((t) => `<span class="badge tag" data-t="${esc(t)}">${esc(t)}</span>`).join("");
+      tile.innerHTML = `<span class="selmark">${inSel ? "✓" : ""}</span>${media}
+        <div class="cap"><b>${esc(a.cur?.note || a.title || a.name)}</b>${esc(a.kind)}${a.role ? " - " + esc(a.role) : ""}</div>
+        <div class="badges">${curB}${tagB}${(a.slot_refs || []).map((s) => `<span class="badge">${esc(s)}</span>`).join("")}</div>`;
+      tile.querySelectorAll(".badge.tag").forEach((b) => b.onclick = (e) => {
+        e.stopPropagation(); state.tag = b.dataset.t; state.group = "all"; render();
+      });
+      tile.addEventListener("click", () => {
+        if (state.sel.has(a.path)) state.sel.delete(a.path); else state.sel.add(a.path);
+        render(); reportFocus();
+      });
+      tile.addEventListener("dblclick", () => openModal(a));
+      $("grid").appendChild(tile);
+    }
+  }
+
+  /* ---- modal player ---- */
+  function openModal(a) {
+    const m = $("modal");
+    const preview = a.kind === "video" ? `<video src="${esc(mediaUrl(a))}" controls autoplay preload="metadata"></video>`
+      : a.kind === "image" ? `<img src="${esc(mediaUrl(a))}" alt="">` : `<div class="thumb" style="height:80px">♪ audio</div>`;
+    const tags = state.byAsset[a.name] || [];
+    m.innerHTML = `<button class="close" id="mClose">✕</button>
+      <h2>${esc(a.cur?.note || a.title || a.name)}</h2>
+      ${preview}
+      ${a.cur ? `<div class="row"><span class="k">version</span><span class="badge ver">${esc(a.cur.label)}</span>${a.cur.locked ? '<span class="badge lk">◉ locked</span>' : ""}</div>` : ""}
+      <div class="row"><span class="k">tags</span><span class="chips" id="mChips"></span></div>
+      <div class="row"><span class="k">file</span><span style="font-size:10.5px;color:var(--dim);word-break:break-all">${esc(a.path)}</span></div>
+      <div class="row">
+        <button id="mDlM">⇓ master</button><button id="mDlP">⇓ preview</button>
+        <button id="mCopy">copy path</button><button id="mSlot">send to slot…</button>
+      </div>`;
+    const chips = m.querySelector("#mChips");
+    for (const t of tags) {
+      const c = document.createElement("span");
+      c.className = "badge tag"; c.innerHTML = `${esc(t)} ✕`;
+      c.title = "remove this tag";
+      c.onclick = async () => { await postTags([{ op: "remove", tag: t, asset: a.path }]); await loadTags(); openModal(a); render(); };
+      chips.appendChild(c);
+    }
+    const addT = document.createElement("input");
+    addT.type = "text"; addT.placeholder = "+ tag ⏎"; addT.style.width = "90px";
+    addT.onkeydown = async (e) => {
+      if (e.key === "Enter" && addT.value.trim()) {
+        await postTags([{ op: "add", tag: addT.value.trim(), asset: a.path }]);
+        await loadTags(); openModal(a); render();
+      }
+    };
+    chips.appendChild(addT);
+    m.querySelector("#mClose").onclick = closeModal;
+    m.querySelector("#mDlM").onclick = () => location.href = `/api/media?path=${encodeURIComponent(a.path)}&dl=1`;
+    m.querySelector("#mDlP").onclick = () => location.href = `/api/media?path=${encodeURIComponent(a.path.replace(/\/renders\//, "/renders/previews/"))}&dl=1`;
+    m.querySelector("#mCopy").onclick = () => { navigator.clipboard.writeText(a.path); $("status").textContent = "Path copied."; };
+    m.querySelector("#mSlot").onclick = async () => {
+      const slot = await ask("Target slot (dot id)", "2.1");
+      if (!slot) return;
+      try {
+        const r = await api("/api/library/route", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: a.path, slot }) });
+        $("status").textContent = `Routed → ${r.dest} (take candidate for ${slot}).`;
+      } catch (e2) { $("status").textContent = e2.message; }
+    };
+    $("modalwrap").classList.add("open");
+  }
+  function closeModal() {
+    const v = $("modal").querySelector("video"); if (v) v.pause();
+    $("modalwrap").classList.remove("open");
+  }
+  $("modalwrap").addEventListener("click", (e) => { if (e.target === $("modalwrap")) closeModal(); });
+  addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+
+  /* ---- toolbar ---- */
+  $("viewLocked").onclick = () => { state.view = "locked"; syncView(); render(); };
+  $("viewAll").onclick = () => { state.view = "all"; syncView(); render(); };
+  function syncView() {
+    $("viewLocked").setAttribute("aria-pressed", String(state.view === "locked"));
+    $("viewAll").setAttribute("aria-pressed", String(state.view === "all"));
+  }
+  $("search").addEventListener("input", render);
+  $("refresh").addEventListener("click", load);
+  fetch("/api/patch").then((r) => r.json()).then((p) => {
+    $("projectName").textContent = (p.timelinePath || "").split("/").slice(-2).join("/");
+  }).catch(() => { $("projectName").textContent = "(server offline?)"; });
+  load();
+})();
+</script>
+</body>
+</html>

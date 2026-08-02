@@ -1,0 +1,94 @@
+{
+  "name": "@openrig/studio-video",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The video/timeline provider for OpenRig Studio surfaces. Serves the verbs mini-nle, media-manager and canvas call. Ported from studio-box; not extracted, not rewritten.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "openrig-studio-video": "./export-server.mjs"
+  },
+  "exports": {
+    ".": "./export-server.mjs",
+    "./scaffold": "./video-new.mjs",
+    "./timeline-patch": "./timeline-patch.mjs",
+    "./project-assets": "./project-assets.mjs"
+  },
+  "openrig": {
+    "_note": "DECLARED, not discovered. Everything below is something an installer would otherwise have to infer from the code \u2014 and inferring it is how you get a hardcoded path. The empty-slot principle: if there is a field for it, nobody inlines it.",
+    "kind": "provider",
+    "surfaces_served": [
+      "mini-nle",
+      "media-manager",
+      "canvas"
+    ],
+    "start": {
+      "entry": "export-server.mjs",
+      "args": {
+        "--port": "required; the provider binds loopback only",
+        "--slice-root": "required; the project bundle (holds timeline.json)",
+        "--canvas-root": "optional; defaults to <slice-root>/../canvases",
+        "--media-root": "repeatable; the user's media libraries",
+        "--timeline": "optional; defaults to <slice-root>/timeline.json"
+      }
+    },
+    "roots": {
+      "_note": "KINDS, not paths. The install binds these to real directories on the user's machine. Every hardcoded path removed from this tree existed because there was nowhere to say this.",
+      "project": {
+        "required": true,
+        "description": "the bundle being edited; timeline.json, history, exports live here"
+      },
+      "media": {
+        "required": true,
+        "repeatable": true,
+        "description": "source footage and stills; never inside the app"
+      },
+      "canvas": {
+        "required": false,
+        "description": "freeform canvas documents, shared across projects"
+      }
+    },
+    "binaries": {
+      "ffmpeg": {
+        "required": true,
+        "used_for": "thumbnails, cut rendering, assembly"
+      },
+      "ffprobe": {
+        "required": true,
+        "used_for": "duration and codec probing of indexed assets"
+      },
+      "rig": {
+        "required": false,
+        "used_for": "the note verbs file work into the owner's own rig queue"
+      },
+      "open": {
+        "required": false,
+        "platform": "darwin",
+        "used_for": "reveal-in-Finder; not served in this studio"
+      },
+      "_resolution": "ffmpeg/ffprobe are resolved by resolveSystemBin from TRUSTED BIN DIRS only (/opt/homebrew/bin, /usr/local/bin, /usr/bin) and it throws a named error otherwise. Worth knowing on a distro that installs elsewhere."
+    },
+    "first_run": {
+      "_note": "Without this the timeline verbs answer ENOENT on a new project \u2014 honest, but not a usable app.",
+      "scaffold": "video-new.mjs :: scaffoldBundle(name, { parent })",
+      "creates": "timeline.json, history, slots, doctrine, media/ and exports/ skeleton"
+    },
+    "peers": {
+      "cutdown": {
+        "_note": "/api/curation proxies to the cutdown backend over loopback. It defaults to 127.0.0.1:8795 and MUST be bound explicitly \u2014 left to the default it will happily read whatever else is on that port and answer ok:true.",
+        "env": "CUTDOWN_API",
+        "degrades": "absent cutdown -> {ok:false, cuts:[]} -> media-manager falls back to a plain grid"
+      }
+    },
+    "vendored": {
+      "vendor/b64Vecs.mjs": "tldraw vector codec, used server-side by canvas-rails. The browser bundle is NOT here - it is an app asset and ships with apps/canvas."
+    }
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0"
+  },
+  "_deps_note": "ffmpeg/ffprobe ship WITH this provider rather than being assumed on PATH. Verified: ffmpeg-static 5.3.0 is ffmpeg 6.0 and carries drawtext/scale/xfade/concat. A stock Linux box commonly has node+npm+git and neither binary \u2014 this is what makes npm ci sufficient there."
+}

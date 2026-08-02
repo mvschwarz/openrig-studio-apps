@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenRig Canvas</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/vendor/tldraw-v5.2.5/tldraw.css">
+<style>
+  /* dark chrome  wrapped around
+     the tldraw editor. The canvas is a THINKING surface: media cards, ink,
+     notes, arrows, frames — storyboarding, not graphic design. The value
+     ladder: ground #121214 · panel/card white-translucent · active = INVERT
+     (solid white bg, black text). Coral = needs-human/error, indigo = routing.
+     BOUNDARY: --well stays the dark obsidian well so the vendored tldraw
+     editor (#editor .tl-container) keeps its own dark theme, untouched. */
+  :root {
+    --bg: #121214; --panel: rgba(255,255,255,.05); --well: #12100c;
+    --line: rgba(255,255,255,.10); --hairline: rgba(255,255,255,.16);
+    --ink: rgba(255,255,255,.95); --dim: rgba(255,255,255,.52);
+    --coral: #ff6b5a; --indigo: #8b93ff;
+    --sans: Helvetica, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); overflow: hidden; }
+  header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  header h1 { font: 600 13px var(--sans); letter-spacing: 0.08em; color: var(--ink); margin: 0; text-transform: uppercase; }
+  header .sub { color: var(--dim); font-size: 11px; }
+  header .spacer { flex: 1; }
+  header button { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 2px; font: 11.5px var(--sans); padding: 4px 10px; cursor: pointer; }
+  header button:hover { border-color: rgba(255,255,255,.35); color: var(--ink); }
+  /* PIN -> AGENT is the primary chrome action: ACTIVE = INVERT (solid, black text) */
+  #pinBtn { background: var(--ink); color: #111; border-color: var(--ink); font-weight: 600; }
+  #pinBtn:hover { border-color: var(--ink); color: #111; opacity: .9; }
+  #sync { font-size: 10px; color: var(--dim); letter-spacing: .05em; }
+  #sync.dirty { color: var(--coral); }
+
+  /* ---- canvas tabs: boards are files, pages live inside a board ---- */
+  #tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; }
+  #tabs .tab { border: 1px solid var(--line); border-bottom-color: transparent; border-radius: 2px 2px 0 0;
+    background: var(--bg); color: var(--dim); font: 11px var(--sans); padding: 4px 12px 5px;
+    cursor: pointer; white-space: nowrap; letter-spacing: .04em; }
+  #tabs .tab:hover { color: var(--ink); }
+  #tabs .tab.on { background: var(--ink); color: #111; border-color: var(--ink); font-weight: 600; }
+  #tabs .tab.add { padding: 4px 9px 5px; font-weight: 600; }
+
+  .body { display: grid; grid-template-columns: 230px minmax(0, 1fr); height: calc(100vh - 62px); }
+
+  /* ---- assets rail: the unified index; tags optional, never required ---- */
+  #rail { border-right: 1px solid var(--line); overflow-y: auto; padding: 8px 0; background: var(--panel); }
+  #rail h3 { margin: 8px 12px 4px; font: 600 9.5px var(--sans); letter-spacing: 0.1em;
+    color: var(--dim); text-transform: uppercase; }
+  #rail .filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 12px 6px; }
+  #rail .chip { font-size: 9.5px; border: 1px solid var(--line); border-radius: 2px; padding: 1px 6px;
+    color: var(--dim); cursor: pointer; }
+  #rail .chip.on { background: var(--ink); border-color: var(--ink); color: #111; font-weight: 600; }
+  #rail input[type="search"] { width: calc(100% - 24px); margin: 0 12px 6px; background: rgba(255,255,255,.05);
+    color: var(--ink); border: 1px solid transparent; border-radius: 2px; font: 11px var(--sans); padding: 4px 8px; }
+  .atile { display: flex; gap: 8px; align-items: center; padding: 4px 12px; cursor: grab; }
+  .atile:hover { background: rgba(255,255,255,.06); }
+  .atile img { width: 52px; height: 34px; object-fit: cover; background: #000;
+    border: 1px solid var(--line); border-radius: 2px; flex: none; }
+  .atile .ph { width: 52px; height: 34px; display: grid; place-items: center; background: #000;
+    border: 1px solid var(--line); border-radius: 2px; color: var(--dim); flex: none; font-size: 13px; }
+  .atile .nm { font-size: 10.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; min-width: 0; }
+  .atile .k { font-size: 9px; color: var(--dim); }
+  .empty { color: var(--dim); padding: 16px 12px; font-size: 11px; }
+
+  /* ---- editor mount ---- */
+  #editor { position: relative; min-width: 0; }
+  #editor .tl-container { background: var(--well); }
+
+  /* ---- the ask modal (house prompt) ---- */
+  #askwrap { display: none; position: fixed; inset: 0; z-index: 600;
+    background: rgba(0,0,0,.65); align-items: center; justify-content: center; }
+  #askwrap.open { display: flex; }
+  #ask { width: min(420px, 90vw); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 2px; padding: 16px; }
+  #ask h2 { margin: 0 0 12px; font: 600 11.5px var(--sans); color: var(--ink); letter-spacing: .05em; line-height: 1.5; }
+  #ask input { width: 100%; padding: 8px 10px; font-size: 12px; background: rgba(255,255,255,.05);
+    color: var(--ink); border: 1px solid transparent; border-radius: 2px; font-family: var(--sans); }
+  #rail input[type="search"]:focus, #ask input:focus { outline: none;
+    border-color: rgba(255,255,255,.20); box-shadow: 0 0 0 2px rgba(255,255,255,.20); }
+  #ask .row { display: flex; gap: 8px; margin-top: 12px; }
+  #ask .spacer { flex: 1; }
+  #ask button { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 2px; font: 11.5px var(--sans); padding: 4px 10px; cursor: pointer; }
+  #ask button.primary { background: var(--ink); border-color: var(--ink); color: #111; font-weight: 600; }
+</style>
+<style>
+  /* dark-scheme scrollbars without color-scheme the
+     browser paints LIGHT scrollbars on our dark surfaces */
+  html { color-scheme: dark; }
+  * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 4px; border: 2px solid transparent; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.32); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Canvas</h1>
+  <div id="tabs"></div>
+  <span class="spacer"></span>
+  <span id="sync">—</span>
+  <button id="pinBtn" title="hand the selected media cards to the agent as a named durable selection">PIN → AGENT</button>
+</header>
+<div class="body">
+  <nav id="rail">
+    <h3>Assets</h3>
+    <input id="search" type="search" placeholder="filter…">
+    <div class="filters" id="groupChips"></div>
+    <div class="filters" id="tagChips"></div>
+    <div id="atiles"><div class="empty">Loading…</div></div>
+  </nav>
+  <div id="editor"></div>
+</div>
+
+<div id="askwrap"><div id="ask">
+  <h2 id="askTitle"></h2>
+  <input type="text" id="askInput">
+  <div class="row"><span class="spacer"></span>
+    <button id="askCancel">cancel</button><button id="askOk" class="primary">OK</button>
+  </div>
+</div></div>
+
+<script src="/vendor/tldraw-v5.2.5/tldraw-bundle.js"></script>
+<script>
+(() => {
+  const { tldraw, React, ReactDOMClient } = window.TldrawBundle;
+  const { Tldraw, loadSnapshot, getSnapshot, createShapeId, AssetRecordType } = tldraw;
+  const $ = (id) => document.getElementById(id);
+  const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // self-hosted fonts: the vendored bundle's ONLY runtime asset need —
+  // the box never calls cdn.tldraw.com
+  const FONT_BASE = "/vendor/tldraw-v5.2.5/fonts";
+  const FONTS = {
+    tldraw_mono: "IBMPlexMono-Medium", tldraw_mono_italic: "IBMPlexMono-MediumItalic",
+    tldraw_mono_bold: "IBMPlexMono-Bold", tldraw_mono_italic_bold: "IBMPlexMono-BoldItalic",
+    tldraw_serif: "IBMPlexSerif-Medium", tldraw_serif_italic: "IBMPlexSerif-MediumItalic",
+    tldraw_serif_bold: "IBMPlexSerif-Bold", tldraw_serif_italic_bold: "IBMPlexSerif-BoldItalic",
+    tldraw_sans: "IBMPlexSans-Medium", tldraw_sans_italic: "IBMPlexSans-MediumItalic",
+    tldraw_sans_bold: "IBMPlexSans-Bold", tldraw_sans_italic_bold: "IBMPlexSans-BoldItalic",
+    tldraw_draw: "Shantell_Sans-Informal_Regular", tldraw_draw_italic: "Shantell_Sans-Informal_Regular_Italic",
+    tldraw_draw_bold: "Shantell_Sans-Informal_Bold", tldraw_draw_italic_bold: "Shantell_Sans-Informal_Bold_Italic",
+  };
+  const assetUrls = { fonts: Object.fromEntries(Object.entries(FONTS).map(([k, f]) => [k, `${FONT_BASE}/${f}.woff2`])) };
+
+  const state = {
+    editor: null,
+    canvas: null,       // active board slug (tabs); pages organize WITHIN a board
+    canvases: [],
+    rev: 0,
+    lastSynced: null,   // the document at the last successful sync — 3-way merge base
+    dirty: false,
+    saving: false,
+    loading: true,      // suppresses autosave while a doc is being loaded/switched
+    emptyDoc: null,     // pristine store snapshot, for opening a blank board
+    assets: [], libAssets: [], tags: {}, byAsset: {},
+    group: "all", tag: null,
+  };
+  const canvasQS = () => `canvas=${encodeURIComponent(state.canvas || "")}`;
+
+  function ask(title, placeholder = "", value = "") {
+    return new Promise((resolve) => {
+      $("askTitle").textContent = title;
+      const inp = $("askInput");
+      inp.placeholder = placeholder; inp.value = value;
+      $("askwrap").classList.add("open"); inp.focus();
+      const done = (v) => { $("askwrap").classList.remove("open");
+        inp.onkeydown = $("askOk").onclick = $("askCancel").onclick = null; resolve(v); };
+      $("askOk").onclick = () => done(inp.value.trim());
+      $("askCancel").onclick = () => done(null);
+      inp.onkeydown = (e) => {
+        if (e.key === "Enter") done(inp.value.trim());
+        if (e.key === "Escape") { e.stopPropagation(); done(null); }
+      };
+    });
+  }
+
+  async function api(pathname, opts) {
+    const res = await fetch(pathname, opts);
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) { const err = new Error(payload.error || `HTTP ${res.status}`); err.payload = payload; err.status = res.status; throw err; }
+    return payload;
+  }
+  const post = (pathname, body) => api(pathname, { method: "POST",
+    headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  const setSync = (text, dirty) => { $("sync").textContent = text; $("sync").classList.toggle("dirty", !!dirty); };
+
+  /* ================= sync engine: autosave + rev discipline ================ */
+
+  const docOf = () => getSnapshot(state.editor.store).document;
+
+  let saveTimer = null;
+  function scheduleSave() {
+    // loading guard: loadSnapshot (boot/switch) flushes into the user-source
+    // listener a tick later — without this, every reload cost a phantom rev
+    if (state.loading) return;
+    state.dirty = true;
+    setSync(`rev ${state.rev} · unsaved`, true);
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(save, 1500);
+  }
+
+  async function save(reason = "ui autosave") {
+    if (!state.editor || state.saving || state.loading) { if (state.dirty) { clearTimeout(saveTimer); saveTimer = setTimeout(save, 800); } return; }
+    state.saving = true;
+    const savingCanvas = state.canvas;
+    const document = docOf();
+    try {
+      const r = await post(`/api/canvas/apply?${canvasQS()}`, { baseRev: state.rev, document, reason });
+      if (savingCanvas !== state.canvas) return; // switched mid-save; the new board owns state now
+      state.rev = r.rev; state.lastSynced = document; state.dirty = false;
+      setSync(`rev ${state.rev} · saved`, false);
+    } catch (e) {
+      if (savingCanvas !== state.canvas) return;
+      if (e.status === 409 && e.payload && e.payload.document) mergeAndResave(e.payload);
+      else setSync(`save failed: ${e.message}`.slice(0, 60), true);
+    } finally { state.saving = false; }
+  }
+
+  // record-level 3-way merge, OURS (the human at the surface) wins conflicts:
+  // start from the server doc, overlay every record we changed vs base, drop
+  // every record we deleted vs base that the server left untouched.
+  function mergeAndResave(server) {
+    const base = state.lastSynced?.store || {};
+    const ours = docOf();
+    const merged = { ...server.document, store: { ...server.document.store } };
+    for (const [id, rec] of Object.entries(ours.store)) {
+      if (JSON.stringify(base[id]) !== JSON.stringify(rec)) merged.store[id] = rec;
+    }
+    for (const id of Object.keys(base)) {
+      if (!(id in ours.store) && JSON.stringify(base[id]) === JSON.stringify(server.document.store[id])) {
+        delete merged.store[id];
+      }
+    }
+    state.rev = server.rev;
+    applyRemote(merged);
+    state.dirty = true;
+    clearTimeout(saveTimer); saveTimer = setTimeout(() => save("merge after concurrent edit"), 200);
+  }
+
+  // apply a full target document to the live store as a REMOTE change
+  // (listener has source:"user", so this never echoes into autosave)
+  function applyRemote(target) {
+    const store = state.editor.store;
+    store.mergeRemoteChanges(() => {
+      const current = getSnapshot(store).document.store;
+      const puts = [], removes = [];
+      for (const [id, rec] of Object.entries(target.store)) {
+        if (JSON.stringify(current[id]) !== JSON.stringify(rec)) puts.push(rec);
+      }
+      for (const id of Object.keys(current)) if (!(id in target.store)) removes.push(id);
+      if (puts.length) store.put(puts);
+      if (removes.length) store.remove(removes);
+    });
+  }
+
+  // quiet poll: agent edits surface live under the human (7s, skip while
+  // dirty — the 409 merge path owns that case)
+  setInterval(async () => {
+    if (!state.editor || state.dirty || state.saving || state.loading) return;
+    try {
+      const ping = await api(`/api/canvas?${canvasQS()}&since=${state.rev}`);
+      if (!ping.changed || ping.canvas !== state.canvas) return;
+      const full = await api(`/api/canvas?${canvasQS()}`);
+      if (!full.document || full.canvas !== state.canvas) return;
+      applyRemote(full.document);
+      state.rev = full.rev; state.lastSynced = full.document;
+      setSync(`rev ${state.rev} · updated by ${full.updated_by || "agent"}`, false);
+    } catch {}
+  }, 7000);
+
+  /* ================= boards: tabs + switching ================= */
+
+  function renderTabs() {
+    const tabs = $("tabs"); tabs.innerHTML = "";
+    for (const c of state.canvases) {
+      const b = document.createElement("button");
+      b.className = "tab" + (c.slug === state.canvas ? " on" : "");
+      b.textContent = c.slug;
+      b.title = c.updated_by ? `rev ${c.rev} · last by ${c.updated_by}` : "empty board";
+      b.onclick = () => switchCanvas(c.slug);
+      tabs.appendChild(b);
+    }
+    const add = document.createElement("button");
+    add.className = "tab add"; add.textContent = "+";
+    add.title = "new board (canvases are boards; use Pages inside a board for scenes/acts)";
+    add.onclick = async () => {
+      const name = await ask("Name the new board", "brand v3");
+      if (!name) return;
+      const r = await post("/api/canvases", { name });
+      state.canvases = r.canvases;
+      switchCanvas(r.slug);
+    };
+    tabs.appendChild(add);
+  }
+
+  async function loadCanvasDoc(slug) {
+    state.loading = true;
+    const full = await api(`/api/canvas?canvas=${encodeURIComponent(slug)}`);
+    state.canvas = full.canvas;
+    loadSnapshot(state.editor.store, { document: full.document || state.emptyDoc });
+    // settle: let the loadSnapshot flush pass before autosave re-arms
+    await new Promise((r) => setTimeout(r, 250));
+    state.rev = full.rev;
+    state.lastSynced = docOf();
+    state.dirty = false;
+    state.loading = false;
+    try { localStorage.setItem("canvasLast", state.canvas); } catch {}
+    setSync(`rev ${state.rev} · saved`, false);
+    renderTabs();
+  }
+
+  async function switchCanvas(slug) {
+    if (!state.editor || slug === state.canvas) return;
+    if (state.dirty) await save("switching board");
+    try { await loadCanvasDoc(slug); } catch (e) { setSync(`switch failed: ${e.message}`.slice(0, 60), true); state.loading = false; }
+  }
+
+  /* ================= focus contract (byte-identical shape) ================= */
+
+  let focusTimer = null, lastFocusKey = "";
+  function reportFocus() {
+    clearTimeout(focusTimer);
+    focusTimer = setTimeout(() => {
+      if (!state.editor) return;
+      const shapes = state.editor.getSelectedShapes();
+      const selection = shapes.map((s) => s.meta?.assetName || s.id).slice(0, 200);
+      const key = selection.join(",");
+      if (key === lastFocusKey) return;
+      lastFocusKey = key;
+      fetch("/api/focus", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ surface: "canvas", selection,
+          view: `${state.canvas || ""}/${state.editor.getCurrentPage()?.name || ""}`.slice(0, 40) }) }).catch(() => {});
+    }, 600);
+  }
+
+  $("pinBtn").onclick = async () => {
+    const shapes = state.editor ? state.editor.getSelectedShapes() : [];
+    const assets = shapes.map((s) => s.meta?.assetName).filter(Boolean);
+    if (!assets.length) { setSync("select media cards first", true); return; }
+    const name = await ask("Name this selection (optional — e.g. 'act 2 boards')", "act 2 boards");
+    if (name === null) return;
+    await post("/api/selections", { name, assets, surface: "canvas" });
+    try { parent.postMessage({ t: "open-agent" }, "*"); } catch {}
+    setSync(`pinned ${assets.length} → agent`, false);
+  };
+
+  /* ================= media placement from the unified index ================ */
+
+  async function loadRail() {
+    try {
+      const [proj, lib, tags] = await Promise.all([
+        api("/api/project-assets").catch(() => ({ assets: [] })),
+        api("/api/library").catch(() => ({ assets: [] })),
+        api("/api/tags").catch(() => ({ tags: {}, byAsset: {} })),
+      ]);
+      state.assets = (proj.assets || [])
+        .filter((a) => a.exists !== false && ["video", "image"].includes(a.media_type))
+        .map((a) => ({ name: a.ref.split("/").pop(), kind: a.media_type, title: a.title || a.ref,
+          src: `/api/media?path=${encodeURIComponent(a.path)}`,
+          thumb: `/api/thumb?src=${encodeURIComponent(a.ref)}&t=1`, path: a.path }));
+      state.libAssets = (lib.assets || [])
+        .filter((a) => ["video", "image"].includes(a.kind))
+        .map((a) => ({ name: a.name, kind: a.kind, title: a.name, lib: true,
+          src: `/api/library/media?path=${encodeURIComponent(a.path)}`,
+          thumb: `/api/thumb?abs=${encodeURIComponent(a.path)}&t=1`, path: a.path }));
+      state.tags = tags.tags || {}; state.byAsset = tags.byAsset || {};
+      renderRail();
+    } catch (e) { $("atiles").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+
+  function railPool() {
+    let pool = state.group === "library" ? state.libAssets
+      : state.group === "all" ? state.assets.concat(state.libAssets) : state.assets;
+    if (state.group === "video" || state.group === "image") pool = pool.filter((a) => a.kind === state.group && !a.lib);
+    if (state.tag) pool = pool.filter((a) => (state.byAsset[a.name] || []).includes(state.tag));
+    const q = $("search").value.toLowerCase();
+    if (q) pool = pool.filter((a) => [a.name, a.title, ...(state.byAsset[a.name] || [])].join(" ").toLowerCase().includes(q));
+    return pool;
+  }
+
+  function renderRail() {
+    const groups = [["all", "All"], ["image", "Image"], ["video", "Video"], ["library", "Library"]];
+    $("groupChips").innerHTML = groups.map(([id, name]) =>
+      `<span class="chip${state.group === id ? " on" : ""}" data-g="${id}">${name}</span>`).join("");
+    $("groupChips").querySelectorAll(".chip").forEach((c) => c.onclick = () => { state.group = c.dataset.g; renderRail(); });
+    const tagNames = Object.keys(state.tags).sort();
+    $("tagChips").innerHTML = tagNames.map((t) =>
+      `<span class="chip${state.tag === t ? " on" : ""}" data-t="${esc(t)}">${esc(t)}</span>`).join("");
+    $("tagChips").querySelectorAll(".chip").forEach((c) => c.onclick = () => { state.tag = state.tag === c.dataset.t ? null : c.dataset.t; renderRail(); });
+    const pool = railPool();
+    const tiles = $("atiles"); tiles.innerHTML = pool.length ? "" : '<div class="empty">Nothing matches. Tags are optional — clear filters or ask the agent.</div>';
+    for (const a of pool.slice(0, 400)) {
+      const d = document.createElement("div");
+      d.className = "atile"; d.draggable = true;
+      d.innerHTML = `<img loading="lazy" src="${esc(a.thumb)}" onerror="this.outerHTML='<span class=ph>${a.kind === "video" ? "▤" : "▣"}</span>'">
+        <span class="nm" title="${esc(a.title)}">${esc(a.name)}<br><span class="k">${esc(a.kind)}${a.lib ? " · library" : ""}</span></span>`;
+      d.onclick = () => placeAsset(a, null);
+      d.ondragstart = (e) => { e.dataTransfer.setData("text/x-canvas-asset", JSON.stringify(a)); e.dataTransfer.effectAllowed = "copy"; };
+      tiles.appendChild(d);
+    }
+  }
+  $("search").addEventListener("input", renderRail);
+
+  // measure natural aspect from the poster; cards land at 480 wide
+  function measure(a) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ w: img.naturalWidth || 480, h: img.naturalHeight || 270 });
+      img.onerror = () => resolve({ w: 480, h: 270 });
+      img.src = a.thumb;
+    });
+  }
+
+  async function placeAsset(a, pagePoint) {
+    if (!state.editor) return;
+    while (state.loading) await new Promise((r) => setTimeout(r, 50)); // never place into a mid-load store
+    const editor = state.editor;
+    const dims = await measure(a);
+    const W = 480, H = Math.max(40, Math.round(W * dims.h / dims.w));
+    let at = pagePoint;
+    if (!at) {
+      const b = editor.getViewportPageBounds();
+      at = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+    }
+    const assetId = AssetRecordType.createId();
+    editor.createAssets([{
+      id: assetId, typeName: "asset", type: a.kind,
+      props: { name: a.name, src: a.src, w: dims.w, h: dims.h, mimeType: a.kind === "video" ? "video/mp4" : "image/jpeg", isAnimated: false },
+      meta: { assetPath: a.path, assetName: a.name },
+    }]);
+    editor.createShape({
+      id: createShapeId(), type: a.kind, x: at.x - W / 2, y: at.y - H / 2,
+      props: { assetId, w: W, h: H },
+      meta: { assetPath: a.path, assetName: a.name },
+    });
+    setSync(`placed ${a.name}`, true);
+  }
+
+  $("editor").addEventListener("dragover", (e) => {
+    if ([...e.dataTransfer.types].includes("text/x-canvas-asset")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }
+  });
+  $("editor").addEventListener("drop", (e) => {
+    const raw = e.dataTransfer.getData("text/x-canvas-asset");
+    if (!raw) return;
+    e.preventDefault(); e.stopPropagation();
+    let at = null;
+    try { at = state.editor.screenToPage({ x: e.clientX, y: e.clientY }); } catch {}
+    placeAsset(JSON.parse(raw), at);
+  }, true);
+
+  /* ================= mount ================= */
+
+  async function boot() {
+    // boards first: pick the remembered tab, else the first board
+    try {
+      state.canvases = (await api("/api/canvases")).canvases;
+    } catch { state.canvases = [{ slug: "main", rev: 0 }]; }
+    let last = null;
+    try { last = localStorage.getItem("canvasLast"); } catch {}
+    const startSlug = state.canvases.some((c) => c.slug === last) ? last : state.canvases[0].slug;
+    renderTabs();
+    // unkeyed tldraw UNMOUNTS the editor after 5s on a production origin
+    // (https non-loopback). The key is a runtime prop; the box carries it
+    // as a file so keying needs no redeploy: echo '{"licenseKey":"…"}' >
+    // ~/studio/app/canvas-license.json
+    let licenseKey;
+    try { licenseKey = (await (await fetch("/canvas-license.json")).json()).licenseKey; } catch {}
+
+    const root = ReactDOMClient.createRoot($("editor"));
+    root.render(React.createElement(Tldraw, {
+      assetUrls,
+      ...(licenseKey ? { licenseKey } : {}),
+      inferDarkMode: false,
+      onMount: (editor) => {
+        state.editor = editor;
+        state.emptyDoc = docOf();   // pristine snapshot: what a blank board loads
+        editor.user.updateUserPreferences({ colorScheme: "dark" });
+        editor.store.listen(() => scheduleSave(), { scope: "document", source: "user" });
+        editor.store.listen(() => reportFocus(), { scope: "session", source: "user" });
+        loadCanvasDoc(startSlug).catch((e) => { setSync(`load failed: ${e.message}`.slice(0, 60), true); state.loading = false; });
+      },
+    }));
+    loadRail();
+    // tab freshness: other sessions/agents create boards too
+    setInterval(async () => {
+      try {
+        const canvases = (await api("/api/canvases")).canvases;
+        if (JSON.stringify(canvases) !== JSON.stringify(state.canvases)) { state.canvases = canvases; renderTabs(); }
+      } catch {}
+    }, 15000);
+  }
+
+  // testability handles (probe law): automated probes
+  window.__canvas = {
+    state,
+    save: () => save("probe"),
+    place: (a, at) => placeAsset(a, at),
+    doc: () => (state.editor ? docOf() : null),
+    switchCanvas,
+    createCanvas: async (name) => { const r = await post("/api/canvases", { name }); state.canvases = r.canvases; await switchCanvas(r.slug); return r.slug; },
+  };
+
+  boot();
+})();
+</script>
+</body>
+</html>

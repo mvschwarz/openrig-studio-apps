@@ -1,0 +1,88 @@
+{
+  "name": "@openrig/studio-cutdown",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The cutdown provider: punch in/out on a folder of footage, and the lane that renders the cuts. Point --footage at any folder of video.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "openrig-studio-cutdown": "./cutdown-server.mjs",
+    "openrig-studio-cutlane": "./watch-markers.mjs"
+  },
+  "exports": {
+    ".": "./cutdown-server.mjs",
+    "./lane": "./watch-markers.mjs"
+  },
+  "openrig": {
+    "_note": "DECLARED, not discovered \u2014 same principle as the video provider. Every hardcoded path removed from this tree existed because there was nowhere to state it.",
+    "kind": "provider",
+    "surfaces_served": [
+      "cutdown"
+    ],
+    "verbs": [
+      "/api/clips",
+      "/api/cuts",
+      "/api/markers",
+      "/api/pick",
+      "/api/cut-note",
+      "/api/cut-delete",
+      "/api/cut-retry",
+      "/api/stabilize"
+    ],
+    "processes": {
+      "_note": "TWO processes, and the second is not optional. The server ACCEPTS cuts; the lane PERFORMS them. Run the server alone and every write verb answers ok:true while nothing ever renders \u2014 accepted-but-unperformed, which passes both a verbs-answer check and a real-data check because the job file genuinely gains a line.",
+      "server": {
+        "entry": "cutdown-server.mjs",
+        "args": {
+          "--port": "required; binds loopback only",
+          "--footage": "required; the folder of video being cut down",
+          "--bundle": "optional; where renders land, defaults to <footage>"
+        }
+      },
+      "lane": {
+        "entry": "watch-markers.mjs",
+        "args": {
+          "--footage": "required; must match the server",
+          "--bundle": "required; must match the server",
+          "--interval": "optional; sweep period in ms, default 10000"
+        },
+        "history": "Rewritten from watch-markers.sh, which used `stat -c %Y` \u2014 GNU syntax. On macOS that returned nothing, the guard fell through, and the cut lane never ran at all. It was Linux-only by accident."
+      }
+    },
+    "roots": {
+      "_note": "KINDS, not paths.",
+      "footage": {
+        "required": true,
+        "description": "any folder of video files. A proxies/ subdir is used when present (review proxies) and originals/ is preferred as the cut source when present, but a plain folder works \u2014 that is the whole setup."
+      },
+      "bundle": {
+        "required": false,
+        "description": "where cut clips are written; defaults to the footage root so the tool is self-contained"
+      }
+    },
+    "binaries": {
+      "ffmpeg": {
+        "required": true,
+        "used_for": "cutting clips to in/out, stabilization passes"
+      },
+      "ffprobe": {
+        "required": true,
+        "used_for": "clip duration for the stabilize progress readout"
+      }
+    },
+    "state": {
+      "_note": "Append-only and attributed, written into the footage root. Durable-first: the UI gesture lands on disk before anything renders.",
+      "markers.jsonl": "punch in/out marks, attributed by UI user",
+      "picks.jsonl": "selects",
+      "stab-jobs.jsonl": "stabilization requests the lane consumes",
+      "cutlane.log": "what the lane did"
+    }
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0"
+  },
+  "_deps_note": "The cut lane shells out to ffmpeg/ffprobe. Shipped with the provider so a box needs only node \u2014 see studio-video/timeline-export-probe.mjs resolveSystemBin for the packaged-first, PATH-fallback order."
+}

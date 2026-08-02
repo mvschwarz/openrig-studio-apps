@@ -1,0 +1,61 @@
+{
+  "_note": "Studio template registry . Semantic ids fix the backwards T1/T2 naming; legacy_alias keeps existing free-text card.template values (e.g. 'rig send T1') resolvable. Canonical copy lives with the tools; video-new copies it into new bundles. Gallery ground truth: ",
+  "templates": [
+    {
+      "id": "terminal-duo",
+      "legacy_alias": "T1",
+      "summary": "Two terminals side by side, framed roles + arrow between them",
+      "hyperframes_template": "T1 two-terminal ",
+      "default_theme": "dark",
+      "good_for": "agent-to-agent command demos (rig send, rig queue)"
+    },
+    {
+      "id": "terminal-solo",
+      "legacy_alias": "T2",
+      "summary": "Single centered terminal with centered label",
+      "hyperframes_template": "T2 single-terminal ",
+      "default_theme": "dark",
+      "good_for": "single-command demos (rig capture, rig transcript)"
+    },
+    {
+      "id": "ui-demo-overlay",
+      "legacy_alias": "T3",
+      "summary": "Product UI demo with the claim as text-over-UI (caption at top)",
+      "hyperframes_template": "T3 UI-demo + text-over-UI",
+      "default_theme": "dark",
+      "good_for": "UI walkthroughs that need a claim overlaid"
+    },
+    {
+      "id": "sequence-cut",
+      "legacy_alias": "T4",
+      "summary": "Sequential cut of steps, caption at top",
+      "hyperframes_template": "T4 sequential cut",
+      "default_theme": "dark",
+      "good_for": "multi-step flows compressed into one beat"
+    },
+    {
+      "id": "explainer-slide",
+      "legacy_alias": "T5",
+      "summary": "Explainer slide, title left (the most used template)",
+      "hyperframes_template": "T5 explainer-slide title-left",
+      "default_theme": "light",
+      "good_for": "concept beats, definitions, framing"
+    },
+    {
+      "id": "full-proof-montage",
+      "legacy_alias": "T6",
+      "summary": "Full-screen UI proof montage",
+      "hyperframes_template": "T6 full-proof montage",
+      "default_theme": "dark",
+      "good_for": "credibility beats - show the real thing running"
+    },
+    {
+      "id": "centered-idea",
+      "legacy_alias": "T7",
+      "summary": "One centered idea, nothing else",
+      "hyperframes_template": "T7 centered idea",
+      "default_theme": "light",
+      "good_for": "payoffs, taglines, the one-sentence takeaway"
+    }
+  ]
+}

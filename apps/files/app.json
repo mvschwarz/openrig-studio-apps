@@ -1,0 +1,45 @@
+{
+  "manifest_version": 1,
+  "id": "files",
+  "name": "FILES",
+  "summary": "Browse, search, tag and edit \u2014 including the studio's own source, so the agent can reshape the app you are looking at.",
+  "category": "studio",
+  "maker": {
+    "name": "OpenRig",
+    "url": "https://github.com/mvschwarz"
+  },
+  "surface": {
+    "entry": "app/files.html",
+    "path": "/surfaces/files.html",
+    "glyph": "\u25a4",
+    "hint": "browse, search, tag and edit your media and source \u2014 the agent can drive it"
+  },
+  "roots": {
+    "media": {
+      "required": true
+    },
+    "project": {
+      "required": false
+    }
+  },
+  "verbs": [
+    "/api/files/tree",
+    "/api/files/read",
+    "/api/files/write",
+    "/api/files/raw",
+    "/api/files/search",
+    "/api/files/tags",
+    "/api/files/goto",
+    "/api/files/roots"
+  ],
+  "vendor": [
+    "marked"
+  ],
+  "requires": {
+    "host_capabilities": [
+      "files.read",
+      "files.write"
+    ],
+    "_note": "Ultralight: this app has no backend of its own. It rides verbs the STUDIO serves. Declaring that is the difference between 'no provider' and 'provider forgotten'."
+  }
+}

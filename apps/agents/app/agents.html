@@ -1,0 +1,148 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>AGENTS</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --ground: #17171d; --well: #1d1d24; --edge: #2e2e38;
+    --ink: #d7d3cc; --faint: #85818a;
+    --brass: #c9a35a; --brass-hi: #e0bd77; --live: #6ac47a; --down: #a33b2a;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 13px var(--mono); }
+  header { padding: 14px 18px; border-bottom: 1px solid var(--edge); display: flex; gap: 14px; align-items: baseline; }
+  header h1 { margin: 0; font: 700 13px var(--mono); letter-spacing: .1em; color: var(--brass-hi); text-transform: uppercase; }
+  header .sub { color: var(--faint); font-size: 11px; }
+  .wrap { display: grid; grid-template-columns: 300px 1fr; height: calc(100vh - 48px); }
+  .roster { border-right: 1px solid var(--edge); overflow: auto; padding: 10px; }
+  .seat { padding: 9px 10px; border: 1px solid var(--edge); border-radius: 3px; margin-bottom: 6px; cursor: pointer; background: var(--well); }
+  .seat:hover { border-color: var(--brass); }
+  .seat[aria-selected="true"] { border-color: var(--brass-hi); background: #23202a; }
+  .seat .n { color: var(--brass-hi); font-weight: 700; letter-spacing: .04em; }
+  .seat .s { color: var(--faint); font-size: 10.5px; margin-top: 2px; word-break: break-all; }
+  .seat .m { color: var(--faint); font-size: 10px; margin-top: 4px; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .dot.on { background: var(--live); } .dot.off { background: var(--down); } .dot.unk { background: #6b6b76; }
+  .pane { display: flex; flex-direction: column; min-width: 0; }
+  .panehead { padding: 10px 16px; border-bottom: 1px solid var(--edge); color: var(--faint); font-size: 11px; display: flex; justify-content: space-between; }
+  pre.capture { flex: 1; margin: 0; padding: 14px 16px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.45; }
+  .composer { border-top: 1px solid var(--edge); padding: 12px 16px; display: flex; gap: 10px; }
+  textarea { flex: 1; resize: none; height: 62px; background: var(--well); color: var(--ink); border: 1px solid var(--edge); border-radius: 3px; padding: 9px 11px; font: 12px var(--mono); }
+  textarea:focus { outline: none; border-color: var(--brass); }
+  button { background: transparent; color: var(--brass-hi); border: 1px solid var(--brass-hi); border-radius: 3px; padding: 0 18px; font: 700 11px var(--mono); letter-spacing: .07em; text-transform: uppercase; cursor: pointer; }
+  button:hover:not(:disabled) { background: var(--brass-hi); color: var(--ground); }
+  button:disabled { opacity: .4; cursor: default; }
+  .status { padding: 8px 16px; font-size: 11px; border-top: 1px solid var(--edge); color: var(--faint); }
+  .status.err { color: var(--down); } .status.ok { color: var(--live); }
+  .empty { padding: 30px; color: var(--faint); text-align: center; }
+</style>
+
+<header>
+  <h1>Agents</h1>
+  <span class="sub" id="sub">loading the roster...</span>
+</header>
+
+<div class="wrap">
+  <div class="roster" id="roster"></div>
+  <div class="pane">
+    <div class="panehead">
+      <span id="paneTitle">no seat selected</span>
+      <span id="paneNote"></span>
+    </div>
+    <pre class="capture" id="capture">Pick a seat to see what it is doing.</pre>
+    <div class="composer">
+      <textarea id="msg" placeholder="Say something to this seat. Shift+Enter for a newline, Enter to send." disabled></textarea>
+      <button id="send" disabled>Send</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+</div>
+
+<script>
+  // ULTRALIGHT. No provider, no bundle, no build. Every verb here is served by
+  // the STUDIO, which is what makes this the smallest honest proof that an app
+  // can drop onto the rail and work.
+  const $ = (id) => document.getElementById(id);
+  let seats = [], selected = null, pollTimer = null;
+
+  const setStatus = (t, kind) => { $("status").textContent = t; $("status").className = "status " + (kind || ""); };
+
+  // Seat state is REPORTED, not interpreted. "unknown" is the honest answer on
+  // this host because the daemon-ingest link is down for claude-code seats;
+  // rendering "idle" would invent a fact about a live seat.
+  const dotClass = (s) => s.lifecycle === "running" ? (s.activity && s.activity !== "unknown" ? "on" : "unk") : "off";
+
+  async function loadRoster() {
+    try {
+      const r = await fetch("/api/seats", { cache: "no-store" }).then((x) => x.json());
+      if (!r.ok) throw new Error(r.error || "roster unavailable");
+      seats = r.seats || [];
+      $("sub").textContent = seats.length + " seat(s) on this box";
+      $("roster").innerHTML = seats.length
+        ? seats.map((s) => '<div class="seat" data-seat="' + s.seat + '" aria-selected="' + (s.seat === selected) + '">'
+            + '<div class="n"><span class="dot ' + dotClass(s) + '"></span>' + (s.name || s.seat) + '</div>'
+            + '<div class="s">' + s.seat + '</div>'
+            + '<div class="m">' + (s.activity || "unknown") + (s.pendingWork ? " - " + s.pendingWork + " pending" : "") + '</div>'
+            + '</div>').join("")
+        : '<div class="empty">No rig is running on this box.<br/>That is a real state, not an error.</div>';
+      for (const el of document.querySelectorAll(".seat")) {
+        el.addEventListener("click", () => select(el.dataset.seat));
+      }
+    } catch (e) {
+      // A failed roster must not look like an empty one.
+      $("sub").textContent = "roster failed";
+      $("roster").innerHTML = '<div class="empty" style="color:var(--down)">Could not read the roster.<br/><br/>'
+        + e.message + '<br/><br/>This is a failure, not an empty box.</div>';
+    }
+  }
+
+  async function refreshCapture() {
+    if (!selected) return;
+    try {
+      const r = await fetch("/api/seats/capture?seat=" + encodeURIComponent(selected) + "&lines=120", { cache: "no-store" }).then((x) => x.json());
+      $("capture").textContent = r.ok ? (r.text || "(pane is empty)") : "capture failed: " + r.error;
+      $("paneNote").textContent = r.ok ? "last " + r.lines + " lines - scrollback-bounded" : "";
+    } catch (e) { $("capture").textContent = "capture failed: " + e.message; }
+  }
+
+  function select(seat) {
+    selected = seat;
+    for (const el of document.querySelectorAll(".seat")) el.setAttribute("aria-selected", el.dataset.seat === seat);
+    $("paneTitle").textContent = seat;
+    $("msg").disabled = false; $("send").disabled = false; $("msg").focus();
+    setStatus("");
+    refreshCapture();
+    clearInterval(pollTimer);
+    pollTimer = setInterval(refreshCapture, 4000);
+  }
+
+  async function send() {
+    const text = $("msg").value.trim();
+    if (!text || !selected) return;
+    $("send").disabled = true; setStatus("sending...");
+    try {
+      const r = await fetch("/api/seats/send", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ seat: selected, text })
+      }).then((x) => x.json());
+      if (!r.ok) { setStatus(r.error, "err"); return; }
+      $("msg").value = "";
+      // `verified` is reported, never translated. It is dead for claude-code
+      // seats on this host and carries real signal only for codex ones.
+      setStatus(r.delivered
+        ? ("delivered" + (r.verified ? " - verified" : " - not verified (weak signal on some runtimes, not a failure)"))
+        : "sent, delivery unconfirmed", r.delivered ? "ok" : "");
+      setTimeout(refreshCapture, 1200);
+    } catch (e) { setStatus(e.message, "err"); }
+    finally { $("send").disabled = false; }
+  }
+
+  $("send").addEventListener("click", send);
+  $("msg").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+
+  loadRoster();
+  setInterval(loadRoster, 15000);
+</script>

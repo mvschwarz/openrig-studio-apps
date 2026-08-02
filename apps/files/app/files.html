@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Files</title>
+<script src="/vendor/marked/marked.min.js"></script>
+<style>
+  /* dark value ladder  */
+  :root {
+    --bg:#121214; --fg:rgba(255,255,255,.95); --body:rgba(255,255,255,.68);
+    --dim:rgba(255,255,255,.52); --faint:rgba(255,255,255,.38);
+    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.16);
+    --card:rgba(255,255,255,.07); --coral:#ff6b5a; --indigo:#8b93ff;
+    --sans:Helvetica,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; height:100vh; background:var(--bg); color:var(--fg);
+    font-family:var(--sans); font-size:13.5px; display:flex; flex-direction:column;
+    -webkit-font-smoothing:antialiased; overflow:hidden; }
+  body::before { content:""; position:fixed; inset:-10%; z-index:0; pointer-events:none;
+    background: radial-gradient(42% 55% at 18% 22%, rgba(139,147,255,.08), transparent 70%),
+      radial-gradient(48% 60% at 82% 18%, rgba(255,107,90,.05), transparent 70%);
+    filter:blur(56px) saturate(1.2) brightness(.9); transform:scale(1.1); }
+  body > * { position:relative; z-index:1; }
+
+  header { display:flex; align-items:center; gap:12px; padding:12px 16px;
+    border-bottom:1px solid var(--line); }
+  header h1 { font-size:12px; letter-spacing:.22em; margin:0; font-weight:700; }
+  #crumb { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; flex:1; }
+  #status { font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
+  #status.dirty { color:var(--coral); }
+  #status.saved { color:var(--body); }
+  .btn { background:var(--fg); color:#111; border:none; border-radius:2px;
+    font-family:var(--sans); font-size:9px; letter-spacing:.18em; text-transform:uppercase;
+    font-weight:600; padding:7px 14px; cursor:pointer; }
+  .btn:hover { background:rgba(255,255,255,.8); }
+  .btn[disabled] { background:rgba(255,255,255,.2); cursor:default; }
+  .ghost { background:none; border:1px solid var(--line2); border-radius:2px;
+    color:var(--dim); font-family:var(--sans); font-size:9px; letter-spacing:.16em;
+    text-transform:uppercase; padding:6px 12px; cursor:pointer; }
+  .ghost:hover { color:var(--fg); border-color:rgba(255,255,255,.35); }
+  .ghost.on { background:var(--fg); color:#111; border-color:var(--fg); font-weight:600; }
+
+  .body { display:grid; grid-template-columns:250px minmax(0,1fr); flex:1; min-height:0; }
+  .body > * { min-height:0; min-width:0; }
+  #rail { border-right:1px solid var(--line); overflow-y:auto; padding:8px 0;
+    background:rgba(255,255,255,.02); backdrop-filter:blur(14px); }
+  .lens { display:flex; gap:6px; padding:4px 12px 10px; }
+  #rail h3 { margin:10px 12px 4px; font-size:9px; letter-spacing:.2em; color:var(--faint);
+    text-transform:uppercase; font-weight:400; }
+  .node { display:flex; align-items:center; gap:6px; padding:3px 12px; cursor:pointer;
+    color:var(--body); font-size:12px; border-left:2px solid transparent;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .node:hover { color:var(--fg); }
+  .node.on { color:var(--fg); border-left-color:var(--fg); background:rgba(255,255,255,.06); }
+  .node.kbd { outline:1px solid rgba(255,255,255,.35); outline-offset:-1px; }
+  .node .tri { width:12px; color:var(--faint); flex:none; font-size:12px; }
+  .node .ic { width:14px; text-align:center; flex:none; color:var(--faint); font-size:11px; }
+  .kids { margin-left:14px; }
+
+  #stage { display:flex; flex-direction:column; min-width:0; }
+  #viewer { flex:1; min-height:0; overflow:auto; padding:0; }
+  #empty { display:flex; height:100%; align-items:center; justify-content:center;
+    color:var(--faint); font-size:10.5px; letter-spacing:.2em; text-transform:uppercase; }
+  #ed { width:100%; height:100%; background:transparent; border:0; resize:none;
+    color:var(--fg); font:12.5px/1.6 var(--mono); padding:18px 22px; outline:none; }
+  #md { padding:24px 34px; max-width:860px; font-size:14px; line-height:1.65; color:var(--body); }
+  #md h1,#md h2,#md h3 { color:var(--fg); letter-spacing:-.02em; line-height:1.2; }
+  #md h1 { font-size:26px; } #md h2 { font-size:19px; } #md h3 { font-size:15px; }
+  #md code { font-family:var(--mono); font-size:.9em; background:rgba(255,255,255,.07);
+    padding:1px 5px; border-radius:2px; }
+  #md pre { background:rgba(255,255,255,.05); border:1px solid var(--line);
+    border-radius:2px; padding:12px 14px; overflow-x:auto; }
+  #md pre code { background:none; padding:0; }
+  #md a { color:var(--indigo); }
+  #md blockquote { border-left:2px solid var(--line2); margin-left:0; padding-left:14px; color:var(--dim); }
+  #md table { border-collapse:collapse; } #md td,#md th { border:1px solid var(--line);
+    padding:5px 10px; font-size:12.5px; }
+  #md img { max-width:100%; }
+  #viewer img.media { max-width:100%; max-height:100%; display:block; margin:0 auto; }
+  #viewer video { width:100%; height:100%; background:#000; }
+  #viewer iframe.twin { width:100%; height:100%; border:0; background:#0a0a0c; }
+</style>
+<style>
+  /* dark-scheme scrollbars without color-scheme the
+     browser paints LIGHT scrollbars on our dark surfaces */
+  html { color-scheme: dark; }
+  * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 4px; border: 2px solid transparent; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.32); }
+</style>
+</head>
+<body>
+<header>
+  <h1>FILES</h1>
+  <div id="crumb"></div>
+  <span id="status"></span>
+  <button class="ghost" id="rawBtn" style="display:none">RAW</button>
+  <button class="btn" id="saveBtn" style="display:none">SAVE</button>
+</header>
+<div class="body">
+  <nav id="rail">
+    <div class="lens">
+      <button class="ghost on" id="lensTree">FOLDERS</button>
+      <button class="ghost" id="lensTags">TAGS</button>
+    </div>
+    <input id="q" placeholder="search — or paste a /path and Enter"
+      style="width:calc(100% - 24px);margin:0 12px 8px;background:rgba(255,255,255,.05);border:none;border-radius:2px;color:var(--fg);font-family:var(--sans);font-size:12px;padding:8px 10px;outline:none" />
+    <div id="tree"></div>
+  </nav>
+  <main id="stage">
+    <div id="viewer"><div id="empty">pick a file — markdown, code, image, video, html</div></div>
+  </main>
+</div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  const api = async (p, opts) => { const r = await fetch(p, opts); return { status: r.status, ...(await r.json().catch(() => ({}))) }; };
+  const ICONS = { markdown:"M", text:"{}", image:"▣", video:"🎞", audio:"♪", html:"<>", other:"·" };
+
+  const st = { file:null, kind:null, mtime:null, dirty:false, mode:"preview", lens:"tree", root:null, watch:null };
+
+  // ---- rail: lazy tree ----
+  async function renderRoots() {
+    const d = await api("/api/files/tree");
+    $("tree").innerHTML = "<h3>roots</h3>" + (d.roots || []).map((r) =>
+      `<div class="node dir" data-dir="${esc(r.path)}"><span class="tri">▸</span><span class="ic">▦</span>${esc(r.name)}</div>`).join("")
+      + `<div class="node" id="addRoot" style="color:var(--faint)"><span class="tri"></span><span class="ic">+</span>add a root…</div>`;
+    $("addRoot").onclick = async () => {
+      const p = prompt("Absolute directory to add as a root\n(inside your home; key/secret dirs refused):");
+      if (!p) return;
+      const r = await api("/api/files/roots", { method: "POST",
+        headers: { "content-type": "application/json" }, body: JSON.stringify({ op: "add", path: p.trim() }) });
+      if (!r.ok) { alert(r.error || "refused"); return; }
+      renderRoots();
+    };
+    wireTree();
+  }
+  function wireTree() {
+    for (const el of document.querySelectorAll(".node.dir")) el.onclick = async (e) => {
+      e.stopPropagation();
+      const open = el.nextElementSibling?.classList?.contains("kids");
+      if (open) { el.nextElementSibling.remove(); el.querySelector(".tri").textContent = "▸"; return; }
+      const d = await api("/api/files/tree?dir=" + encodeURIComponent(el.dataset.dir));
+      if (!d.ok) return;
+      const kids = document.createElement("div");
+      kids.className = "kids";
+      kids.innerHTML = d.dirs.map((x) =>
+          `<div class="node dir" data-dir="${esc(x.path)}"><span class="tri">▸</span><span class="ic">▦</span>${esc(x.name)}</div>`).join("")
+        + d.files.map((f) =>
+          `<div class="node file" data-path="${esc(f.path)}"><span class="tri"></span><span class="ic">${ICONS[f.kind] || "·"}</span>${esc(f.name)}</div>`).join("");
+      el.after(kids);
+      el.querySelector(".tri").textContent = "▾";
+      st.root = el.dataset.dir.split("/").slice(0, 6).join("/");
+      wireTree();
+    };
+    for (const el of document.querySelectorAll(".node.file")) el.onclick = () => openFile(el.dataset.path, el);
+  }
+
+  async function renderTags() {
+    const roots = (await api("/api/files/tree")).roots || [];
+    const ws = roots.find((r) => /workspace/.test(r.path)) || roots[0];
+    if (!ws) return;
+    const d = await api("/api/files/tags?root=" + encodeURIComponent(ws.path));
+    const base = d.tagsPath ? d.tagsPath.replace(/tags\.jsonl$/, "") : ws.path + "/";
+    $("tree").innerHTML = "<h3>tags</h3>" + (Object.keys(d.tags || {}).length
+      ? Object.entries(d.tags).map(([tag, assets]) => `
+        <div class="node dir" data-tag="${esc(tag)}"><span class="tri">▸</span><span class="ic">#</span>${esc(tag)} · ${assets.length}</div>
+        <div class="kids" style="display:none">${assets.map((a) => `
+          <div class="node file" data-path="${esc(base)}media/renders/${esc(a)}"><span class="tri"></span><span class="ic">▶</span>${esc(a)}</div>`).join("")}</div>`).join("")
+      : '<div class="node" style="color:var(--faint)">no tags.jsonl in this workspace</div>');
+    for (const el of document.querySelectorAll(".node[data-tag]")) el.onclick = () => {
+      const kids = el.nextElementSibling;
+      const open = kids.style.display !== "none";
+      kids.style.display = open ? "none" : "";
+      el.querySelector(".tri").textContent = open ? "▸" : "▾";
+    };
+    for (const el of document.querySelectorAll(".node.file")) el.onclick = () => openFile(el.dataset.path, el);
+  }
+
+  // ---- viewer ----
+  function setActive(el) {
+    document.querySelectorAll(".node.on").forEach((x) => x.classList.remove("on"));
+    if (el) el.classList.add("on");
+  }
+  async function openFile(p, el) {
+    if (st.dirty && !confirm("Discard unsaved changes?")) return;
+    clearInterval(st.watch);
+    setActive(el);
+    const d = await api("/api/files/read?path=" + encodeURIComponent(p));
+    if (!d.ok) { $("viewer").innerHTML = `<div id="empty">${esc(d.error || "unreadable")}</div>`; return; }
+    Object.assign(st, { file:p, kind:d.kind, mtime:d.mtime, dirty:false, mode:"preview" });
+    $("crumb").textContent = p;
+    $("saveBtn").style.display = (d.kind === "markdown" || d.kind === "text") ? "" : "none";
+    $("rawBtn").style.display = (d.kind === "markdown" || d.kind === "html") ? "" : "none";
+    $("rawBtn").classList.remove("on");
+    render(d);
+    // agent co-editing: watch mtime; refresh view when someone else writes
+    st.watch = setInterval(async () => {
+      if (st.dirty) return; // human's unsaved edit wins the screen
+      const c = await api("/api/files/read?path=" + encodeURIComponent(st.file));
+      if (c.ok && c.mtime !== st.mtime) { st.mtime = c.mtime; render(c); flash("updated by agent"); }
+    }, 2000);
+    try { fetch("/api/focus", { method:"POST", headers:{ "content-type":"application/json" },
+      body: JSON.stringify({ surface:"files", selection:[p], view:st.root, ts:Date.now() }) }).catch(()=>{}); } catch {}
+  }
+  function render(d) {
+    const v = $("viewer");
+    if (d.kind === "markdown") {
+      v.innerHTML = st.mode === "raw"
+        ? `<textarea id="ed" spellcheck="false"></textarea>`
+        : `<div id="md"></div>`;
+      if (st.mode === "raw") { $("ed").value = d.content; wireEditor(); }
+      else $("md").innerHTML = marked.parse(d.content);
+      st.content = d.content;
+    } else if (d.kind === "text") {
+      v.innerHTML = `<textarea id="ed" spellcheck="false"></textarea>`;
+      $("ed").value = d.content; st.content = d.content; wireEditor();
+    } else if (d.kind === "image") {
+      v.innerHTML = `<img class="media" src="${esc(d.raw)}" alt="">`;
+    } else if (d.kind === "video" || d.kind === "audio") {
+      v.innerHTML = d.kind === "video" ? `<video controls src="${esc(d.raw)}"></video>`
+        : `<div style="padding:40px"><audio controls src="${esc(d.raw)}" style="width:100%"></audio></div>`;
+    } else if (d.kind === "html") {
+      v.innerHTML = st.mode === "raw"
+        ? `<textarea id="ed" spellcheck="false"></textarea>`
+        : `<iframe class="twin" sandbox="allow-scripts" src="${esc(d.raw || ("/api/files/raw?path=" + encodeURIComponent(st.file)))}"></iframe>`;
+      if (st.mode === "raw") {
+        api("/api/files/read?path=" + encodeURIComponent(st.file)).then((c) => {
+          if ($("ed")) { $("ed").value = c.content ?? ""; st.content = c.content; wireEditor(); }
+        });
+      }
+    } else {
+      v.innerHTML = `<div id="empty">no viewer for this type yet</div>`;
+    }
+  }
+  function wireEditor() {
+    $("ed").addEventListener("input", () => { st.dirty = true; status("unsaved", "dirty"); });
+    $("ed").addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); save(); }
+    });
+  }
+  const status = (t, cls) => { const s = $("status"); s.textContent = t; s.className = cls || ""; };
+  const flash = (t) => { status(t, "saved"); setTimeout(() => !st.dirty && status(""), 2500); };
+
+  async function save() {
+    const ed = $("ed"); if (!ed) return;
+    const r = await api("/api/files/write", { method:"POST",
+      headers:{ "content-type":"application/json" },
+      body: JSON.stringify({ path: st.file, content: ed.value, baseMtime: st.mtime }) });
+    if (r.status === 409) {
+      if (confirm("An agent (or someone) changed this file while you edited.\nOK = load THEIR version (your text goes to clipboard). Cancel = keep editing yours.")) {
+        try { await navigator.clipboard.writeText(ed.value); } catch {}
+        st.dirty = false; st.mtime = r.mtime;
+        render({ kind: st.kind, content: r.content, mtime: r.mtime });
+        flash("reloaded their version");
+      }
+      return;
+    }
+    if (!r.ok) { status(r.error || "save failed", "dirty"); return; }
+    st.mtime = r.mtime; st.dirty = false; st.content = ed.value;
+    flash("saved");
+  }
+  $("saveBtn").onclick = save;
+  $("rawBtn").onclick = () => {
+    st.mode = st.mode === "raw" ? "preview" : "raw";
+    $("rawBtn").classList.toggle("on", st.mode === "raw");
+    api("/api/files/read?path=" + encodeURIComponent(st.file)).then(render);
+  };
+  $("lensTree").onclick = () => { st.lens = "tree"; $("lensTree").classList.add("on"); $("lensTags").classList.remove("on"); renderRoots(); };
+  $("lensTags").onclick = () => { st.lens = "tags"; $("lensTags").classList.add("on"); $("lensTree").classList.remove("on"); renderTags(); };
+
+  // search box: /path + Enter jumps straight there; anything else searches names
+  let qTimer = null;
+  $("q").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && $("q").value.trim().startsWith("/")) openFile($("q").value.trim(), null);
+  });
+  $("q").addEventListener("input", () => {
+    clearTimeout(qTimer);
+    const q = $("q").value.trim();
+    if (q.startsWith("/") || q.length < 2) { if (!q) (st.lens === "tags" ? renderTags : renderRoots)(); return; }
+    qTimer = setTimeout(async () => {
+      const d = await api("/api/files/search?q=" + encodeURIComponent(q));
+      $("tree").innerHTML = `<h3>results · ${d.hits.length}</h3>` + d.hits.map((f) => `
+        <div class="node file" data-path="${esc(f.path)}" title="${esc(f.path)}"><span class="tri"></span><span class="ic">${ICONS[f.kind] || "·"}</span>${esc(f.name)}</div>`).join("")
+        || '<div class="node" style="color:var(--faint)">nothing matched</div>';
+      for (const el of document.querySelectorAll("#tree .node.file")) el.onclick = () => openFile(el.dataset.path, el);
+    }, 250);
+  });
+
+  // agent-driven navigation: an agent POSTs /api/files/goto and this view follows
+  let lastGoto = Date.now();
+  setInterval(async () => {
+    const d = await api("/api/files/goto").catch(() => null);
+    if (d && d.goto && d.goto.ts > lastGoto) { lastGoto = d.goto.ts; openFile(d.goto.path, null); flash("opened by agent"); }
+  }, 3000);
+
+  // keyboard tree navigation: up/down walk visible nodes, right expands or
+  // opens, left collapses or jumps to parent, Enter activates
+  const visNodes = () => [...document.querySelectorAll("#tree .node")].filter((n) => n.offsetParent !== null && !n.id);
+  document.addEventListener("keydown", (e) => {
+    if (["TEXTAREA", "INPUT"].includes(e.target.tagName)) return;
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"].includes(e.key)) return;
+    const nodes = visNodes(); if (!nodes.length) return;
+    e.preventDefault();
+    let i = nodes.findIndex((n) => n.classList.contains("kbd"));
+    const setK = (j) => { nodes.forEach((n) => n.classList.remove("kbd"));
+      i = Math.max(0, Math.min(nodes.length - 1, j));
+      nodes[i].classList.add("kbd"); nodes[i].scrollIntoView({ block: "nearest" }); };
+    if (i === -1) { setK(0); return; }
+    const cur = nodes[i];
+    const isDir = cur.classList.contains("dir") || cur.dataset.tag !== undefined;
+    const expanded = cur.querySelector(".tri") && cur.querySelector(".tri").textContent === "▾";
+    if (e.key === "ArrowDown") setK(i + 1);
+    else if (e.key === "ArrowUp") setK(i - 1);
+    else if (e.key === "Enter") { cur.click(); if (!isDir) return; setTimeout(() => setK(i), 150); }
+    else if (e.key === "ArrowRight") {
+      if (isDir && !expanded) { cur.click(); setTimeout(() => setK(i), 150); }
+      else if (isDir && expanded) setK(i + 1);
+      else cur.click();
+    } else if (e.key === "ArrowLeft") {
+      if (isDir && expanded) { cur.click(); setTimeout(() => setK(i), 150); }
+      else {
+        const depth = (n) => { let d = 0, p = n.parentElement; while (p && p.id !== "tree") { if (p.classList.contains("kids")) d++; p = p.parentElement; } return d; };
+        const myD = depth(cur);
+        for (let j = i - 1; j >= 0; j--) if (depth(nodes[j]) < myD) { setK(j); break; }
+      }
+    }
+  });
+
+  renderRoots();
+  window.__files = { openFile, save, st };
+})();
+</script>
+</body>
+</html>

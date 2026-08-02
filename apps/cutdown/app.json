@@ -1,0 +1,90 @@
+{
+  "manifest_version": 1,
+  "id": "cutdown",
+  "name": "CUTDOWN",
+  "summary": "Punch in/out on a folder of footage and let the lane render the cuts.",
+  "category": "create",
+  "maker": {
+    "name": "OpenRig",
+    "url": "https://github.com/mvschwarz"
+  },
+  "surface": {
+    "entry": "app/cutdown.html",
+    "path": "/surfaces/cutdown.html",
+    "glyph": "\u2702",
+    "hint": "pick and trim takes"
+  },
+  "provider": {
+    "package": "@openrig/studio-cutdown",
+    "required": true,
+    "_note": "This app is a CLIENT of that provider. Installing the surface alone gets you an HTML file that 502s \u2014 the field rigs-to-apps v1 had no slot for, which is why media-manager was listed there and was not installable.",
+    "run": {
+      "entry": "cutdown-server.mjs",
+      "args": [
+        "--port",
+        "{{port}}",
+        "--footage",
+        "{{root:footage}}",
+        "--bundle",
+        "{{root:project}}"
+      ],
+      "companions": [
+        {
+          "label": "cut lane",
+          "entry": "watch-markers.mjs",
+          "args": [
+            "--footage",
+            "{{root:footage}}",
+            "--bundle",
+            "{{root:project}}"
+          ],
+          "_note": "The renderer the write verbs enqueue for. Without it stabilize and cut-retry accept work nothing performs \u2014 declared so it starts WITH the provider rather than being remembered."
+        }
+      ]
+    },
+    "serves": [
+      "/media/",
+      "/cutprev/",
+      "/cuts/"
+    ],
+    "_serves_note": "BYTE-route prefixes. A backend is not only its /api/ verbs \u2014 these were undeclared, so the front proxied only /api/* and clips listed but would not play.",
+    "supplies": [
+      "ffmpeg",
+      "ffprobe"
+    ],
+    "_supplies_note": "Binaries this provider SHIPS (ffmpeg-static/ffprobe-static), so the host does not need them. requires.binaries still declares the NEED \u2014 that stays legible and true; this says who satisfies it. Without the distinction the installer refuses a working install on any box without a system ffmpeg, which is most of them."
+  },
+  "roots": {
+    "footage": {
+      "required": true
+    },
+    "project": {
+      "required": true
+    }
+  },
+  "verbs": [
+    "/api/clips",
+    "/api/cuts",
+    "/api/markers",
+    "/api/pick",
+    "/api/cut-note",
+    "/api/cut-delete",
+    "/api/cut-retry",
+    "/api/stabilize"
+  ],
+  "vendor": [],
+  "requires": {
+    "binaries": [
+      "ffmpeg",
+      "ffprobe"
+    ],
+    "ffmpeg_filters": [
+      "scale",
+      "concat"
+    ],
+    "_filters_note": "REQUIRED vs PREFERRED, and the split is the point. scale/concat are load-bearing: no cut renders without them. drawtext only writes the LABEL on a placeholder slate, and the assembler now renders an unlabelled slate and reports the degradation instead of failing the export. So drawtext must NOT block an install \u2014 the Linux ffmpeg-static build (7.0.2) lacks it while the macOS one (6.0) has it, and losing a caption on an unshot beat is not worth refusing a working studio.",
+    "ffmpeg_filters_preferred": [
+      "drawtext"
+    ]
+  }
+}
