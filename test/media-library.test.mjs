@@ -37,7 +37,7 @@ async function startProvider({ projectRoot, mediaRoot }) {
     if (proc.exitCode != null) throw new Error(`provider exited ${proc.exitCode}:\n${log}`);
     try {
       const response = await fetch(endpoint);
-      if (response.ok) return { proc, endpoint, log: () => log };
+      if (response.ok) return { proc, endpoint, origin: `http://127.0.0.1:${port}`, log: () => log };
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 75));
   }
@@ -74,4 +74,25 @@ test("the library walks the media root the install actually declared", async (t)
   assert.ok(paths.includes(realControl), `positive control missing: the harness did not see root/library; payload=${JSON.stringify(payload)}`);
   assert.ok(paths.includes(realExpected), "media under the declared root's footage/ subtree was silently narrowed out");
   assert.ok(!paths.includes(realOutside), "provider escaped the declared media root");
+});
+
+test("project-relative media refs stream through /api/media", async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "studio-project-media-"));
+  const projectRoot = path.join(tmp, "project");
+  const mediaRoot = path.join(tmp, "media");
+  const expected = path.join(projectRoot, "media", "captures", "expected.mp4");
+  fs.mkdirSync(path.dirname(expected), { recursive: true });
+  fs.mkdirSync(mediaRoot, { recursive: true });
+  fs.writeFileSync(expected, "declared project media");
+  fs.writeFileSync(path.join(projectRoot, "project-assets.json"), JSON.stringify({
+    assets: [{ path: expected }],
+  }));
+
+  const provider = await startProvider({ projectRoot, mediaRoot });
+  t.after(() => { provider.proc.kill(); fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  const response = await fetch(`${provider.origin}/api/media?path=${encodeURIComponent("media/captures/expected.mp4")}`);
+  const responseBody = await response.text();
+  assert.equal(response.status, 200, responseBody);
+  assert.equal(responseBody, "declared project media");
 });

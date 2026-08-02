@@ -1240,32 +1240,37 @@ async function handleNleApi(req, res, url) {
   }
   if (url.pathname === "/api/media" && req.method === "GET") {
     const requested = url.searchParams.get("path") || "";
+    // Timeline refs are bundle-relative by design (media/captures/foo.mp4).
+    // Resolve them against the configured project before applying the same
+    // index + root boundary as absolute asset-index paths. Otherwise the API
+    // only works for callers that already know this box's filesystem layout.
+    const mediaPath = resolveRefPath(requested, { sliceRoot: args.sliceRoot });
     // a render's previews/ sibling rides its master's allowlist entry
     // (preview proxies are derived files, never indexed themselves);
     // exports under <bundle>/assembly/ are servable by construction
-    const previewAlias = requested.replace(/\/previews\//, "/");
-    const inAssembly = path.resolve(requested).startsWith(path.resolve(args.sliceRoot, "assembly") + path.sep);
+    const previewAlias = mediaPath.replace(/\/previews\//, "/");
+    const inAssembly = path.resolve(mediaPath).startsWith(path.resolve(args.sliceRoot, "assembly") + path.sep);
     const allowed = inAssembly
-      || isAllowlisted(requested, currentAllowlist(), [args.sliceRoot, ...args.mediaRoots])
-      || (requested.includes("/previews/") && isAllowlisted(previewAlias, currentAllowlist(), [args.sliceRoot, ...args.mediaRoots]));
+      || isAllowlisted(mediaPath, currentAllowlist(), [args.sliceRoot, ...args.mediaRoots])
+      || (mediaPath.includes("/previews/") && isAllowlisted(previewAlias, currentAllowlist(), [args.sliceRoot, ...args.mediaRoots]));
     if (!allowed) {
       return sendJson(res, 403, { ok: false, error: "path is not an indexed project asset" });
     }
-    const stats = fs.statSync(requested);
+    const stats = fs.statSync(mediaPath);
     const response = staticResponseHeaders({
       fileSize: stats.size,
       rangeHeader: req.headers.range,
-      contentType: contentType(requested),
+      contentType: contentType(mediaPath),
     });
     if (url.searchParams.get("dl")) {
       // deliberate download lane (media manager bulk export): same-origin,
       // so masters move without cross-host auth seams
-      response.headers["content-disposition"] = `attachment; filename="${path.basename(requested)}"`;
+      response.headers["content-disposition"] = `attachment; filename="${path.basename(mediaPath)}"`;
     }
     res.writeHead(response.status, response.headers);
     if (req.method === "HEAD" || response.status === 416) return res.end();
     const streamOptions = response.range ? { start: response.range.start, end: response.range.end } : undefined;
-    fs.createReadStream(requested, streamOptions).pipe(res);
+    fs.createReadStream(mediaPath, streamOptions).pipe(res);
     return true;
   }
   return false;
