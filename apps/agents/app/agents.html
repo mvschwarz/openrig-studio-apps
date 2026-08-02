@@ -36,6 +36,10 @@
   .status { padding: 8px 16px; font-size: 11px; border-top: 1px solid var(--edge); color: var(--faint); }
   .status.err { color: var(--down); } .status.ok { color: var(--live); }
   .empty { padding: 30px; color: var(--faint); text-align: center; }
+  .setup { margin: 8px; padding: 18px; border: 1px solid var(--edge); border-radius: 3px; background: var(--well); }
+  .setup strong { display: block; color: var(--ink); margin-bottom: 9px; }
+  .setup p { margin: 0 0 12px; color: var(--faint); font-size: 11px; line-height: 1.5; }
+  .setup button { padding: 9px 12px; }
 </style>
 
 <header>
@@ -67,14 +71,40 @@
   let seats = [], selected = null, pollTimer = null;
 
   const setStatus = (t, kind) => { $("status").textContent = t; $("status").className = "status " + (kind || ""); };
+  const esc = (t) => String(t ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
   // Seat state is REPORTED, not interpreted. "unknown" is the honest answer on
   // this host because the daemon-ingest link is down for claude-code seats;
   // rendering "idle" would invent a fact about a live seat.
   const dotClass = (s) => s.lifecycle === "running" ? (s.activity && s.activity !== "unknown" ? "on" : "unk") : "off";
 
+  function renderNoRig(state) {
+    seats = []; selected = null; clearInterval(pollTimer);
+    const cliMissing = state.reason === "no-rig-cli";
+    const title = cliMissing ? "Could not confirm rig attachment" : "No rig is running on this box";
+    const detail = state.detail || (cliMissing
+      ? "OpenRig is not available on this box yet."
+      : "This box is ready for a rig, but none is attached.");
+    $("sub").textContent = cliMissing ? "rig tooling unavailable" : "no rig attached";
+    $("roster").innerHTML = `<div class="setup"><strong>${esc(title)}</strong>
+      <p>${esc(detail)}</p>
+      <p>The setup flow will check for an existing rig, reuse it when found, and create one only when needed.</p>
+      <button type="button" id="standUpRig">Stand up a rig</button></div>`;
+    $("paneTitle").textContent = "rig setup";
+    $("paneNote").textContent = "";
+    $("capture").textContent = "Stand up or attach a rig before talking to seats.";
+    $("msg").disabled = true; $("send").disabled = true;
+    setStatus("This is an honest no-rig state, not an empty roster.");
+    $("standUpRig").addEventListener("click", () => {
+      parent.postMessage({ type: "open-agent", prompt: "Stand up OpenRig on this box. Check for an existing rig first, reuse it if found, and create one only if none exists. Report what you changed." }, "*");
+    });
+  }
+
   async function loadRoster() {
     try {
+      const attachment = await fetch("/api/factory/state", { cache: "no-store" }).then((x) => x.json());
+      if (!attachment.ok) throw new Error(attachment.degraded || "Could not confirm rig attachment");
+      if (attachment.attached === false) { renderNoRig(attachment); return; }
       const r = await fetch("/api/seats", { cache: "no-store" }).then((x) => x.json());
       if (!r.ok) throw new Error(r.error || "roster unavailable");
       seats = r.seats || [];
@@ -85,7 +115,7 @@
             + '<div class="s">' + s.seat + '</div>'
             + '<div class="m">' + (s.activity || "unknown") + (s.pendingWork ? " - " + s.pendingWork + " pending" : "") + '</div>'
             + '</div>').join("")
-        : '<div class="empty">No rig is running on this box.<br/>That is a real state, not an error.</div>';
+        : '<div class="empty">The rig is attached, but it currently reports no seats.</div>';
       for (const el of document.querySelectorAll(".seat")) {
         el.addEventListener("click", () => select(el.dataset.seat));
       }

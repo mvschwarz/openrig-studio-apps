@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "license": "Apache-2.0",
+  "scripts": {
+    "test": "node --test ../../test/agents-no-rig.test.mjs"
+  },
   "description": "Host capabilities for studio apps: file browsing with root containment, and the seat roster/messaging that makes an app agent-managed.",
   "_note": "These verbs used to be special-cased as requires.host_capabilities and served by a private box. That meant FILES and AGENTS installed onto a public studio and rendered empty panes. They are an ordinary provider now \u2014 one mechanism instead of two."
 }
