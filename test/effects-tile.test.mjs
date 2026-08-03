@@ -3,6 +3,7 @@
 // defect there, and each is silent if it regresses.
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { lStar, luminanceGrid, planBlocks, pickTile, TILE_FAMILIES, PALETTES, tileSpec,
          levelWindow, applyLevels }
   from "../providers/studio-effects/engine/tile.mjs";
@@ -173,4 +174,32 @@ test("autoLevels is declared as a knob an agent can find and reach for", () => {
   assert.ok(spec, "autoLevels must be published in the schema");
   assert.ok(spec.says.length > 20, "it needs to say what it does in plain words");
   assert.equal(spec.default, 1, "normalisation is the sane default for real footage");
+});
+
+test("the atlas is keyed on the values that are RENDERED, not the ones authored", () => {
+  // FOUND BY INDEPENDENT QA. buildAtlas() keyed on the authored tileSet/palette
+  // and early-returned on the unchanged key, so a curve driving either updated
+  // the effective values, hit the stale key, and left the frame pixel-identical
+  // while the status handle reported the parameter as driving with no notes.
+  // The third site with that shape, in the family that had not been audited.
+  const SURFACE = fs.readFileSync(
+    new URL("../apps/effects/app/effects.html", import.meta.url), "utf8");
+  assert.match(SURFACE, /function buildAtlas\(P\)/, "the atlas must take the live values");
+  assert.match(SURFACE, /const key = `\$\{P\.tileSet\}\|\$\{P\.palette\}`/, "and key on them");
+  assert.match(SURFACE, /buildAtlas\(P\)/, "and be called with them");
+  assert.equal(/const key = `\$\{params\./.test(SURFACE), false,
+    "keying the atlas on authored values is the defect this pins");
+});
+
+test("a hard cut SNAPS the tone window rather than easing through it", () => {
+  // QA measured the unconditional ease taking 1.3-1.5s to settle across a cut
+  // between two static shots — the classic auto-exposure pump.
+  const SURFACE = fs.readFileSync(
+    new URL("../apps/effects/app/effects.html", import.meta.url), "utf8");
+  assert.match(SURFACE, /SCENE_CUT_LSTAR/, "a cut threshold must exist");
+  assert.match(SURFACE, /if \(jump < SCENE_CUT_LSTAR\)/, "smoothing must be conditional on it");
+  // A COUNTER rather than a per-frame flag: a boolean is reset by the next frame,
+  // so a checker sampling after a cut reads false and concludes nothing happened.
+  assert.match(SURFACE, /cuts: cutCount/, "the snap must be observable after the fact");
+  assert.equal(/snappedToCut/.test(SURFACE), false, "a per-frame flag is not observable");
 });

@@ -152,3 +152,48 @@ test("the two vertical axes stay separate — the fix for an upside-down picture
   // and the phase must be taken through scanLine(), never from the raw y
   assert.match(ANALOG_FRAGMENT, /phaseAt\(x, scanLine\(py\)\)/);
 });
+
+// ---- FOUND BY INDEPENDENT QA, PINNED HERE -------------------------------
+
+test("the reach covers the WIDEST WINDOW THE SCHEMA ALLOWS, not just the shipped looks", () => {
+  // QA found a legal in-range combination the engine accepted and then silently
+  // clamped: the lowest declared carrier against the highest declared bleed. The
+  // old test only checked the presets, so the corner of the declared space went
+  // unexamined. Offering a range you cannot render is the defect.
+  const p = defaultsOf("analog");
+  const worst = {
+    ...p,
+    subcarrierCycles: FAMILIES.analog.params.subcarrierCycles.min,
+    chromaBleed: FAMILIES.analog.params.chromaBleed.max,
+    dotCrawl: FAMILIES.analog.params.dotCrawl.min,
+  };
+  const w = analogWindows(worst, ANALOG_INTERNAL_WIDTH);
+  assert.equal(w.clamped, false,
+    `the declared parameter space needs ${Math.max(w.chromaTaps, w.lumaTaps)} taps; reach is ${ANALOG_TAP_REACH}`);
+});
+
+test("BOTH decode paths walk the same reach — there is no second, hidden limit", () => {
+  // QA found the chroma-delay branch looping over a hard-coded 8 while windows()
+  // reported clamping against the shared reach, so the handle described geometry
+  // that branch did not use, and shipped looks asking for 14-16 taps were being
+  // decoded through 8. A handle that overstates its own range is the same defect
+  // as one that overstates its own effect.
+  const loops = ANALOG_FRAGMENT.match(/for \(int k = -TAP_REACH; k <= TAP_REACH; \+\+k\)/g) || [];
+  assert.equal(loops.length, 2, "expected the main decode AND the chroma-delay decode to share the reach");
+  assert.equal(/for \(int k = -\d+; k <= \d+; \+\+k\)/.test(ANALOG_FRAGMENT), false,
+    "a numeric loop bound is a second limit that windows() cannot see");
+});
+
+test("the shipped looks that use chroma delay are decoded through their full window", () => {
+  // The specific consequence QA named: vhs and worn tape both request 14-16
+  // chroma taps AND use a non-zero chroma delay.
+  for (const name of ["vhs", "worn tape"]) {
+    const { params } = applyPreset("analog", name);
+    const w = analogWindows(params, ANALOG_INTERNAL_WIDTH);
+    if (params.chromaDelayX !== 0 || params.chromaDelayY !== 0) {
+      assert.ok(w.chromaTaps <= ANALOG_TAP_REACH,
+        `${name} uses chroma delay and needs ${w.chromaTaps} taps`);
+      assert.equal(w.clamped, false, `${name} must not be silently clamped`);
+    }
+  }
+});

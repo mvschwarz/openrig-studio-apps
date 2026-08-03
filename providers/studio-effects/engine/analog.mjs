@@ -35,7 +35,13 @@
 // a window is wider than the reach it is silently truncated, and truncating the
 // CHROMA window at a non-integer number of carrier periods demodulates luma into
 // colour. Measured on a white UI capture at 1920 wide: a solid yellow-green cast.
-export const ANALOG_TAP_REACH = 20;
+// It must cover the WIDEST WINDOW THE SCHEMA ALLOWS, not merely the widest one
+// the shipped looks ask for. Independent QA found a legal in-range combination —
+// the lowest carrier against the highest bleed — that the engine accepted, then
+// silently clamped, so the top of a declared knob quietly stopped meaning "more".
+// Offering a range you cannot render is the defect; 27 is what that corner needs
+// at the internal width, and a test asserts it rather than trusting this comment.
+export const ANALOG_TAP_REACH = 27;
 
 // Real NTSC resolves only ~440 luma pixels across a line, so rendering at 1080p
 // simulates detail the format could never carry. Capping the internal width is
@@ -212,7 +218,13 @@ void main() {
     // coordinates where the scan line would subtract.
     float dy = y + uChromaDelay.y;
     float ci = 0.0, cq = 0.0, cw2 = 0.0;
-    for (int k = -8; k <= 8; ++k) {
+    // THE SAME REACH AS THE MAIN PATH, and it did not used to be. This loop
+    // carried a hard-coded 8 while windows() reported clamping against the
+    // shared reach, so the handle described geometry this branch did not use —
+    // and shipped looks asking for 14-16 taps were quietly decoded through 8.
+    // Two limits for one property is the drift the shared constant exists to
+    // prevent; it simply was not applied here.
+    for (int k = -TAP_REACH; k <= TAP_REACH; ++k) {
       float fk = abs(float(k));
       float x = dx + float(k);
       float cur = composite(x, dy);

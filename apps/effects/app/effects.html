@@ -599,15 +599,22 @@
       }
     }
 
-    function buildAtlas() {
-      const key = `${params.tileSet}|${params.palette}`;
+    // TAKES THE LIVE VALUES, and the cache key is the reason this is a fix rather
+    // than a tidy-up. Keyed on the AUTHORED tileSet and palette, a curve driving
+    // either one updated the effective values, hit the unchanged key, and returned
+    // early — so the atlas was never rebuilt and the frame stayed pixel-identical
+    // while curveInfo() reported the parameter as driving with no notes. Found by
+    // independent QA in the family I had said I had not audited: the THIRD site
+    // with this shape, after the window computation and the scan path.
+    function buildAtlas(P) {
+      const key = `${P.tileSet}|${P.palette}`;
       if (atlasFor === key) return;
-      const fam = TILE.TILE_FAMILIES[params.tileSet];
-      const pal = TILE.PALETTES[params.palette] || TILE.PALETTES.paper;
+      const fam = TILE.TILE_FAMILIES[P.tileSet];
+      const pal = TILE.PALETTES[P.palette] || TILE.PALETTES.paper;
       const size = 32;
       atlas = [];
       for (let i = 0; i < fam.count; i++) {
-        const spec = TILE.tileSpec(params.tileSet, i, fam.count);
+        const spec = TILE.tileSpec(P.tileSet, i, fam.count);
         const c = document.createElement('canvas'); c.width = c.height = size;
         const x = c.getContext('2d', { willReadFrequently: true });
         drawTileSpec(x, spec, size, pal);
@@ -620,7 +627,7 @@
     function drawTiles() {
       if (!srcEl) return;
       const P = effective();
-      buildAtlas();
+      buildAtlas(P);
       const W = srcW, H = srcH;
       c2d.width = W; c2d.height = H;
       const ctx = c2d.getContext('2d', { willReadFrequently: true });
@@ -639,11 +646,24 @@
       // artifact and reads as a bug rather than as a look.
       const win = TILE.levelWindow(grid);
       if (levelsEma && isVideo && !win.degenerate) {
-        const a = 0.12;
-        win.lo = levelsEma.lo + (win.lo - levelsEma.lo) * a;
-        win.hi = levelsEma.hi + (win.hi - levelsEma.hi) * a;
-        win.span = win.hi - win.lo;
-        win.degenerate = win.span < 4;
+        // A CUT IS NOT MOTION, AND SMOOTHING THROUGH ONE IS THE ARTIFACT.
+        // Independent QA measured the old unconditional ease taking 1.3-1.5
+        // seconds to settle across a hard cut between two STATIC shots, with the
+        // first frames visibly brighter and detail resolving progressively — the
+        // classic auto-exposure pump, which reads as a bug rather than a look.
+        //
+        // Frame-to-frame the window barely moves; across a cut it jumps. So a
+        // jump is the signal: ease the small changes, SNAP the large ones. The
+        // threshold is in L* units, where the whole scale is 0-100.
+        const jump = Math.max(Math.abs(win.lo - levelsEma.lo), Math.abs(win.hi - levelsEma.hi));
+        if (jump < SCENE_CUT_LSTAR) {
+          const a = 0.12;
+          win.lo = levelsEma.lo + (win.lo - levelsEma.lo) * a;
+          win.hi = levelsEma.hi + (win.hi - levelsEma.hi) * a;
+          win.span = win.hi - win.lo;
+          win.degenerate = win.span < 4;
+        }
+        if (jump >= SCENE_CUT_LSTAR) cutCount++;
       }
       levelsEma = win.degenerate ? null : { lo: win.lo, hi: win.hi };
       grid = TILE.applyLevels(grid, win, P.autoLevels);
@@ -675,11 +695,22 @@
                     // this all one tile" needs to see the source's own range, not
                     // guess at it — and a degenerate window is a real answer.
                     levels: { lo: +win.lo.toFixed(1), hi: +win.hi.toFixed(1),
-                              span: +win.span.toFixed(1), flatSourceLeftAlone: win.degenerate } };
+                              span: +win.span.toFixed(1), flatSourceLeftAlone: win.degenerate,
+                              // How many times the mapping has SNAPPED rather than
+                              // eased. Rises once per cut; compare across two
+                              // samples to see whether one happened between them.
+                              cuts: cutCount } };
     }
     // Reset whenever the source changes: carrying one clip's tone window into
     // another's first frame is a visible flash.
-    let levelsEma = null;
+    // Above this jump in the measured window, the source has CUT rather than
+    // moved, and the tone mapping follows immediately instead of easing.
+    const SCENE_CUT_LSTAR = 12;
+    // A COUNTER, NOT A FLAG. The first shape of this was a per-frame boolean, and
+    // it was effectively unobservable — by the time anything reads it the renderer
+    // has drawn several more frames and reset it, so a checker sampling after a
+    // cut sees false and concludes nothing happened. A count survives sampling.
+    let levelsEma = null, cutCount = 0;
     let lastStats = null;
     // The sampling geometry actually sent to the GPU. Exposed for the same reason
     // stats() is: a checker should be able to ask what the engine did, not infer
