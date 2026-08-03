@@ -75,3 +75,39 @@ test("the instrument reports its own cost", () => {
   const v = buildView({ samples: [], boxes: ["a", "b", "c"] });
   assert.equal(v.cost.callsLastPoll, 3, "sampling spends the budget it measures; say so");
 });
+
+test("the remote script carries no shell brace-expansion", async () => {
+  // NOT a style rule. The probe script lives inside a JS template literal, and
+  // even String.raw interpolates a dollar-brace — so shell syntax like
+  // $ {VAR:-default} (no space, spelled apart here on purpose) is consumed by
+  // JavaScript before bash ever sees it. It does not misbehave at run time; the
+  // MODULE fails to parse, which took the whole suite down when I introduced it.
+  //
+  // Committed rather than checked once, because a control that is not re-runnable
+  // is a status line. Written with a constructed regex so this assertion cannot
+  // trip over its own pattern the way the warning comment above it once did.
+  const { _internals } = await import("../providers/studio-fleet/probe.mjs");
+  const braceExpansion = new RegExp("\\$" + "\\{[^}]*\\}");
+  assert.ok(_internals.REMOTE_PROBE.includes("$HOME"), "positive control: the script was not read");
+  assert.doesNotMatch(_internals.REMOTE_PROBE, braceExpansion,
+    "a dollar-brace here is eaten by the JS template literal before bash sees it");
+});
+
+test("a reading says which token source produced it", () => {
+  // Boxes do not hold the token the same way — measured: the demo box uses a
+  // studio-box secrets file, the box we actually ship has no secrets directory
+  // at all and authenticates through the ordinary claude credentials file. A
+  // reading you cannot attribute to a source cannot be compared across boxes.
+  const r = parseProbe(probe({ src: "file:claude-credentials", u5: "0.12", u7: "0.4" }));
+  assert.equal(r.sampled, true);
+  assert.equal(r.tokenSource, "file:claude-credentials");
+});
+
+test("a box with no token anywhere degrades honestly and names what was tried", () => {
+  // The failure that would have shipped: one hardcoded path, absent on the very
+  // box this app exists for, reporting nothing forever. Degrading is correct —
+  // degrading WITHOUT saying what was looked for is not actionable.
+  const r = parseProbe(JSON.stringify({ ok: false, reason: "no-token-source (tried env, studio-box secrets, claude credentials)" }));
+  assert.equal(r.sampled, false, "no token must never read as a sample");
+  assert.match(r.reason, /tried/, "the refusal must name where it looked");
+});
