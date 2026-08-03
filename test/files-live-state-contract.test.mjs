@@ -1,10 +1,11 @@
 // Live rig state must not die with whichever app happens to be installed.
 //
-// AUTHORSHIP NOTE, since this file changed hands: studio-qa wrote this to pin
+// AUTHORSHIP NOTE, since this file changed hands: it was written by an independent
+// QA reviewer to pin
 // the repair in a63a82e, which put the live-state companion on FILES after
-// retiring the AGENTS app had taken it away — Matti's landing page served an
-// invented rig with four invented seats under a green live signal on a box
-// running eleven real ones.
+// retiring the AGENTS app had taken it away — a deployed box's landing page served
+// an invented rig with four invented seats under a green live signal while eleven
+// real ones were running on it.
 //
 // The property below is THEIRS and is unchanged. Only its location moved: the
 // companion now belongs to the provider that ships live-state.mjs, so the

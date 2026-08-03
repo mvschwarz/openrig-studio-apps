@@ -59,7 +59,7 @@ function readContract() {
 }
 
 // AUTHORSHIP NOTE, since this moved under studio-video's provider lift: the
-// PROPERTIES below are studio-qa's and are unchanged. Only where the app records a
+// PROPERTIES below came from an independent QA review and are unchanged. Only where the app records a
 // route moved — `verbs` (a flat list doing double duty as both "what I need" and
 // "what my provider routes") became `calls` (what this app CALLS, with per-call
 // required-ness). Reading `verbs` here would now read `undefined` and every one of

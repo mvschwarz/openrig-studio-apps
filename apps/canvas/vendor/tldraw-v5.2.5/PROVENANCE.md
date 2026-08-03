@@ -27,8 +27,8 @@ passes `assetUrls.fonts` overrides pointing here so the box never calls cdn.tldr
 `LICENSE.md` (tldraw's own).
 
 LICENSE STATUS (founder research 2026-07-25): dev/localhost use is unkeyed and fine;
-PRODUCTION on an HTTPS non-localhost domain (bray.rigs.to) requires a license key —
+PRODUCTION on an HTTPS non-localhost domain requires a license key —
 noncommercial "hobby license" (approval + watermark) or the 100-day production trial.
-Founder action before box deploy; flagged via dev-driver3. A version bump changes the
+Requires action before any production deploy. A version bump changes the
 store schema — canvas.json docs migrate on next UI load; bump the dir name and the
 `version` field together.

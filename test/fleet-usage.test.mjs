@@ -54,7 +54,7 @@ test("the last good reading IS the reading, and a failed probe does not disturb 
 });
 
 test("a box whose probe carried no account still keeps its own reading", () => {
-  // THE LIVE 401 CASE. A failed probe often carries no org — matti's did — and
+  // THE LIVE 401 CASE. A failed probe often carries no org — the one measured live did not — and
   // the earlier shape looked the last-good reading up BY ORG, so it lost the
   // box's own history exactly when it was needed and rendered every column as a
   // dash while a good reading sat in the store. Keyed on the box now.
@@ -135,7 +135,7 @@ test("a box with no token anywhere degrades honestly and names what was tried", 
 });
 
 test("a rejected credential is not reported as a spent account", () => {
-  // MEASURED ON A REAL BOX, first live probe: matti's cached OAuth access token
+  // MEASURED ON A REAL BOX, first live probe: the box's cached OAuth access token
   // had expired minutes earlier (refresh token still valid, scopes correct), so
   // the probe got 401. If that renders like at-or-over-limit, the dashboard
   // argues for rotating AWAY from an account with full headroom — the same
