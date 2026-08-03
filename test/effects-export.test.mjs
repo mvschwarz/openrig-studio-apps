@@ -152,7 +152,40 @@ test("every texture bind selects its unit first", () => {
     sinceActivate = null;
   }
   assert.deepEqual(unowned, [],
-    `these binds do not select a unit of their own (lines ${unowned}) — each one writes into whichever unit the previous caller left active`);
+    `these binds do not select a unit of their own (lines ${unowned}).\n` +
+    `Each writes into whichever unit the previous caller left active.\n` +
+    `If one of these is an UNBIND (binding null): it still needs a unit. Clearing\n` +
+    `the wrong unit is the same defect as binding to it — that is why this fires on\n` +
+    `a pattern that looks harmless. Select the unit, do not delete this check.`);
+});
+
+// WHAT THIS GUARD CANNOT SEE, written down so nobody trusts it further than it
+// reaches. Knowing where a guard stops holding is worth more than a pass.
+//
+// IT READS SOURCE TEXT, AND TEXTUAL ORDER IS NOT EXECUTION ORDER. An activeTexture
+// inside a branch that does not run, a bind inside a loop with the activation
+// outside it, or an activation in a branch the bind does not share will all
+// satisfy this and still be wrong at runtime. It also cannot follow a bind reached
+// through an alias or a helper.
+//
+// Those are the honest boundary of any source-reading check, not defects in it.
+// The runtime evidence that the current code is correct comes from GL-level
+// traces in review, not from here — this exists to stop a NEW unguarded bind
+// being added, which is a different job.
+test("the binds this guard covers are straight-line, so its reading is sound today", () => {
+  // The limit above only bites if a bind sits under control flow. None does right
+  // now, and this fails if that changes — at which point the guard needs runtime
+  // evidence rather than a wider regex.
+  const lines = SURFACE.split("\n");
+  const risky = [];
+  lines.forEach((line, i) => {
+    if (!line.includes("bindTexture")) return;
+    const before = lines.slice(Math.max(0, i - 2), i).join(" ");
+    // an activation and a bind separated by a branch or loop opening
+    if (/\b(if|for|while)\s*\(/.test(before) && !before.includes("activeTexture")) risky.push(i + 1);
+  });
+  assert.deepEqual(risky, [],
+    `a bind sits under control flow (lines ${risky}); textual order no longer implies execution order there`);
 });
 
 test("the sampler units are named once rather than spelled out at each call", () => {
