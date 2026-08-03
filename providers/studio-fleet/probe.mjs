@@ -142,6 +142,34 @@ export function parseProbe(raw) {
 // this deliberately does not manage credentials, hosts files or tunnels; if ssh
 // to that name does not already work, that is a provisioning fact to report, not
 // something for a dashboard to paper over.
+//
+// ── THE UNIT OF SAMPLING IS THE HOST, NOT THE SEAT. Founder ruling, 2026-08-03.
+//
+// Sample ONE reading per harness per host, and never fan out across the agents
+// running on it. Every seat on a box authenticates from the same token file — its
+// login shell cats the same secret — so a second seat cannot report a different
+// account or a different utilisation. Polling five agents on one host buys nothing
+// and spends five times the budget this dashboard exists to protect.
+//
+// This function honours that STRUCTURALLY rather than by discipline: it opens one
+// ssh, runs one probe against the box's own credential, and never addresses a seat
+// at all. Keep it that way.
+//
+// IF A FUTURE READING GENUINELY NEEDS A SEAT — and codex is the live candidate,
+// because its usage figure goes stale and appears to need triggered activity before
+// it refreshes — then the founder's rule says WHICH seat: an IDLE one. A review
+// agent, or anything quiet for a long time. NEVER an orchestrator and never an
+// implementer; those are the seats doing the work you are trying to protect.
+//
+// AND WHATEVER YOU DO, DO NOT DRIVE A COMMAND INTO A SEAT'S PANE. `/status` inside a
+// Claude seat opens a panel that BLOCKS the agent until someone presses Esc, so a
+// monitor that types it parks the very seat it was measuring — silently, because a
+// parked seat still reports sessionStatus running: the daemon observes the session,
+// not what the TUI is displaying. A monitoring tool that can park its subject is
+// worse than no monitoring. A read-only-SOUNDING command can have a WRITE-like
+// effect on a TUI; the test is whether the pane is left accepting input, not what
+// the verb is called. (Distinct from `claude auth status --json`, which is a
+// harmless subprocess and never touches a pane — do not conflate the two.)
 export function probeBox(host, { timeoutMs = 45000 } = {}) {
   return new Promise((resolve) => {
     const started = Date.now();

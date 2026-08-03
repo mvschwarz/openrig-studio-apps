@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseProbe } from "../providers/studio-fleet/probe.mjs";
 import { buildView } from "../providers/studio-fleet/fleet-state.mjs";
+import fs from "node:fs";
 
 const probe = (o) => JSON.stringify({ ok: true, status: "200", org: "org-a", ...o });
 
@@ -148,4 +149,56 @@ test("a rejected credential is not reported as a spent account", () => {
   const spent = parseProbe(JSON.stringify({ ok: true, status: "429", u5: "", u7: "" }));
   assert.equal(spent.reason, "at-or-over-limit", "positive control: a real 429 still reads as spent");
   assert.equal(spent.authFailed, undefined, "a spent account is not an auth failure");
+});
+
+test("the probe never drives a command into a seat's pane", () => {
+  // FOUNDER RULING, 2026-08-03, from a real incident: `/status` inside a Claude seat
+  // opens a panel that BLOCKS the agent until someone presses Esc. A monitor that
+  // types it PARKS the seat it was measuring, and does so invisibly — a parked seat
+  // still reports sessionStatus running, because the daemon observes the session and
+  // not what the TUI is showing. A monitoring tool that can park its subject is worse
+  // than no monitoring.
+  //
+  // A comment cannot hold this: the tempting version of "get codex usage" is to type
+  // something into a seat and read the pane. So it is a test.
+  // COMMENTS ARE STRIPPED FIRST, and that is not tidiness. The warning explaining
+  // why /status must never be typed into a seat CONTAINS the string "/status", so a
+  // raw scan flags the very documentation of the property it is checking — a verifier
+  // that misfires on the description of its own rule is worse than none, because it
+  // fails toward looking-like-a-finding. Inspect code, never prose.
+  // TWO comment syntaxes, because this file embeds a shell script in a JS template
+  // literal and BOTH kinds of prose tripped this check while it was being written —
+  // first a // warning containing "/status", then a # warning containing "rig send".
+  // Twice, in the one test whose whole point is that prose is not code.
+  const strip = (t) => t
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "")
+    .replace(/^\s*#.*$/gm, "");
+  const src = ["probe.mjs", "fleet-state.mjs"]
+    .map((f) => strip(fs.readFileSync(new URL(`../providers/studio-fleet/${f}`, import.meta.url), "utf8")))
+    .join("\n");
+
+  assert.match(src, /execFile\("ssh"/, "positive control: the probe source was not read");
+  assert.ok(!/\/\/|\/\*/.test(src.split("\n").find((l) => l.includes("execFile")) ?? ""),
+    "positive control: comment stripping left code intact");
+  for (const forbidden of ["send-keys", "capture-pane", "tmux", "rig send", "/status"]) {
+    assert.ok(!src.includes(forbidden),
+      `${forbidden} addresses a live seat; sampling is per-HOST and must never touch a pane`);
+  }
+});
+
+test("sampling is one reading per host, not one per seat", () => {
+  // Same ruling, the other half. Every seat on a box authenticates from the same
+  // token file, so a second seat cannot report a different account or utilisation —
+  // fanning out buys nothing and spends the very budget this dashboard protects.
+  // Pinned as behaviour: many samples for one host collapse to exactly one row.
+  const samples = [
+    { host: "box-a", sampled: true, org: "org-a", used7d: 10, at: "2026-08-03T00:00:00Z" },
+    { host: "box-a", sampled: true, org: "org-a", used7d: 12, at: "2026-08-03T01:00:00Z" },
+    { host: "box-a", sampled: true, org: "org-a", used7d: 14, at: "2026-08-03T02:00:00Z" },
+  ];
+  const v = buildView({ samples, boxes: ["box-a"] });
+  assert.equal(v.boxes.length, 1, "a host is one row however many times it was sampled");
+  assert.equal(v.boxes[0].used7d, 14, "and the newest good reading is the reading");
+  assert.equal(v.cost.callsLastPoll, 1, "one host, one real API call — the cost the poll reports");
 });
