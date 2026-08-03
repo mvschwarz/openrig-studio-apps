@@ -77,6 +77,44 @@ export function luminanceGrid(imageData, cols, rows) {
   return out;
 }
 
+// SOURCE NORMALISATION, and it is the difference between a technique and a tool.
+//
+// Matching tiles against ABSOLUTE lightness assumes the source uses the whole
+// range. Real footage does not: a dark product photograph occupies the bottom of
+// the scale and a white UI capture the top, so every cell lands in one or two
+// tone buckets and the picture collapses to a single tile. Independent QA
+// measured the worst case — a dark photo rendered as ONE block covering 336
+// cells, with the subject simply gone, and raising contrast to its maximum did
+// not recover it, which is what proves the fault is the mapping rather than the
+// merge.
+//
+// PERCENTILES, NOT MIN AND MAX. One specular highlight or one black pixel would
+// otherwise define the whole window and normalise nothing. The default 2/98 pair
+// discards the outliers that carry no structure.
+export function levelWindow(grid, { lowPct = 2, highPct = 98 } = {}) {
+  if (!grid.length) return { lo: 0, hi: 100, span: 100, degenerate: true };
+  const s = Float32Array.from(grid).sort();
+  const at = (p) => s[Math.min(s.length - 1, Math.max(0, Math.round((p / 100) * (s.length - 1))))];
+  const lo = at(lowPct), hi = at(highPct);
+  // A GENUINELY FLAT SOURCE MUST NOT BE AMPLIFIED. Stretching a 2-unit span to
+  // the full ramp turns sensor noise into a picture — inventing structure that
+  // was never there is worse than showing the flat field honestly.
+  const span = hi - lo;
+  return { lo, hi, span, degenerate: span < 4 };
+}
+
+// Map a measured window onto the full ramp. `amount` at 0 leaves the source
+// alone, so the old absolute behaviour stays reachable rather than being removed.
+export function applyLevels(grid, win, amount = 1) {
+  if (win.degenerate || amount <= 0) return grid;
+  const out = new Float32Array(grid.length);
+  for (let i = 0; i < grid.length; i++) {
+    const stretched = ((grid[i] - win.lo) / win.span) * 100;
+    out[i] = Math.max(0, Math.min(100, grid[i] + (stretched - grid[i]) * amount));
+  }
+  return out;
+}
+
 // ADAPTIVE MERGE. A rectangle whose cells all sit within `tolerance` of their mean
 // becomes ONE tile. This is what separates the effect from a uniform grid of
 // stamps: flat regions go calm and large, detail stays fine, and the block

@@ -95,6 +95,8 @@ export const FAMILIES = {
                         says: "how many distinct tones — low is posterised" },
       tileVariety:    { type: "int", min: 1, max: 16, default: 6,
                         says: "distinct tiles per tone; 1 is rigid, high is lively" },
+      autoLevels:     { type: "float", min: 0, max: 1, default: 1,
+                        says: "spread the source's own darkest and lightest onto the full tile ramp — without it a dark photo or a white screen collapses to one tile" },
       contrast:       { type: "float", min: 0, max: 2, default: 1,
                         says: "applied before the tones are chosen" },
       outline:        { type: "bool", default: false, says: "draw the tile edges" },
@@ -103,10 +105,16 @@ export const FAMILIES = {
     presets: {
       "game boy":     { palette: "gameboy", tileSet: "solid", toneLevels: 4, adaptiveMerge: false, gridSize: 80 },
       "classic dither":{ tileSet: "bayer", palette: "mono", toneLevels: 2, adaptiveMerge: false, gridSize: 180 },
-      "newspaper":    { tileSet: "halftone", palette: "paper", toneLevels: 6, gridSize: 120 },
+      // Halftone's dot grid IS the look, so merging cells erases it — measured on
+      // a modern UI capture, merge collapsed 8,160 cells to 777 blocks and the
+      // topology went with them.
+      "newspaper":    { tileSet: "halftone", palette: "paper", toneLevels: 6, gridSize: 120, adaptiveMerge: false },
       "ascii":        { tileSet: "glyph", palette: "mono", toneLevels: 10, gridSize: 100, adaptiveMerge: false },
       "poster":       { tileSet: "geometric", palette: "ember", toneLevels: 12, mergeTolerance: 0.28, tileVariety: 8 },
-      "chunky":       { gridSize: 24, minBlockCells: 2, toneLevels: 8, mergeTolerance: 0.35 },
+      // Chunkiness comes from the GRID being coarse, not from merging on top of a
+      // coarse grid — with both, a low-key source merged to a single block and the
+      // subject disappeared entirely.
+      "chunky":       { gridSize: 24, minBlockCells: 2, toneLevels: 8, adaptiveMerge: false },
       "fine":         { gridSize: 160, mergeTolerance: 0.07, toneLevels: 48 },
     },
     guidance: [

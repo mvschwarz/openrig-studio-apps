@@ -336,6 +336,7 @@
     }
     async function useSource(rel) {
       stopVideo();
+      levelsEma = null;
       if (!rel) {
         const c = testFrame(); srcEl = c; isVideo = false;
         $('#vidctl').hidden = true; upload(c, c.width, c.height); return;
@@ -596,7 +597,22 @@
       const sx = small.getContext('2d', { willReadFrequently: true });
       sx.imageSmoothingEnabled = true;
       sx.drawImage(srcEl, 0, 0, cols, rows);
-      const grid = TILE.luminanceGrid(sx.getImageData(0, 0, cols, rows), cols, rows);
+      let grid = TILE.luminanceGrid(sx.getImageData(0, 0, cols, rows), cols, rows);
+
+      // NORMALISE BEFORE QUANTISING. Measured per frame, then smoothed across
+      // frames — an unsmoothed window recomputed every frame makes the whole
+      // image pump as the shot changes, which is the classic auto-exposure
+      // artifact and reads as a bug rather than as a look.
+      const win = TILE.levelWindow(grid);
+      if (levelsEma && isVideo && !win.degenerate) {
+        const a = 0.12;
+        win.lo = levelsEma.lo + (win.lo - levelsEma.lo) * a;
+        win.hi = levelsEma.hi + (win.hi - levelsEma.hi) * a;
+        win.span = win.hi - win.lo;
+        win.degenerate = win.span < 4;
+      }
+      levelsEma = win.degenerate ? null : { lo: win.lo, hi: win.hi };
+      grid = TILE.applyLevels(grid, win, params.autoLevels);
 
       if (params.contrast !== 1) {
         for (let i = 0; i < grid.length; i++) grid[i] = Math.max(0, Math.min(100, (grid[i] - 50) * params.contrast + 50));
@@ -620,8 +636,16 @@
       // An agent asking for "chunkier" needs to know whether it worked. The
       // originals give no such feedback, so an agent drives them blind.
       lastStats = { blocks: blocks.length, cells: cols * rows,
-                    meanBlockCells: +(blocks.reduce((a, b) => a + b.w * b.h, 0) / blocks.length).toFixed(2) };
+                    meanBlockCells: +(blocks.reduce((a, b) => a + b.w * b.h, 0) / blocks.length).toFixed(2),
+                    // What the tone mapping actually did. A driver asking "why is
+                    // this all one tile" needs to see the source's own range, not
+                    // guess at it — and a degenerate window is a real answer.
+                    levels: { lo: +win.lo.toFixed(1), hi: +win.hi.toFixed(1),
+                              span: +win.span.toFixed(1), flatSourceLeftAlone: win.degenerate } };
     }
+    // Reset whenever the source changes: carrying one clip's tone window into
+    // another's first frame is a visible flash.
+    let levelsEma = null;
     let lastStats = null;
     // The sampling geometry actually sent to the GPU. Exposed for the same reason
     // stats() is: a checker should be able to ask what the engine did, not infer

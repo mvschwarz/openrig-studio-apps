@@ -3,7 +3,8 @@
 // defect there, and each is silent if it regresses.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { lStar, luminanceGrid, planBlocks, pickTile, TILE_FAMILIES, PALETTES, tileSpec }
+import { lStar, luminanceGrid, planBlocks, pickTile, TILE_FAMILIES, PALETTES, tileSpec,
+         levelWindow, applyLevels }
   from "../providers/studio-effects/engine/tile.mjs";
 import { FAMILIES, applyPreset } from "../providers/studio-effects/engine/schema.mjs";
 
@@ -105,4 +106,71 @@ test("every family produces a spec across its whole range", () => {
       assert.ok(spec.t >= 0 && spec.t <= 1, `${id}[${i}] tone out of range`);
     }
   }
+});
+
+// ---- SOURCE NORMALISATION -------------------------------------------------
+// Added after an independent QA drive found the family renders successfully and
+// still erases the picture on real footage: matching against ABSOLUTE lightness
+// assumes a source that uses the whole range, and neither a dark photograph nor
+// a white screen does. Measured on real material — a low-key frame occupies
+// L* 0-50 and a modern UI capture L* 86-99.6.
+
+test("the level window is percentile-based, so one stray pixel cannot define it", () => {
+  // min/max would be defined entirely by the two outliers and normalise nothing.
+  const grid = new Float32Array(1000).fill(40);
+  grid[0] = 0; grid[999] = 100;
+  const w = levelWindow(grid);
+  assert.ok(w.lo > 0 && w.hi < 100, `outliers captured the window: ${w.lo}..${w.hi}`);
+});
+
+test("a genuinely flat source is left alone rather than amplified into noise", () => {
+  // Stretching a 2-unit span across the full ramp invents structure that was
+  // never in the source, which is worse than showing the flat field honestly.
+  const flat = new Float32Array(500).fill(50);
+  const w = levelWindow(flat);
+  assert.equal(w.degenerate, true);
+  const out = applyLevels(flat, w, 1);
+  assert.deepEqual(Array.from(out.slice(0, 3)), [50, 50, 50]);
+});
+
+test("a narrow real range is spread across the full tile ramp", () => {
+  // The low-key case: everything between 0 and 50 must reach the whole ramp, or
+  // every cell quantises into the bottom buckets and the subject disappears.
+  const grid = Float32Array.from({ length: 200 }, (_, i) => (i / 199) * 50);
+  const w = levelWindow(grid);
+  const out = applyLevels(grid, w, 1);
+  assert.ok(Math.max(...out) > 90, `top of range only reached ${Math.max(...out)}`);
+  assert.ok(Math.min(...out) < 10, `bottom of range only reached ${Math.min(...out)}`);
+});
+
+test("autoLevels at 0 is exactly the old absolute behaviour", () => {
+  // The previous mapping stays reachable rather than being removed, so a look
+  // that wanted it can still ask.
+  const grid = Float32Array.from({ length: 100 }, (_, i) => (i / 99) * 50);
+  const w = levelWindow(grid);
+  assert.deepEqual(Array.from(applyLevels(grid, w, 0)), Array.from(grid));
+});
+
+test("normalisation is monotonic — it must not reorder tones", () => {
+  // A tone mapping that swapped light and dark would still 'work' by every count
+  // and produce a negative of the picture.
+  const grid = Float32Array.from({ length: 100 }, (_, i) => 20 + (i / 99) * 30);
+  const out = applyLevels(grid, levelWindow(grid), 1);
+  for (let i = 1; i < out.length; i++) assert.ok(out[i] >= out[i - 1], `not monotonic at ${i}`);
+});
+
+test("the looks whose structure IS the grid do not merge cells away", () => {
+  // Halftone's dot grid and chunky's coarse grid are the look; merging on top of
+  // them collapsed a UI capture's topology and a dark photo's subject.
+  for (const name of ["newspaper", "chunky"]) {
+    assert.equal(FAMILIES.tile.presets[name].adaptiveMerge, false,
+      `${name} must not merge — its grid is the look`);
+  }
+});
+
+test("autoLevels is declared as a knob an agent can find and reach for", () => {
+  const spec = FAMILIES.tile.params.autoLevels;
+  assert.ok(spec, "autoLevels must be published in the schema");
+  assert.ok(spec.says.length > 20, "it needs to say what it does in plain words");
+  assert.equal(spec.default, 1, "normalisation is the sane default for real footage");
 });
