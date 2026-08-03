@@ -11,48 +11,8 @@
   "surface": {
     "entry": "app/cutdown.html",
     "path": "/surfaces/cutdown.html",
-    "glyph": "\u2702",
+    "glyph": "✂",
     "hint": "pick and trim takes"
-  },
-  "provider": {
-    "package": "@openrig/studio-cutdown",
-    "required": true,
-    "_note": "This app is a CLIENT of that provider. Installing the surface alone gets you an HTML file that 502s \u2014 the field rigs-to-apps v1 had no slot for, which is why media-manager was listed there and was not installable.",
-    "run": {
-      "entry": "cutdown-server.mjs",
-      "args": [
-        "--port",
-        "{{port}}",
-        "--footage",
-        "{{root:footage}}",
-        "--bundle",
-        "{{root:project}}"
-      ],
-      "companions": [
-        {
-          "label": "cut lane",
-          "entry": "watch-markers.mjs",
-          "args": [
-            "--footage",
-            "{{root:footage}}",
-            "--bundle",
-            "{{root:project}}"
-          ],
-          "_note": "The renderer the write verbs enqueue for. Without it stabilize and cut-retry accept work nothing performs \u2014 declared so it starts WITH the provider rather than being remembered."
-        }
-      ]
-    },
-    "serves": [
-      "/media/",
-      "/cutprev/",
-      "/cuts/"
-    ],
-    "_serves_note": "BYTE-route prefixes. A backend is not only its /api/ verbs \u2014 these were undeclared, so the front proxied only /api/* and clips listed but would not play.",
-    "supplies": [
-      "ffmpeg",
-      "ffprobe"
-    ],
-    "_supplies_note": "Binaries this provider SHIPS (ffmpeg-static/ffprobe-static), so the host does not need them. requires.binaries still declares the NEED \u2014 that stays legible and true; this says who satisfies it. Without the distinction the installer refuses a working install on any box without a system ffmpeg, which is most of them."
   },
   "roots": {
     "footage": {
@@ -62,16 +22,33 @@
       "required": true
     }
   },
-  "verbs": [
-    "/api/clips",
-    "/api/cuts",
-    "/api/markers",
-    "/api/pick",
-    "/api/cut-note",
-    "/api/cut-delete",
-    "/api/cut-retry",
-    "/api/stabilize"
-  ],
+  "calls": {
+    "/api/clips": {
+      "required": true
+    },
+    "/api/cuts": {
+      "required": true
+    },
+    "/api/markers": {
+      "required": true
+    },
+    "/api/pick": {
+      "required": true
+    },
+    "/api/cut-note": {
+      "required": true
+    },
+    "/api/cut-delete": {
+      "required": true
+    },
+    "/api/cut-retry": {
+      "required": true
+    },
+    "/api/stabilize": {
+      "required": true
+    }
+  },
+  "_calls_note": "What this app CALLS — a different fact from what a provider ANSWERS. It was `verbs`, a flat list doing double duty: authored by the app to mean a dependency, consumed by the composer as provider routing. Every one is required: cutdown without its verbs is a picture of a video editor.",
   "vendor": [],
   "requires": {
     "binaries": [
@@ -82,9 +59,14 @@
       "scale",
       "concat"
     ],
-    "_filters_note": "REQUIRED vs PREFERRED, and the split is the point. scale/concat are load-bearing: no cut renders without them. drawtext only writes the LABEL on a placeholder slate, and the assembler now renders an unlabelled slate and reports the degradation instead of failing the export. So drawtext must NOT block an install \u2014 the Linux ffmpeg-static build (7.0.2) lacks it while the macOS one (6.0) has it, and losing a caption on an unshot beat is not worth refusing a working studio.",
+    "_filters_note": "REQUIRED vs PREFERRED, and the split is the point. scale/concat are load-bearing: no cut renders without them. drawtext only writes the LABEL on a placeholder slate, and the assembler now renders an unlabelled slate and reports the degradation instead of failing the export. So drawtext must NOT block an install — the Linux ffmpeg-static build (7.0.2) lacks it while the macOS one (6.0) has it, and losing a caption on an unshot beat is not worth refusing a working studio.",
     "ffmpeg_filters_preferred": [
       "drawtext"
     ]
+  },
+  "provider": {
+    "package": "@openrig/studio-cutdown",
+    "required": true,
+    "_note": "A REFERENCE, not a run spec. How to start this backend, the CUT LANE COMPANION that renders what its write verbs enqueue, and the byte routes it serves are declared by the provider itself in providers/studio-cutdown/provider.json. The companion mattered most: while it lived here, retiring this app would have taken the renderer with it and left the write verbs accepting work nothing performs — the same shape that cost this repo live rig state when the AGENTS app was retired."
   }
 }
