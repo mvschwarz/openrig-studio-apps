@@ -115,6 +115,11 @@
     let PROGRAM = null, params = {}, srcTex = null, pathTex = null;
     let srcW = 0, srcH = 0;
     let TILE = null, ANALOG = null, CURVES = null, atlas = [], atlasFor = '';
+    // THE SAMPLER UNITS, NAMED ONCE. Texture bindings are per-unit GLOBAL state,
+    // so a helper that binds without choosing its unit writes into a variable it
+    // does not own. Two call sites agreeing on a bare 0 and 1 is how one of them
+    // ended up on the wrong unit with nothing looking odd.
+    const UNIT_SRC = 0, UNIT_PATH = 1;
     // A parameter as a function of time. Null until something sets one, so the
     // app is a still-image tool by default and a motion-graphics one on request.
     let curveSpec = null, lastCurve = null;
@@ -343,6 +348,11 @@
       canvas.width = Math.max(2, Math.round(w * scale));
       canvas.height = Math.max(2, Math.round(h * scale));
       if (!srcTex) srcTex = gl.createTexture();
+      // The SECOND instance of the same shape, found by asking where else it is
+      // produced rather than only whether the reported symptom was gone. This one
+      // never bit because of the order things happen to run in today — which is
+      // exactly why it would have bitten later, on someone else's change.
+      gl.activeTexture(gl.TEXTURE0 + UNIT_SRC);
       gl.bindTexture(gl.TEXTURE_2D, srcTex);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -445,6 +455,19 @@
       const data = new Uint8Array(r.path);
       if (!pathTex) pathTex = gl.createTexture();
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      // SELECT THE UNIT BEFORE BINDING, or this uploads over whoever is active.
+      //
+      // A GL trace found the cost: the caller binds the SOURCE on unit 0, then
+      // calls this, which bound the path texture with no activeTexture — landing
+      // it on unit 0 and overwriting the source. Both samplers then read the path
+      // texture and the frame came out magenta. A cache-hit redraw skipped this
+      // upload entirely, so unit 0 survived and the SAME parameters rendered
+      // correctly the second time — which is why it looked like a race and
+      // survived a serialisation fix.
+      //
+      // Texture bindings are per-unit global state; a helper that binds without
+      // choosing its unit is writing into a variable it does not own.
+      gl.activeTexture(gl.TEXTURE0 + UNIT_PATH);
       gl.bindTexture(gl.TEXTURE_2D, pathTex);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -462,6 +485,9 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, r.length, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+      // Leave the active unit as it was found, so callers cannot depend on our
+      // side effects and later edits cannot silently inherit them.
+      gl.activeTexture(gl.TEXTURE0 + UNIT_SRC);
       pathKey = key;
     }
 
@@ -522,7 +548,7 @@
           gl.viewport(0, 0, canvas.width, canvas.height);
           gl.useProgram(PROGRAM);
           const u = (n) => gl.getUniformLocation(PROGRAM, n);
-          gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, srcTex); gl.uniform1i(u('uSrc'), 0);
+          gl.activeTexture(gl.TEXTURE0 + UNIT_SRC); gl.bindTexture(gl.TEXTURE_2D, srcTex); gl.uniform1i(u('uSrc'), UNIT_SRC);
 
           if (familyId === 'analog') {
             gl.uniform2f(u('uRes'), canvas.width, canvas.height);
@@ -560,7 +586,7 @@
           }
 
           await refreshPath(P);
-          gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, pathTex); gl.uniform1i(u('uPath'), 1);
+          gl.activeTexture(gl.TEXTURE0 + UNIT_PATH); gl.bindTexture(gl.TEXTURE_2D, pathTex); gl.uniform1i(u('uPath'), UNIT_PATH);
           gl.uniform2f(u('uRes'), canvas.width, canvas.height);
           gl.uniform2f(u('uAxis'), P.scanAxis === 'horizontal' ? 1 : 0, P.scanAxis === 'horizontal' ? 0 : 1);
           gl.uniform1f(u('uAmp'), 1);

@@ -112,3 +112,44 @@ test("save-frame reads the live canvas rather than assuming one renderer", () =>
   assert.match(SURFACE, /const liveCanvas = \(\) =>[\s\S]{0,120}c2d : canvas;/);
   assert.match(SURFACE, /function frameDataUrl\(\) \{ return liveCanvas\(\)\.toDataURL/);
 });
+
+test("every texture bind selects its unit first", () => {
+  // FOUND BY A GL TRACE IN REVIEW, and it is the class rather than the instance.
+  // Texture bindings are per-unit GLOBAL state. refreshPath() bound the path
+  // texture with no activeTexture, so it landed on whichever unit the caller had
+  // left active — unit 0, holding the SOURCE — and both samplers then read the
+  // path texture. The frame came out magenta.
+  //
+  // It self-healed on redraw, because an unchanged path key skips the upload and
+  // leaves unit 0 intact. FAILS ONCE, RECOVERS ON REPEAT, ONLY ON THE FIRST DRAW
+  // AFTER A CHANGE is the signature of a race, which is why it survived a
+  // serialisation fix aimed at the wrong cause.
+  const lines = SURFACE.split("\n");
+  const unguarded = [];
+  lines.forEach((line, i) => {
+    if (!line.includes("bindTexture")) return;
+    const window = lines.slice(Math.max(0, i - 3), i + 1).join("\n");
+    if (!window.includes("activeTexture")) unguarded.push(i + 1);
+  });
+  assert.deepEqual(unguarded, [],
+    `bindTexture without selecting a unit writes into state it does not own (lines ${unguarded})`);
+});
+
+test("the sampler units are named once rather than spelled out at each call", () => {
+  // Two call sites agreeing on a bare 0 and 1 is how one of them ended up on the
+  // wrong unit with nothing looking odd.
+  assert.match(SURFACE, /const UNIT_SRC = 0, UNIT_PATH = 1;/);
+  assert.match(SURFACE, /gl\.uniform1i\(u\('uSrc'\), UNIT_SRC\)/);
+  assert.match(SURFACE, /gl\.uniform1i\(u\('uPath'\), UNIT_PATH\)/);
+});
+
+test("uploading the path leaves the active unit as it found it", () => {
+  // So a caller cannot depend on our side effects, and a later edit cannot
+  // silently inherit them.
+  const fn = SURFACE.slice(SURFACE.indexOf("async function refreshPath("),
+                           SURFACE.indexOf("let frameCounter"));
+  assert.ok(fn.length > 200, "refreshPath body not located");
+  assert.match(fn, /gl\.activeTexture\(gl\.TEXTURE0 \+ UNIT_PATH\);/, "must select its own unit");
+  assert.match(fn, /gl\.activeTexture\(gl\.TEXTURE0 \+ UNIT_SRC\);\s*\n\s*pathKey = key;/,
+    "and restore the caller's before returning");
+});
