@@ -123,56 +123,39 @@ test("save-frame reads the live canvas rather than assuming one renderer", () =>
 // and blanks everything that is not executable code, preserving length and line
 // breaks so reported line numbers stay true.
 //
-// 🛑 TEMPLATE LITERALS ARE NO LONGER SPECIAL-CASED, AND THAT DELETED SIX ROUNDS
-// OF MACHINERY. This scanner used to blank template bodies whole, which created a
-// blind spot inside `${...}`, which needed an interpolation walker, which needed
-// its own control, which needed a body-level backstop, which needed an
-// await/yield absence assertion — and review defeated each in turn, finally with
-// a compound that ended a recorded template body early and hid an executing bind.
+// 🛑 THE FRAME WAS WRONG FOR SIX ROUNDS, AND FIXING IT DELETED THE MACHINERY.
+// This scanner used to blank template bodies WHOLE — text and `${...}` alike —
+// which created a blind spot inside the interpolation, which needed a walker,
+// which needed its own control, which needed a body-level backstop, which needed
+// an await/yield absence assertion. Review defeated each in turn.
 //
-// THE PREMISE UNDER ALL OF IT WAS FALSE. The comment justifying the blanking said
-// "the shader lives in one of those, so treating it as code would scan GLSL as
-// JavaScript." MEASURED ON THE ONLY FILE THIS SCANNER IS EVER POINTED AT:
-//   #version / void main / gl_FragColor / gl_Position / precision / varying — ZERO
-//   19 template bodies, ZERO multi-line, longest 101 chars
-//   none contains `//`, `/*`, or the text of a texture call
-// The shaders are FETCHED from /api/effects/shader; the real GLSL lives in
+// THE PREMISE UNDER ALL OF IT: "the shader lives in a template literal, so
+// treating bodies as code would scan GLSL as JavaScript." It was wrong TWICE.
+//
+// WRONG ONCE — re-measured independently on the only file this scanner is pointed
+// at: #version / void main / gl_FragColor / gl_Position / precision / varying all
+// ZERO; 19 template bodies, ZERO multi-line, longest 101 chars. The shaders are
+// FETCHED from /api/effects/shader and the real GLSL lives in
 // providers/studio-effects/engine/*.mjs, which this scanner never opens.
 //
-// So the blanking protected against scanning GLSL as JavaScript in a file with no
-// GLSL, and every mechanism built on top of it was defending a blind spot that
-// only existed because of it. Scanning template bodies as ordinary code — which
-// is what they are here — makes the whole class stop existing rather than be
-// defended against. That is the shape that has worked in every round that stuck.
+// WRONG TWICE, and this is the part that mattered: even if a shader WERE embedded
+// it would be template TEXT. GLSL is not written inside a dollar-brace. So
+// blanking TEXT is the whole of what protecting GLSL ever required, and blanking
+// INTERPOLATIONS was never load-bearing for it — while an interpolation is the one
+// part of a template that IS executable code. The blind spot existed because the
+// only executable part was the part being discarded.
 //
-// ⚠️ THE LIMIT, TIED TO THE SURFACE RATHER THAN TO A MECHANISM: this holds because
-// THIS file's templates are short, single-line and shader-free. The engine modules
-// DO carry GLSL in template literals. If this guard is ever pointed at them,
-// blanking template bodies becomes correct again and this deletion becomes wrong.
-// It is a fact about what is scanned, not a property of the scanner.
+// SO: template TEXT is blanked, `${...}` is walked AS CODE in the same pass. No
+// companion, no span to find, no gap held by prose. Review's compound stops
+// existing rather than being defended against.
 //
-// That gap is held by a TEST, not by a sentence. The first draft of this comment
-// said "none is", which was true when measured and is exactly the status line
-// that goes stale silently on the day someone adds one.
-//
-// ONE SCANNER, TWO OUTPUTS — AND THAT IS THE FIX FOR A REAL DEFECT, not tidiness.
-// This was two functions: this one lexed properly, and a separate interpolation
-// walker counted braces WITHOUT lexing. They drifted exactly where you would
-// expect, and review found it:
-//
-//     fail(`could not start: ${"}", gl.bindTexture(gl.TEXTURE_2D, pathTex), e.message}`);
-//
-// The `}` inside an ordinary JavaScript STRING ended the walker's span early, so
-// the live bind fell outside the recorded interpolation and vanished from both
-// checks — while the `>= 5` control stayed green, because the file's other
-// interpolations kept the count up. Review confirmed it executes, not merely
-// resembles a call.
-//
-// Two places computing one property WILL diverge; that is this rig's
-// one-discovery-function rule, and I wrote the second walker anyway one commit
-// after citing the rule. Now a single walk produces the blanked code AND the
-// interpolation spans, so they cannot disagree: the same string, comment, regex
-// and nested-template handling delimits both.
+// MEASURED AGAINST THE ALTERNATIVE, because I had already committed the blunter
+// version — delete the template case entirely and scan text as code too. That one
+// HIDES A BIND: a template whose text contains `//` swallows the rest of the line,
+// including a real bind after it, and it passed. This walk catches it. The blunt
+// version's stated limit ("wrong only if pointed at the engine files") was itself
+// too generous — it bites on this surface the moment anyone writes a template
+// containing a slash-slash.
 function scan(src) {
   const n = src.length;
   const out = src.split("");
@@ -236,12 +219,43 @@ function scan(src) {
     return i;
   };
   const blankBody = (i, end) => { i++; while (i < end - 1) blank(i++); return end; };
+  // OPTION D: a template's TEXT is blanked; its ${...} is CODE and is walked as
+  // code in the same pass. GLSL, if ever embedded, is TEXT — it is never written
+  // inside a dollar-brace — so blanking text is the whole of what protecting GLSL
+  // required, and blanking interpolations never was.
+  function walkTemplate(i) {
+    blank(i); i++;                                  // opening backtick
+    while (i < n && src[i] !== "`") {
+      if (src[i] === "\\") { blank(i); blank(i + 1); i += 2; continue; }
+      if (src[i] === "$" && src[i + 1] === "{") {
+        blank(i); blank(i + 1); i += 2;             // ${ is not code
+        let depth = 0;
+        while (i < n) {
+          const c = src[i], d2 = src[i + 1];
+          if (c === "}" && depth === 0) { blank(i); i++; break; }
+          if (c === "{") depth++;
+          else if (c === "}") depth--;
+          else if (c === "/" && d2 === "/") { const e = skipLineComment(i); while (i < e) blank(i++); continue; }
+          else if (c === "/" && d2 === "*") { const e = skipBlockComment(i); while (i < e) blank(i++); continue; }
+          else if (c === '"' || c === "'") { i = blankBody(i, skipString(i)); continue; }
+          else if (c === "`") { i = walkTemplate(i); continue; }
+          else if (c === "/" && opensRegex(i)) { i = blankBody(i, skipRegex(i)); continue; }
+          i++;                                      // ordinary code character: KEPT
+        }
+        continue;
+      }
+      blank(i); i++;                                // template text: blanked
+    }
+    if (i < n) { blank(i); i++; }                   // closing backtick
+    return i;
+  }
   let i = 0;
   while (i < n) {
     const c = src[i], d = src[i + 1];
     if (c === "/" && d === "/") { const e = skipLineComment(i); while (i < e) blank(i++); continue; }
     if (c === "/" && d === "*") { const e = skipBlockComment(i); while (i < e) blank(i++); continue; }
     if (c === '"' || c === "'") { i = blankBody(i, skipString(i)); continue; }
+    if (c === "`") { i = walkTemplate(i); continue; }
     if (c === "/" && opensRegex(i)) { i = blankBody(i, skipRegex(i)); continue; }
     i++;
   }
