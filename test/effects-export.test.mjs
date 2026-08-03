@@ -113,50 +113,86 @@ test("save-frame reads the live canvas rather than assuming one renderer", () =>
   assert.match(SURFACE, /function frameDataUrl\(\) \{ return liveCanvas\(\)\.toDataURL/);
 });
 
-test("every texture bind selects its unit first", () => {
-  // FOUND BY A GL TRACE IN REVIEW, and it is the class rather than the instance.
-  // Texture bindings are per-unit GLOBAL state. refreshPath() bound the path
-  // texture with no activeTexture, so it landed on whichever unit the caller had
-  // left active — unit 0, holding the SOURCE — and both samplers then read the
-  // path texture. The frame came out magenta.
+// STRIP COMMENTS BEFORE SCANNING. Review commented out all four binds and the
+// guard still passed: four textual occurrences remained, and the check counted
+// them. A lexical guard that reads its own dead code is measuring the file, not
+// the program.
+const CODE = SURFACE
+  .replace(/\/\*[\s\S]*?\*\//g, " ")
+  .split("\n").map((l) => l.replace(/\/\/.*$/, "")).join("\n");
+
+test("every direct texture bind is preceded by an activation it consumes", () => {
+  // WHAT THIS IS, STATED HONESTLY BECAUSE REVIEW MEASURED IT: this enforces a
+  // CONVENTION — direct gl.activeTexture / gl.bindTexture calls, alternating —
+  // and it does NOT prove runtime ownership. Independent review demonstrated both
+  // directions with GL traces:
   //
-  // It self-healed on redraw, because an unchanged path key skips the upload and
-  // leaves unit 0 intact. FAILS ONCE, RECOVERS ON REPEAT, ONLY ON THE FIRST DRAW
-  // AFTER A CHANGE is the signature of a race, which is why it survived a
-  // serialisation fix aimed at the wrong cause.
+  //   ACCEPTED BUT WRONG AT RUNTIME: `if (false) gl.activeTexture(...)` before a
+  //   bind, and one activation outside a loop whose body binds twice. The trace
+  //   showed the second iteration binding the path texture onto unit 0, exactly
+  //   the original corruption. Textual order is not execution order, and textual
+  //   cardinality is not runtime cardinality.
   //
-  // THE FIRST VERSION OF THIS TEST WAS DEFEATED IN REVIEW, and the reason is worth
-  // more than the fix: it asked whether ANY activeTexture appeared within three
-  // preceding LINES. So an unguarded bind placed immediately after a guarded one
-  // inherited its neighbour's evidence and passed. That is a PROXY for the
-  // property — proximity to an activation — rather than the property itself, and
-  // a test that pins a proxy is a status line that reports on something adjacent
-  // to what it claims.
+  //   REJECTED BUT RIGHT AT RUNTIME: the activation moved into a hoisted helper.
+  //   Traced correct — and this guard fails it, because it cannot follow calls.
   //
-  // THE PROPERTY IS ORDINAL, NOT POSITIONAL: between any two consecutive binds
-  // there must be an activation, because each bind needs a unit selected for IT.
-  // Distance is irrelevant; order is everything.
-  const calls = [...SURFACE.matchAll(/gl\.(activeTexture|bindTexture)\s*\(/g)]
+  // The convention is still worth enforcing: it keeps the property AUDITABLE by
+  // reading, and it caught both real defects. But the runtime evidence is the GL
+  // trace, and this cannot replace it.
+  // FOLLOW ONE LEVEL OF INDIRECTION, because rejecting correct code is how a guard
+  // dies. Review demonstrated it: an activation factored into a hoisted helper is
+  // CORRECT at runtime — traced, source on unit 0 and path on unit 1 — and the
+  // direct-call form failed it. Someone will do that legitimately, hit this under
+  // deadline, and delete the check rather than restructure.
+  //
+  // So a local function whose body itself calls gl.activeTexture COUNTS as an
+  // activation. That covers the realistic factoring without pretending to resolve
+  // arbitrary indirection: a helper calling a helper is still outside this, and
+  // the message says so rather than leaving it to be discovered.
+  const activators = new Set();
+  const declRe = /(?:function\s+(\w+)\s*\(|(?:const|let|var)\s+(\w+)\s*=\s*(?:\([^)]*\)|\w+)\s*=>)/g;
+  for (const d of CODE.matchAll(declRe)) {
+    const name = d[1] || d[2];
+    if (!name) continue;
+    if (/gl\.activeTexture\s*\(/.test(CODE.slice(d.index, d.index + 400))) activators.add(name);
+  }
+  const activatorCall = activators.size
+    ? new RegExp(`\\b(?:${[...activators].join("|")})\\s*\\(`, "g") : null;
+
+  const calls = [...CODE.matchAll(/gl\.(activeTexture|bindTexture)\s*\(/g)]
     .map((m) => ({ kind: m[1], at: m.index }));
-  const lineOf = (idx) => SURFACE.slice(0, idx).split("\n").length;
+  if (activatorCall) {
+    for (const m of CODE.matchAll(activatorCall)) {
+      // the declaration itself is not a call site
+      if (/(?:function|const|let|var)\s+$/.test(CODE.slice(Math.max(0, m.index - 12), m.index))) continue;
+      calls.push({ kind: "activeTexture", at: m.index });
+    }
+    calls.sort((a, b) => a.at - b.at);
+  }
+  const lineOf = (idx) => CODE.slice(0, idx).split("\n").length;
 
   assert.ok(calls.filter((c) => c.kind === "bindTexture").length >= 3,
     "expected the source, path and draw-time binds to be present");
 
   const unowned = [];
-  let sinceActivate = null;            // the last activation seen, or null if consumed
+  let pending = null;              // an activation not yet claimed by a bind
   for (const c of calls) {
-    if (c.kind === "activeTexture") { sinceActivate = c.at; continue; }
-    // a bind CONSUMES the activation before it; the next bind needs its own
-    if (sinceActivate === null) unowned.push(lineOf(c.at));
-    sinceActivate = null;
+    if (c.kind === "activeTexture") { pending = c.at; continue; }
+    if (pending === null) unowned.push(lineOf(c.at));
+    pending = null;                // a bind CONSUMES it; the next needs its own
   }
   assert.deepEqual(unowned, [],
     `these binds do not select a unit of their own (lines ${unowned}).\n` +
     `Each writes into whichever unit the previous caller left active.\n` +
-    `If one of these is an UNBIND (binding null): it still needs a unit. Clearing\n` +
-    `the wrong unit is the same defect as binding to it — that is why this fires on\n` +
-    `a pattern that looks harmless. Select the unit, do not delete this check.`);
+    `\n` +
+    `IF THIS IS AN UNBIND (binding null): it still needs a unit. Clearing the\n` +
+    `wrong unit is the same defect as binding to it — that is why this fires on\n` +
+    `something that looks harmless. Select the unit; do not delete the check.\n` +
+    `\n` +
+    `IF YOU MOVED THE ACTIVATION INTO A HELPER: a local function that itself\n` +
+    `calls gl.activeTexture IS recognised. A helper calling ANOTHER helper is not\n` +
+    `— this follows one level, deliberately. Inline it, flatten the helper, or\n` +
+    `change this guard and say what replaces the audit. Do not just delete it.`);
 });
 
 // WHAT THIS GUARD CANNOT SEE, written down so nobody trusts it further than it
