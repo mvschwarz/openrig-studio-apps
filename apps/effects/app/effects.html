@@ -25,6 +25,10 @@
       border: 1px solid var(--line); border-radius: 8px; background: #06080c; overflow: hidden;
     }
     canvas { max-width: 100%; max-height: 100%; display: block; }
+    /* An explicit display wins over the `hidden` attribute, which the UA stylesheet
+       implements as display:none. Without this the two renderers draw side by side
+       and it reads as one effect producing a split image. */
+    canvas[hidden], video[hidden] { display: none; }
 
     .panel { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
     .card { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; }
@@ -56,10 +60,15 @@
 </head>
 <body>
   <div class="wrap">
-    <div class="stage"><canvas id="gl"></canvas></div>
+    <div class="stage">
+      <canvas id="gl"></canvas>
+      <canvas id="c2d" hidden></canvas>
+      <video id="vid" hidden playsinline muted loop></video>
+    </div>
     <div class="panel">
       <div class="card">
-        <div class="eyebrow">Scanner</div><h1>Effects</h1>
+        <div class="eyebrow" id="eyebrow">Effects</div><h1>Effects</h1>
+        <select id="family" style="margin-top:8px"></select>
         <p class="note" id="summary"></p>
       </div>
 
@@ -70,6 +79,8 @@
           <button class="ghost" id="reload" title="reload the source list">↻</button>
         </div>
         <p class="note" id="srcnote"></p>
+        <div id="vidctl" hidden style="margin-top:8px"><button id="play">play</button>
+          <span class="note" id="vidnote"></span></div>
       </div>
 
       <div class="card">
@@ -96,8 +107,12 @@
     const gl = canvas.getContext('webgl2', { alpha: false, preserveDrawingBuffer: true });
     if (!gl) fail('WebGL2 is not available in this browser, so nothing can render here.');
 
-    let FAMILY = null, PROGRAM = null, params = {}, srcTex = null, pathTex = null;
+    let ALL = null, FAMILY = null, familyId = 'scan';
+    let PROGRAM = null, params = {}, srcTex = null, pathTex = null;
     let srcW = 0, srcH = 0;
+    let TILE = null, atlas = [], atlasFor = '';
+    let srcEl = null, isVideo = false, videoLoop = null;
+    const c2d = $('#c2d'), vid = $('#vid');
 
     // TESTABILITY HANDLES. An automated check — or an agent driving this from the
     // sidebar — should read state from here rather than scraping the DOM or
@@ -107,23 +122,47 @@
       get ready() { return Boolean(PROGRAM && srcTex); },
       set: (patch) => { Object.assign(params, patch); syncInputs(); draw(); return { ...params }; },
       preset: (name) => applyPreset(name),
-      families: () => FAMILY,
+      families: () => ALL,
+      family: (id) => { if (id) { familyId = id; $('#family').value = id; return useFamily(); } return familyId; },
+      stats: () => lastStats,
       frameHash: () => frameHash(),
     };
 
     async function boot() {
       try {
-        const fams = await (await fetch('/api/effects/families')).json();
-        FAMILY = fams.families.scan;
-        $('#summary').textContent = FAMILY.summary;
+        ALL = (await (await fetch('/api/effects/families')).json()).families;
+        TILE = await import('/api/effects/engine/tile.mjs');
+        const sel = $('#family');
+        sel.innerHTML = '';
+        for (const [id, f] of Object.entries(ALL)) {
+          const o = document.createElement('option'); o.value = id; o.textContent = f.name; sel.appendChild(o);
+        }
+        sel.value = familyId;
+        sel.addEventListener('change', async () => { familyId = sel.value; await useFamily(); });
         const sh = await (await fetch('/api/effects/shader?family=scan')).json();
         PROGRAM = build(sh.vertex, sh.fragment);
-        buildControls();
-        applyDefaults();
+        await useFamily();
         await loadSources();
         await useSource('');
         say('ready');
       } catch (e) { fail(`could not start: ${e.message}`); }
+    }
+
+    // Switching family swaps BOTH the control set and the renderer. The two
+    // families do not share a rendering approach on purpose: scan is a per-pixel
+    // gather that belongs on the GPU, tile is a few hundred independent block draws
+    // that does not. Forcing one path on both would cost performance in one
+    // direction and complexity in the other.
+    async function useFamily() {
+      FAMILY = ALL[familyId];
+      $('#eyebrow').textContent = FAMILY.name;
+      $('#summary').textContent = FAMILY.summary;
+      const gpu = FAMILY.engine === 'webgl2';
+      canvas.hidden = !gpu; c2d.hidden = gpu;
+      buildControls();
+      applyDefaults();
+      atlasFor = '';
+      draw();
     }
 
     function compile(type, src) {
@@ -196,7 +235,7 @@
       // the surface, to an agent, and to a headless render.
       const r = await (await fetch('/api/effects/resolve', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ family: 'scan', preset: name }),
+        body: JSON.stringify({ family: familyId, preset: name }),
       })).json();
       if (!r.ok) { fail(r.error || 'preset failed'); return; }
       params = r.params; syncInputs(); draw(); say(`look: ${name}`);
@@ -251,14 +290,53 @@
       } catch (e) { $('#srcnote').textContent = `could not list sources: ${e.message}`; }
     }
     async function useSource(rel) {
-      if (!rel) { const c = testFrame(); upload(c, c.width, c.height); return; }
+      stopVideo();
+      if (!rel) {
+        const c = testFrame(); srcEl = c; isVideo = false;
+        $('#vidctl').hidden = true; upload(c, c.width, c.height); return;
+      }
+      if (/\.(mp4|mov|webm|m4v)$/i.test(rel)) return useVideo(rel);
+      $('#vidctl').hidden = true; isVideo = false;
       await new Promise((res, rej) => {
         const im = new Image();
-        im.onload = () => { upload(im, im.naturalWidth, im.naturalHeight); res(); };
+        im.onload = () => { srcEl = im; upload(im, im.naturalWidth, im.naturalHeight); res(); };
         im.onerror = () => rej(new Error(`could not load ${rel}`));
         im.src = `/media/${encodeURIComponent(rel)}`;
       }).catch((e) => fail(e.message));
     }
+
+    // VIDEO. The whole point of the exercise is making ordinary recent footage look
+    // old, which is not testable on stills — so a video is just another texture
+    // source, re-uploaded per frame.
+    function stopVideo() {
+      if (videoLoop) { cancelAnimationFrame(videoLoop); videoLoop = null; }
+      if (!vid.paused) vid.pause();
+    }
+    async function useVideo(rel) {
+      isVideo = true; srcEl = vid;
+      $('#vidctl').hidden = false;
+      vid.src = `/media/${encodeURIComponent(rel)}`;
+      await new Promise((res, rej) => {
+        vid.onloadeddata = () => res();
+        vid.onerror = () => rej(new Error(`could not load ${rel} — the browser may not decode this codec`));
+      }).catch((e) => { fail(e.message); throw e; });
+      upload(vid, vid.videoWidth, vid.videoHeight);
+      $('#vidnote').textContent = `${vid.videoWidth}x${vid.videoHeight}, ${vid.duration.toFixed(1)}s`;
+      say('video loaded — press play');
+    }
+    function videoTick() {
+      if (!isVideo || vid.paused) return;
+      // Re-upload the current frame, then draw. The frame clock is the VIDEO's,
+      // not the render loop's, so playback speed does not depend on refresh rate.
+      if (FAMILY.engine === 'webgl2') { upload(vid, vid.videoWidth, vid.videoHeight); }
+      else { draw(); }
+      videoLoop = requestAnimationFrame(videoTick);
+    }
+    $('#play').addEventListener('click', () => {
+      if (!isVideo) return;
+      if (vid.paused) { vid.play(); $('#play').textContent = 'pause'; videoTick(); }
+      else { vid.pause(); $('#play').textContent = 'play'; stopVideo(); }
+    });
 
     // The path is built in the PROVIDER so the preview and any headless render
     // agree exactly. Rebuilt only when a parameter changes — never per frame.
@@ -294,7 +372,16 @@
 
     let drawQueued = false;
     async function draw() {
-      if (!PROGRAM || !srcTex || drawQueued) return;
+      if (drawQueued) return;
+      if (FAMILY && FAMILY.engine === 'canvas2d') {
+        drawQueued = true;
+        requestAnimationFrame(() => {
+          drawQueued = false;
+          try { drawTiles(); errEl.textContent = ''; } catch (e) { fail(e.message); }
+        });
+        return;
+      }
+      if (!PROGRAM || !srcTex) return;
       drawQueued = true;
       requestAnimationFrame(async () => {
         drawQueued = false;
@@ -323,13 +410,129 @@
       });
     }
 
+
+    // ---- TILE FAMILY ------------------------------------------------------
+    // The atlas is built ONCE per (tileSet, palette) and its lightness MEASURED
+    // rather than assumed. Measuring is the whole point: a family whose shapes
+    // happen to cluster dark still produces an honest ramp, where ranking by
+    // generation order would leave the picture washed at both ends.
+    function drawTileSpec(ctx, spec, size, pal) {
+      const pick = (t) => pal[Math.max(0, Math.min(pal.length - 1, Math.round(t * (pal.length - 1))))];
+      ctx.clearRect(0, 0, size, size);
+      switch (spec.kind) {
+        case 'solid':
+          ctx.fillStyle = pick(spec.t); ctx.fillRect(0, 0, size, size); break;
+        case 'bayer': {
+          // A threshold matrix IS a tile. This is the case that makes "a
+          // brightness-ranked tile set is a generalised ordered dither" concrete.
+          const n = spec.matrix, cell = size / n;
+          const M = [[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]];
+          ctx.fillStyle = pal[0]; ctx.fillRect(0, 0, size, size);
+          ctx.fillStyle = pal[pal.length - 1];
+          for (let y = 0; y < n; y++) for (let x = 0; x < n; x++)
+            if (spec.t * 16 > M[y % 4][x % 4]) ctx.fillRect(x * cell, y * cell, cell + 0.5, cell + 0.5);
+          break;
+        }
+        case 'dot':
+          ctx.fillStyle = pal[0]; ctx.fillRect(0, 0, size, size);
+          ctx.fillStyle = pal[pal.length - 1];
+          ctx.beginPath(); ctx.arc(size / 2, size / 2, (size / 2) * spec.radius, 0, Math.PI * 2); ctx.fill();
+          break;
+        case 'glyph':
+          ctx.fillStyle = pal[0]; ctx.fillRect(0, 0, size, size);
+          ctx.fillStyle = pal[pal.length - 1];
+          ctx.font = `${Math.floor(size * 0.9)}px ui-monospace, monospace`;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(spec.char, size / 2, size / 2);
+          break;
+        case 'shapes': {
+          ctx.fillStyle = pick(spec.t * 0.4); ctx.fillRect(0, 0, size, size);
+          ctx.fillStyle = pick(0.55 + spec.t * 0.45);
+          ctx.save(); ctx.translate(size / 2, size / 2); ctx.rotate((spec.rotation * Math.PI) / 180);
+          ctx.translate(-size / 2, -size / 2);
+          const k = size * (0.25 + spec.t * 0.7);
+          switch (spec.shape) {
+            case 0: ctx.fillRect(0, 0, size, k); break;
+            case 1: ctx.beginPath(); ctx.arc(size/2, size/2, k/2, 0, Math.PI*2); ctx.fill(); break;
+            case 2: ctx.beginPath(); ctx.moveTo(0,size); ctx.lineTo(size/2,size-k); ctx.lineTo(size,size); ctx.fill(); break;
+            case 3: ctx.fillRect((size-k)/2, 0, k, size); break;
+            case 4: ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(size,0); ctx.lineTo(0,k); ctx.fill(); break;
+            case 5: ctx.beginPath(); ctx.arc(0, size, k, -Math.PI/2, 0); ctx.fill(); break;
+            case 6: for (let i=0;i<4;i++) if ((i+spec.shape)%2) ctx.fillRect((i%2)*size/2,(i>1?1:0)*size/2,size/2,size/2); break;
+            default: ctx.fillRect(0, size - k, size, k);
+          }
+          ctx.restore(); break;
+        }
+      }
+    }
+
+    function buildAtlas() {
+      const key = `${params.tileSet}|${params.palette}`;
+      if (atlasFor === key) return;
+      const fam = TILE.TILE_FAMILIES[params.tileSet];
+      const pal = TILE.PALETTES[params.palette] || TILE.PALETTES.paper;
+      const size = 32;
+      atlas = [];
+      for (let i = 0; i < fam.count; i++) {
+        const spec = TILE.tileSpec(params.tileSet, i, fam.count);
+        const c = document.createElement('canvas'); c.width = c.height = size;
+        const x = c.getContext('2d', { willReadFrequently: true });
+        drawTileSpec(x, spec, size, pal);
+        // MEASURED, in linear light, by the same function the engine uses.
+        atlas.push({ img: c, l: TILE.tileLightness(x.getImageData(0, 0, size, size)) });
+      }
+      atlasFor = key;
+    }
+
+    function drawTiles() {
+      if (!srcEl) return;
+      buildAtlas();
+      const W = srcW, H = srcH;
+      c2d.width = W; c2d.height = H;
+      const ctx = c2d.getContext('2d', { willReadFrequently: true });
+
+      const cols = Math.max(2, params.gridSize);
+      const rows = Math.max(2, Math.round((cols * H) / W));
+      const small = document.createElement('canvas'); small.width = cols; small.height = rows;
+      const sx = small.getContext('2d', { willReadFrequently: true });
+      sx.imageSmoothingEnabled = true;
+      sx.drawImage(srcEl, 0, 0, cols, rows);
+      const grid = TILE.luminanceGrid(sx.getImageData(0, 0, cols, rows), cols, rows);
+
+      if (params.contrast !== 1) {
+        for (let i = 0; i < grid.length; i++) grid[i] = Math.max(0, Math.min(100, (grid[i] - 50) * params.contrast + 50));
+      }
+
+      const blocks = params.adaptiveMerge
+        ? TILE.planBlocks(grid, cols, rows, { tolerance: params.mergeTolerance, minCells: params.minBlockCells })
+        : Array.from({ length: cols * rows }, (_, i) => ({ x: i % cols, y: Math.floor(i / cols), w: 1, h: 1, l: grid[i] }));
+
+      const bw = W / cols, bh = H / rows;
+      ctx.fillStyle = (TILE.PALETTES[params.palette] || TILE.PALETTES.paper)[0];
+      ctx.fillRect(0, 0, W, H);
+      for (const b of blocks) {
+        const t = TILE.pickTile(atlas, b.l, {
+          toneLevels: params.toneLevels, variety: params.tileVariety, x: b.x, y: b.y, seed: params.seed,
+        });
+        if (t) ctx.drawImage(t.img, b.x * bw, b.y * bh, b.w * bw, b.h * bh);
+        if (params.outline) { ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 1;
+          ctx.strokeRect(b.x * bw, b.y * bh, b.w * bw, b.h * bh); }
+      }
+      // An agent asking for "chunkier" needs to know whether it worked. The
+      // originals give no such feedback, so an agent drives them blind.
+      lastStats = { blocks: blocks.length, cells: cols * rows,
+                    meanBlockCells: +(blocks.reduce((a, b) => a + b.w * b.h, 0) / blocks.length).toFixed(2) };
+    }
+    let lastStats = null;
+
     // A cheap fingerprint of what is actually on screen. Lets a check assert that
     // a parameter CHANGED THE IMAGE, rather than only that the call returned —
     // which is the difference between a control that works and one that answers.
     function frameHash() {
       const w = 64, h = 64;
+      const live = (FAMILY && FAMILY.engine === 'canvas2d') ? c2d : canvas;
       const c = document.createElement('canvas'); c.width = w; c.height = h;
-      c.getContext('2d').drawImage(canvas, 0, 0, w, h);
+      c.getContext('2d').drawImage(live, 0, 0, w, h);
       const d = c.getContext('2d').getImageData(0, 0, w, h).data;
       let a = 2166136261;
       for (let i = 0; i < d.length; i += 7) { a ^= d[i]; a = Math.imul(a, 16777619); }

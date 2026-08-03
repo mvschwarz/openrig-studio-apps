@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { FAMILIES, coerce, applyPreset } from "./engine/schema.mjs";
 import { SCAN_FRAGMENT, SCAN_VERTEX, buildPath } from "./engine/scan.mjs";
+import { TILE_FAMILIES, PALETTES } from "./engine/tile.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const arg = (flag, fallback) => {
@@ -63,6 +64,20 @@ http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, family, vertex: SCAN_VERTEX, fragment: SCAN_FRAGMENT });
     }
 
+    // The engine modules, served so the surface IMPORTS them rather than carrying a
+    // copy. Same rule as the shader: one definition, two consumers. The tile maths
+    // — linear-light averaging, the quadtree, luminance matching — has to be
+    // identical in the interactive preview and in any headless render, and the only
+    // way to guarantee that is for there to be one file.
+    if (url.pathname.startsWith("/api/effects/engine/")) {
+      const name = path.basename(url.pathname);
+      if (!/^[a-z-]+\.mjs$/.test(name)) { res.writeHead(400); return res.end("bad module name"); }
+      const file = path.join(HERE, "engine", name);
+      if (!fs.existsSync(file)) { res.writeHead(404); return res.end("no such module"); }
+      res.writeHead(200, { "content-type": "text/javascript", "cache-control": "no-cache" });
+      return fs.createReadStream(file).pipe(res);
+    }
+
     // Resolve parameters without rendering anything. This is what an agent calls
     // to find out what a request actually became — including what got clamped,
     // which is how it learns the edges rather than guessing at them.
@@ -96,7 +111,7 @@ http.createServer(async (req, res) => {
           if (e.name.startsWith(".")) continue;
           const full = path.join(dir, e.name);
           if (e.isDirectory()) out = out.concat(walk(full, depth + 1));
-          else if (/\.(png|jpe?g|webp|gif)$/i.test(e.name)) out.push(path.relative(MEDIA, full));
+          else if (/\.(png|jpe?g|webp|gif|mp4|mov|webm|m4v)$/i.test(e.name)) out.push(path.relative(MEDIA, full));
         }
         return out;
       };
@@ -109,9 +124,31 @@ http.createServer(async (req, res) => {
       const real = insideMedia(decodeURIComponent(url.pathname.slice("/media/".length)));
       if (!real || !fs.existsSync(real)) { res.writeHead(404); return res.end("not found"); }
       const ext = path.extname(real).toLowerCase();
-      const type = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp"
-                 : ext === ".gif" ? "image/gif" : "image/jpeg";
-      res.writeHead(200, { "content-type": type, "cache-control": "no-cache" });
+      const TYPES = { ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+                      ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                      ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm" };
+      const type = TYPES[ext] || "application/octet-stream";
+      const size = fs.statSync(real).size;
+
+      // RANGE REQUESTS, because video needs them. A browser will not scrub — often
+      // will not even start — a video served as one opaque blob, and the failure
+      // looks like a broken file rather than a missing header.
+      const range = req.headers.range;
+      if (range && /^bytes=\d*-\d*$/.test(range)) {
+        const [s0, s1] = range.replace("bytes=", "").split("-");
+        const start = s0 ? Number(s0) : 0;
+        const end = s1 ? Math.min(Number(s1), size - 1) : size - 1;
+        if (start >= size || start > end) {
+          res.writeHead(416, { "content-range": `bytes */${size}` }); return res.end();
+        }
+        res.writeHead(206, {
+          "content-type": type, "content-length": end - start + 1,
+          "content-range": `bytes ${start}-${end}/${size}`, "accept-ranges": "bytes",
+        });
+        return fs.createReadStream(real, { start, end }).pipe(res);
+      }
+      res.writeHead(200, { "content-type": type, "content-length": size,
+                           "accept-ranges": "bytes", "cache-control": "no-cache" });
       return fs.createReadStream(real).pipe(res);
     }
 
