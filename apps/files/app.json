@@ -48,7 +48,20 @@
         "--root",
         "{{root:media}}"
       ],
-      "_note": "Root KINDS, bound at install. The box supplies the paths; this provider never names one."
+      "_note": "Root KINDS, bound at install. The box supplies the paths; this provider never names one.",
+      "companions": [
+        {
+          "label": "live rig state",
+          "entry": "live-state.mjs",
+          "args": [
+            "--out",
+            "{{state}}",
+            "--interval",
+            "10000"
+          ],
+          "_note": "Generates the box's REAL observe-state from the running rig, replacing the SDK's shipped demo fixture. Declaring {{state}} is what points the runtime here. Without it a deployed studio renders an invented rig under a live dot, and on a box with no rig at all this writes an explicit no-rig state rather than leaving the fiction on screen."
+        }
+      ]
     },
     "_note": "These verbs were special-cased as requires.host_capabilities and served by a private box, so this app installed onto a public studio and rendered an EMPTY PANE. It is an ordinary provider now."
   }
