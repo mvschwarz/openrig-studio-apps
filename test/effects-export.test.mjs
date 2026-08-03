@@ -123,19 +123,33 @@ test("save-frame reads the live canvas rather than assuming one renderer", () =>
 // and blanks everything that is not executable code, preserving length and line
 // breaks so reported line numbers stay true.
 //
-// KNOWN AND DELIBERATE: the inside of a template literal is blanked whole,
-// including any `${...}` interpolation. A bind written inside an interpolation
-// is therefore MISSED by the convention guard.
+// 🛑 TEMPLATE LITERALS ARE NO LONGER SPECIAL-CASED, AND THAT DELETED SIX ROUNDS
+// OF MACHINERY. This scanner used to blank template bodies whole, which created a
+// blind spot inside `${...}`, which needed an interpolation walker, which needed
+// its own control, which needed a body-level backstop, which needed an
+// await/yield absence assertion — and review defeated each in turn, finally with
+// a compound that ended a recorded template body early and hid an executing bind.
 //
-// 🛑 THE STATED REASON FOR THAT WAS FALSE AND IS WITHDRAWN. This comment said
+// THE PREMISE UNDER ALL OF IT WAS FALSE. The comment justifying the blanking said
 // "the shader lives in one of those, so treating it as code would scan GLSL as
-// JavaScript." MEASURED: this surface contains ZERO occurrences of
-// `#version 300 es` — the shaders are FETCHED from /api/effects/shader and
-// compiled from the response. `scan(SURFACE)` never sees them. The rationale was
-// inherited from an earlier shape of this file and I never re-measured it, so a
-// design decision stood on a premise nobody had checked. Blanking template bodies
-// is still right — a template body is not executable code — but that is the
-// reason, not the shader.
+// JavaScript." MEASURED ON THE ONLY FILE THIS SCANNER IS EVER POINTED AT:
+//   #version / void main / gl_FragColor / gl_Position / precision / varying — ZERO
+//   19 template bodies, ZERO multi-line, longest 101 chars
+//   none contains `//`, `/*`, or the text of a texture call
+// The shaders are FETCHED from /api/effects/shader; the real GLSL lives in
+// providers/studio-effects/engine/*.mjs, which this scanner never opens.
+//
+// So the blanking protected against scanning GLSL as JavaScript in a file with no
+// GLSL, and every mechanism built on top of it was defending a blind spot that
+// only existed because of it. Scanning template bodies as ordinary code — which
+// is what they are here — makes the whole class stop existing rather than be
+// defended against. That is the shape that has worked in every round that stuck.
+//
+// ⚠️ THE LIMIT, TIED TO THE SURFACE RATHER THAN TO A MECHANISM: this holds because
+// THIS file's templates are short, single-line and shader-free. The engine modules
+// DO carry GLSL in template literals. If this guard is ever pointed at them,
+// blanking template bodies becomes correct again and this deletion becomes wrong.
+// It is a fact about what is scanned, not a property of the scanner.
 //
 // That gap is held by a TEST, not by a sentence. The first draft of this comment
 // said "none is", which was true when measured and is exactly the status line
@@ -162,8 +176,6 @@ test("save-frame reads the live canvas rather than assuming one renderer", () =>
 function scan(src) {
   const n = src.length;
   const out = src.split("");
-  const interpolations = [];
-  const templateBodies = [];
   const blank = (i) => { if (out[i] !== "\n") out[i] = " "; };
   const OPENS_REGEX = "(,=:[!&|?{};+-*%~^<>";
   const KEYWORDS = ["return", "typeof", "case", "in", "of", "new", "delete", "void", "instanceof"];
@@ -223,42 +235,6 @@ function scan(src) {
     }
     return i;
   };
-  // `i` sits just after "${" — return the index of the brace that closes it,
-  // lexing the interpolation as the JavaScript it is.
-  function endOfInterpolation(i) {
-    let depth = 0;
-    while (i < n) {
-      const c = src[i], d = src[i + 1];
-      if (c === "}") { if (depth === 0) return i; depth--; i++; continue; }
-      if (c === "{") { depth++; i++; continue; }
-      if (c === "/" && d === "/") { i = skipLineComment(i); continue; }
-      if (c === "/" && d === "*") { i = skipBlockComment(i); continue; }
-      if (c === '"' || c === "'") { i = skipString(i); continue; }
-      if (c === "`") { i = skipTemplate(i); continue; }
-      if (c === "/" && opensRegex(i)) { i = skipRegex(i); continue; }
-      i++;
-    }
-    return n;
-  }
-  // `i` sits on the opening backtick — return the index after the closing one,
-  // recording every interpolation encountered, including nested templates'.
-  function skipTemplate(i) {
-    const bodyStart = i + 1;
-    i++;
-    while (i < n && src[i] !== "`") {
-      if (src[i] === "\\") { i += 2; continue; }
-      if (src[i] === "$" && src[i + 1] === "{") {
-        const start = i + 2;
-        const end = endOfInterpolation(start);
-        interpolations.push(src.slice(start, end));
-        i = end + 1;
-        continue;
-      }
-      i++;
-    }
-    templateBodies.push(src.slice(bodyStart, i));
-    return Math.min(n, i + 1);
-  }
   const blankBody = (i, end) => { i++; while (i < end - 1) blank(i++); return end; };
   let i = 0;
   while (i < n) {
@@ -266,142 +242,14 @@ function scan(src) {
     if (c === "/" && d === "/") { const e = skipLineComment(i); while (i < e) blank(i++); continue; }
     if (c === "/" && d === "*") { const e = skipBlockComment(i); while (i < e) blank(i++); continue; }
     if (c === '"' || c === "'") { i = blankBody(i, skipString(i)); continue; }
-    if (c === "`") { i = blankBody(i, skipTemplate(i)); continue; }
     if (c === "/" && opensRegex(i)) { i = blankBody(i, skipRegex(i)); continue; }
     i++;
   }
-  return { code: out.join(""), interpolations, templateBodies };
+  return { code: out.join("") };
 }
 
 const SCAN = scan(SURFACE);
 const CODE = SCAN.code;
-
-test("no texture call hides inside a template interpolation", () => {
-  // MECHANISM FOR A GAP I FIRST WROTE AS A STATUS LINE. The scanner blanks
-  // template bodies whole, so a bind inside `${...}` is invisible to the guard.
-  // Saying "there aren't any" was true the day I measured it and would stay in
-  // the file, unchanged and wrong, the day someone adds one.
-  // TWO CHECKS AT DIFFERENT GRAIN, AND THE COARSE ONE IS THE POINT.
-  //
-  // Review has now defeated interpolation-SPAN delimitation twice — once with a
-  // brace inside a string, once with a brace inside a regex that `opensRegex` did
-  // not recognise (`await /}/...`). Both truncated the recorded span so a live
-  // bind fell outside it. The pattern is that any check depending on finding the
-  // exact END of an interpolation inherits every gap in the lexer's grammar.
-  //
-  // So the load-bearing assertion asks a SMALLER question: does a texture call
-  // appear ANYWHERE inside a template body? Span boundaries are irrelevant to it,
-  // so a truncated `${...}` cannot hide a call from it.
-  //
-  // 🛑 AND THAT IS STILL NOT ENOUGH. THIS COMPANION IS A PARTIAL MECHANISM AND
-  // REVIEW HAS DEFEATED IT. Reproduced by me at this pin — it passes 13/13 while
-  // the bind executes:
-  //
-  //     void `${await /* c */ /}`/.test(""), (() => {
-  //       gl.activeTexture(...); gl.bindTexture(...); })(), ""}`;
-  //
-  // A block comment after `await` slips past the slash-absence assertion; the
-  // unrecognised regex then carries BOTH a `}` and a BACKTICK, which ends the
-  // recorded template body early, so the later pair sits outside every recorded
-  // view — and the pair itself satisfies the adjacency convention. Three lexer
-  // gaps compounding, which is the shape of every defeat in this loop.
-  //
-  // DO NOT READ A GREEN RUN HERE AS "NO TEXTURE CALL IS HIDDEN IN A TEMPLATE."
-  // It means no SIMPLE one is. The honest boundary is that a hand-written lexer
-  // cannot answer this question about arbitrary JavaScript, and the runtime
-  // evidence has always been the GL-level trace in review, never this file.
-  // Whether this companion should exist at all, be deleted like the straight-line
-  // one, or wait for real grammar is a SCOPE question and is routed, not decided
-  // here. It is left in place, honest about its limit, rather than removed
-  // silently or widened a seventh time.
-  const bodyHits = SCAN.templateBodies
-    .filter((b) => /gl\.(bindTexture|activeTexture)\s*\(/.test(b));
-  assert.deepEqual(bodyHits.map((b) => b.slice(0, 60)), [],
-    `a texture call appears inside a template literal. This is the coarse check —\n` +
-    `it does not care where the interpolation starts or ends, so a mis-delimited\n` +
-    `span cannot hide the call from it.`);
-
-  const hits = SCAN.interpolations
-    .filter((s) => /gl\.(bindTexture|activeTexture)\s*\(/.test(s));
-  assert.deepEqual(hits, [],
-    `a texture bind or activation is written inside a template interpolation.\n` +
-    `The convention guard cannot see in there — it blanks template bodies so the\n` +
-    `shader is not scanned as JavaScript. Move the call into ordinary code, or\n` +
-    `widen the scanner deliberately and say what covers this instead.`);
-  // POSITIVE CONTROLS. The `>= 5` count alone was NOT enough and review proved it:
-  // a span truncated at a `}` inside a string still left five other interpolations
-  // standing, so the count stayed green while the walker was losing content. A
-  // count proves the walker finds SOME interpolations; it says nothing about
-  // whether it finds each one WHOLE.
-  assert.ok(SCAN.interpolations.length >= 5,
-    "found almost no interpolations — the walker is broken, not the source clean");
-  // So also assert it can carry the exact shape that defeated the old walker: a
-  // string containing a brace, followed by more of the same interpolation.
-  const probe = scan('const s = `x${"}", gl.bindTexture(a, b), y}`;').interpolations;
-  assert.equal(probe.length, 1, "a brace inside a string must not end the span");
-  assert.match(probe[0], /gl\.bindTexture/,
-    "the span was truncated at the string's brace — content after it was lost");
-});
-
-test("the scanner reads code and only code — the control for the guard below", () => {
-  // A CONTROL HARNESS NEEDS ITS OWN CONTROL. The guard is only as good as what it
-  // is looking at, and the last two defects were both in this layer rather than
-  // in the rule. These are review's exact defeating inputs, committed so they
-  // re-run rather than being a claim I made once.
-  const stripped = scan([
-    `// gl.bindTexture(gl.TEXTURE_2D, deadTex);`,
-    `const endpoint = "https://example.test"; gl.bindTexture(gl.TEXTURE_2D, liveTex);`,
-    `if (/\\/\\/'"/.test(x)) gl.bindTexture(gl.TEXTURE_2D, afterRegexTex);`,
-    `/* gl.bindTexture(gl.TEXTURE_2D, blockTex); */ gl.bindTexture(gl.TEXTURE_2D, afterBlockTex);`,
-  ].join("\n")).code;
-  const seen = [...stripped.matchAll(/gl\.bindTexture/g)].length;
-  assert.equal(seen, 3,
-    `expected the live binds only: commented-out gone, the ones after a string, a\n` +
-    `quote-bearing regex and a block comment kept. Saw ${seen}.`);
-  assert.equal(stripped.split("\n").length, 4, "line count must be preserved for line numbers");
-  assert.ok(!stripped.includes("deadTex") && !stripped.includes("blockTex"), "dead code survived");
-  assert.ok(stripped.includes("liveTex") && stripped.includes("afterRegexTex"), "live code was eaten");
-});
-
-test("no regex literal sits where this scanner has to GUESS whether it is one", () => {
-  // MAKE THE ASSUMPTION LOUD RATHER THAN DECIDE IT — orch-lead's, and it is the
-  // same move that fixed the interpolation gap in an earlier round: when a check
-  // cannot decide something, assert that the undecidable case is ABSENT, so the
-  // day it appears you get a failing test instead of a wrong texture unit.
-  //
-  // regex-vs-division is the last grammar guess in this file. `opensRegex` decides
-  // it from the previous significant token, and that keyword list is an
-  // ENUMERATION OF A GRAMMAR which has now been short twice — the `if (...)` case,
-  // then `await` / `yield`. Extending it again is the sixth widening of a check
-  // narrowed five times, and it cuts both ways: with `await` now in the list,
-  // `await / 2` — legal division — would be misread as a regex and blank real code.
-  //
-  // So instead of trusting the list, refuse the ambiguity. Measured today: the
-  // surface has 24 `await`s and NOT ONE is followed by a regex; they are all
-  // `await fetch` / `await import`. Nothing is broken — this fails the day that
-  // stops being true.
-  //
-  // DELIBERATELY OVER-STRICT: `await /x/` and `await / x` both trip it, and the
-  // second is division. That is the trade orch-lead named from five rounds — for a
-  // GUARD, prefer an over-approximation that can only be TOO STRICT over a precise
-  // rule that can be silently TOO LOOSE. Too strict announces itself the first
-  // time it fires on correct code; too loose ships the bug and reports 12/12.
-  const risky = [];
-  for (const m of SURFACE.matchAll(/\b(await|yield)\s*\/(?![/*])/g)) {
-    risky.push(`line ${SURFACE.slice(0, m.index).split("\n").length}: ${m[0].trim()}`);
-  }
-  assert.deepEqual(risky, [],
-    `a '/' follows await or yield, where this scanner must GUESS regex vs division.\n` +
-    `It guesses from an enumerated keyword list that has been wrong twice.\n` +
-    `\n` +
-    `If that '/' is a REGEX: the guess is currently right, but you are relying on\n` +
-    `the enumeration, which is the thing that keeps failing. If it is DIVISION:\n` +
-    `the guess is WRONG and the scanner will blank live code after it.\n` +
-    `\n` +
-    `This assertion exists because neither case is decidable here without real\n` +
-    `JavaScript grammar, and a wrong answer is silent. Rewrite the expression, or\n` +
-    `route the grammar question rather than extending the list a third time.`);
-});
 
 test("CONVENTION: each texture bind spells out its own unit selection", () => {
   // WHAT THIS IS, AND THE NAME NOW SAYS IT: a CONVENTION about how binds are
