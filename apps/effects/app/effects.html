@@ -466,19 +466,31 @@
     }
 
     let frameCounter = 0;
+    // THE RENDER FENCE. `paramGen` is the INTENT counter; this is the DELIVERY
+    // one — the intent generation that a completed render actually drew. Anything
+    // that needs to capture the screen must wait for this to catch up rather than
+    // guess at a duration.
+    //
+    // A sleep cannot do this job. Independent QA delayed the animation callbacks
+    // and got a full, correctly-labelled contact sheet in which five of seven
+    // cells held a DIFFERENT look, with no error and a success message. A longer
+    // timeout only moves the threshold; it does not remove the defect.
+    let lastDrawnGen = -1;
     let drawQueued = false;
     async function draw() {
       if (drawQueued) return;
       if (FAMILY && FAMILY.engine === 'canvas2d') {
         drawQueued = true;
+        const gen = paramGen;
         requestAnimationFrame(() => {
           drawQueued = false;
-          try { drawTiles(); errEl.textContent = ''; } catch (e) { fail(e.message); }
+          try { drawTiles(); errEl.textContent = ''; lastDrawnGen = gen; } catch (e) { fail(e.message); }
         });
         return;
       }
       if (!PROGRAM || !srcTex) return;
       drawQueued = true;
+      const gen = paramGen;
       requestAnimationFrame(async () => {
         drawQueued = false;
         try {
@@ -520,7 +532,7 @@
             gl.uniform1f(u('uVertBlend'), P.chromaVertBlend);
             gl.uniform1f(u('uScanlines'), P.scanlines);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
-            errEl.textContent = '';
+            errEl.textContent = ''; lastDrawnGen = gen;
             return;
           }
 
@@ -538,7 +550,7 @@
           gl.uniform1f(u('uSubpixel'), P.subpixel ? 1 : 0);
           gl.uniform1f(u('uSeed'), P.seed);
           gl.drawArrays(gl.TRIANGLES, 0, 3);
-          errEl.textContent = '';
+          errEl.textContent = ''; lastDrawnGen = gen;
         } catch (e) { fail(e.message); }
       });
     }
@@ -739,6 +751,24 @@
 
     function frameDataUrl() { return liveCanvas().toDataURL('image/png'); }
 
+    // Wait until a render has actually drawn the intent identified by `gen`. The
+    // bound exists to stop a hang, NOT to stand in for the signal — reaching it
+    // throws, because capturing a frame we cannot prove is the right one is the
+    // exact defect this replaces.
+    function awaitRender(gen, bailAfterMs = 8000) {
+      return new Promise((resolve, reject) => {
+        const t0 = performance.now();
+        const check = () => {
+          if (lastDrawnGen >= gen) return resolve();
+          if (performance.now() - t0 > bailAfterMs) {
+            return reject(new Error('the renderer did not finish the requested frame in time — nothing was captured'));
+          }
+          requestAnimationFrame(check);
+        };
+        check();
+      });
+    }
+
     // EVERY LOOK ON ONE SHEET, which is the PRD's "presets produce visibly distinct
     // results, shown side by side" — and it is how an agent that has been nudging
     // knobs can actually SEE what the named looks do rather than take the schema's
@@ -748,11 +778,18 @@
       const before = { ...params }, beforeCurve = curveSpec;
       const shots = [];
       try {
+        // A SHEET OF NAMED LOOKS MUST SHOW THE NAMED LOOKS. With a curve running,
+        // QA measured every cell matching the curve-modified render exactly while
+        // the labels still claimed the bare preset — so the sheet could not be
+        // used for the one comparison it exists to make. Curves are suspended for
+        // the duration and restored with everything else.
+        curveSpec = null;
         for (const name of names) {
           await applyPreset(name);
-          // The tile family draws on a rAF; give the frame a chance to land or the
-          // sheet captures the PREVIOUS look and every cell is off by one.
-          await new Promise((r) => setTimeout(r, 260));
+          // WAIT FOR THE RENDER, DO NOT GUESS AT IT. This replaced a fixed 260ms
+          // sleep that produced a complete, correctly-labelled sheet whose cells
+          // held the wrong looks on a slower machine.
+          await awaitRender(paramGen);
           shots.push({ name, url: frameDataUrl() });
         }
       } finally {
