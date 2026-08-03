@@ -476,23 +476,46 @@
     // cells held a DIFFERENT look, with no error and a success message. A longer
     // timeout only moves the threshold; it does not remove the defect.
     let lastDrawnGen = -1;
-    let drawQueued = false;
-    async function draw() {
-      if (drawQueued) return;
-      if (FAMILY && FAMILY.engine === 'canvas2d') {
-        drawQueued = true;
-        const gen = paramGen;
-        requestAnimationFrame(() => {
-          drawQueued = false;
-          try { drawTiles(); errEl.textContent = ''; lastDrawnGen = gen; } catch (e) { fail(e.message); }
-        });
-        return;
-      }
-      if (!PROGRAM || !srcTex) return;
-      drawQueued = true;
+
+    // DRAWS ARE SERIALISED, AND THE OLD FLAG DID NOT DO THAT. It was cleared at
+    // the START of the animation callback, before an async body that awaits the
+    // displacement path — so a second draw could begin while the first was still
+    // in flight, and two render bodies interleaved over one GL context. One
+    // uploaded a path texture while the other set uniforms and drew, producing a
+    // frame belonging to NEITHER intent.
+    //
+    // That is what independent QA saw: a sheet cell that matched neither the pure
+    // preset nor the curved variant — a third image — while the authored params
+    // and the provider request at capture time were both correct. Right inputs,
+    // wrong pixels, because the pixels came from two renders mixed together.
+    //
+    // A request arriving mid-render is REMEMBERED rather than dropped, so the
+    // newest intent always gets drawn eventually.
+    let drawing = false, drawPending = false;
+    function draw() {
+      if (drawing) { drawPending = true; return; }
+      runDraw();
+    }
+    async function runDraw() {
+      drawing = true;
+      const finish = (gen) => {
+        // ONLY CLAIM DELIVERY IF THIS RENDER IS STILL THE NEWEST INTENT. A render
+        // superseded while it was awaiting must not satisfy the fence — that is
+        // how a stale frame gets captured with a current label.
+        if (gen === paramGen) lastDrawnGen = gen;
+        drawing = false;
+        if (drawPending) { drawPending = false; draw(); }
+      };
+      await new Promise((r) => requestAnimationFrame(r));
+      // Captured AFTER the frame boundary, so it reflects the state actually
+      // being rendered rather than the state when the request was made.
       const gen = paramGen;
-      requestAnimationFrame(async () => {
-        drawQueued = false;
+      if (FAMILY && FAMILY.engine === 'canvas2d') {
+        try { drawTiles(); errEl.textContent = ''; } catch (e) { fail(e.message); }
+        return finish(gen);
+      }
+      if (!PROGRAM || !srcTex) { drawing = false; if (drawPending) { drawPending = false; draw(); } return; }
+      {
         try {
           const P = effective();
           if (!gl.getExtension('EXT_color_buffer_float')) { /* path texture only; sampling is fine */ }
@@ -532,8 +555,8 @@
             gl.uniform1f(u('uVertBlend'), P.chromaVertBlend);
             gl.uniform1f(u('uScanlines'), P.scanlines);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
-            errEl.textContent = ''; lastDrawnGen = gen;
-            return;
+            errEl.textContent = '';
+            return finish(gen);
           }
 
           await refreshPath(P);
@@ -550,9 +573,10 @@
           gl.uniform1f(u('uSubpixel'), P.subpixel ? 1 : 0);
           gl.uniform1f(u('uSeed'), P.seed);
           gl.drawArrays(gl.TRIANGLES, 0, 3);
-          errEl.textContent = ''; lastDrawnGen = gen;
+          errEl.textContent = '';
         } catch (e) { fail(e.message); }
-      });
+        return finish(gen);
+      }
     }
 
 

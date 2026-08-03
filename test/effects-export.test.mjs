@@ -39,10 +39,36 @@ test("the fence is a delivery counter, not the intent counter", () => {
   // yourself: it advances the moment the request is made, so the fence would be
   // satisfied before anything had been drawn.
   assert.match(SURFACE, /let lastDrawnGen = -1;/, "a delivery counter must exist");
-  // Every completed render marks delivery — the tile path and BOTH GPU exits.
-  const marks = SURFACE.match(/lastDrawnGen = gen;/g) || [];
-  assert.equal(marks.length, 3,
-    `expected the tile draw and both GPU exit points to mark delivery, found ${marks.length}`);
+  // Asserting the PROPERTY rather than counting assignment sites — an earlier
+  // form of this test counted three literal assignments and broke when they were
+  // correctly refactored into one guarded helper. Shape is not content, and that
+  // applies to my own assertions.
+  assert.match(SURFACE, /if \(gen === paramGen\) lastDrawnGen = gen;/,
+    "delivery may only be claimed while this render is still the newest intent");
+  const exits = SURFACE.match(/return finish\(gen\);/g) || [];
+  assert.equal(exits.length, 3,
+    `the tile path and both GPU exits must route through the guard, found ${exits.length}`);
+});
+
+test("renders are serialised, so two cannot interleave over one GL context", () => {
+  // MEASURED IN REVIEW: the old flag was cleared at the START of the animation
+  // callback, before an async body that awaits the displacement path. A second
+  // draw began while the first was in flight and the two interleaved — one
+  // uploading a path texture while the other set uniforms and drew. The result
+  // belonged to NEITHER intent: a visibly corrupted third image, while the
+  // authored params AND the provider request at capture were both correct.
+  //
+  // "Right params, right request, an image that is not any look at all" is a
+  // STATE bug, not a timing one, and it is why a mutex is the fix rather than
+  // more waiting.
+  assert.match(SURFACE, /let drawing = false, drawPending = false;/,
+    "a render in progress must exclude another");
+  assert.match(SURFACE, /if \(drawing\) \{ drawPending = true; return; \}/,
+    "a request arriving mid-render must be remembered, not dropped");
+  assert.match(SURFACE, /if \(drawPending\) \{ drawPending = false; draw\(\); \}/,
+    "and replayed, or the newest intent never reaches the screen");
+  assert.equal(/let drawQueued/.test(SURFACE), false,
+    "the flag that only guarded queueing is the defect this replaces");
 });
 
 test("the fence FAILS rather than capturing a frame it cannot vouch for", () => {
