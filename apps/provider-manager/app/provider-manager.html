@@ -60,7 +60,7 @@
     td { padding: 9px 12px; border-bottom: 1px solid var(--line); color: #cbd1db; font-size: 11px; vertical-align: middle; }
     tbody tr:last-child td { border-bottom: 0; }
     tbody tr:hover td { background: rgba(255,255,255,.018); }
-    .name { color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
+    .name { color: var(--text); font-weight: 650; white-space: nowrap; }
     .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .muted { color: var(--muted); }
     /* Editable cells look editable but stay quiet — this is a reference table
@@ -80,7 +80,7 @@
        so it is the loudest thing on the page for as long as that is true. */
     tr.just-reset td { background: color-mix(in srgb, var(--fresh) 15%, transparent); box-shadow: inset 2px 0 0 var(--fresh); }
     .pick { white-space: nowrap; }
-    .switch { padding: 4px 9px; margin-left: 6px; font-size: 11px; }
+    .switch { padding: 3px 8px; margin-left: 6px; font-size: 13px; line-height: 1; }
     .switch:hover:not(:disabled) { border-color: var(--fresh); color: var(--fresh); }
     .hint { margin: -4px 0 10px; color: var(--muted); font-size: 11px; }
     .tag.ok { --state: var(--fresh); }
@@ -146,17 +146,21 @@
     // say an exhausted account is completely fresh — the exact mistake this app
     // exists to prevent, and the one that would send a box onto a dead account.
     // Absent stays absent, all the way to the screen.
-    const pct = (v) => (v === null || v === undefined) ? '<span class="muted">—</span>' : `${esc(v)}%`;
-    // Room LEFT is the number the decision is made on. Same absent-never-zero
+        // Room LEFT is the number the decision is made on. Same absent-never-zero
     // rule as pct: an unknown capacity must not render as a full account, which
     // would invite switching onto something already spent.
     const left = (v) => (v === null || v === undefined)
       ? '<span class="muted">unknown</span>' : `${esc(v)}%`;
 
-    const bar = (v) => {
-      if (v === null || v === undefined) return '';
-      const cls = v >= 85 ? 'hot' : v >= 60 ? 'warn' : '';
-      return `<span class="bar ${cls}"><i style="width:${Math.max(0, Math.min(100, v))}%"></i></span>`;
+        // The recurring slot in the reader's OWN timezone. The server can only say
+    // what the timestamp is; only the browser knows where it is being read.
+    const slot = (iso) => {
+      if (!iso) return '<span class="muted">—</span>';
+      const t = new Date(iso);
+      if (Number.isNaN(t.getTime())) return '<span class="muted">—</span>';
+      return `<span title="${esc(iso)}">${t.toLocaleString(undefined, {
+        weekday: 'long', hour: 'numeric', minute: '2-digit'
+      })}</span>`;
     };
 
     const when = (iso) => {
@@ -168,20 +172,6 @@
       })}</span>`;
     };
 
-    // How old a reading is, said plainly. A number with no age invites someone
-    // to act on it as if it were current.
-    const age = (iso) => {
-      if (!iso) return '<span class="muted">never</span>';
-      const ms = Date.now() - new Date(iso).getTime();
-      if (!Number.isFinite(ms)) return '<span class="muted">—</span>';
-      const m = Math.round(ms / 60000);
-      if (m < 1) return 'just now';
-      if (m < 60) return `${m}m ago`;
-      const h = Math.round(m / 60);
-      if (h < 48) return `${h}h ago`;
-      return `${Math.round(h / 24)}d ago`;
-    };
-
     // THE READING IS THE LAST GOOD ONE, ALWAYS. Its AGE is the qualifier, not a
     // separate kind of state — a cached token expires hourly and only refreshes
     // when a seat uses it, so finding the credential stale is the normal case
@@ -190,27 +180,11 @@
     // What the age must never do is disappear. A number with no age invites
     // someone to act on it as current, so it leads the column rather than
     // hiding in a tooltip.
-    const readingTag = (row) => {
-      if (!row.hasReading) {
-        return `<span class="tag s-never"><span class="pip"></span>never read</span>`;
-      }
-      const ms = Date.now() - new Date(row.readingFrom).getTime();
-      const h = ms / 3600000;
-      const cls = h < 1 ? 's-sampled' : h < 24 ? 's-stale' : 's-old';
-      return `<span class="tag ${cls}"><span class="pip"></span>${esc(age(row.readingFrom).replace(/<[^>]*>/g, ''))}</span>`;
-    };
-
-    // The attempt is SECONDARY and is annotated, not alarmed. A stale credential
+        // The attempt is SECONDARY and is annotated, not alarmed. A stale credential
     // on the box says nothing about the account's headroom, and showing it with
     // the same weight as a real usage problem is what would argue for rotating
     // away from a healthy account.
-    const attemptNote = (a) => {
-      if (!a || a.ok) return '';
-      const what = a.authFailed ? 'credential stale on the box' : esc(a.reason || 'probe failed');
-      return `<div class="note" title="${esc(a.reason || '')}">not refreshed — ${what}</div>`;
-    };
-
-    function render(view) {
+        function render(view) {
       const boxes = view.boxes ?? [];
       const accounts = view.accounts ?? [];
       const parts = [];
@@ -238,13 +212,13 @@
       const byId = new Map(accounts.map(a => [a.account, a]));
       const opts = (sel) => ['<option value="">— none —</option>'].concat(
         accounts.map(a => `<option value="${esc(a.account)}"${a.account === sel ? ' selected' : ''}>${
-          esc(a.label || a.account)}${a.capacityLeft === null || a.capacityLeft === undefined ? '' : ` · ${esc(a.capacityLeft)}% left`}</option>`)
+          esc(a.label || a.account)}</option>`)
       ).join('');
       const cells = (id) => {
         const a = byId.get(id);
         if (!a) return '<td class="numeric muted">—</td><td class="muted">—</td>';
         return `<td class="numeric">${left(a.capacityLeft)}</td>
-                <td>${a.resetsWeeklyAt ? esc(a.resetsWeeklyAt) : '<span class="muted">—</span>'}</td>`;
+                <td>${slot(a.nextResetAt)}</td>`;
       };
 
       parts.push(`<section><h2>Machines</h2><div class="table-wrap"><table>
@@ -254,12 +228,12 @@
           <th>Codex account</th><th class="numeric">left</th><th>resets</th>
         </tr></thead><tbody>
         ${boxes.length ? boxes.map(b => `<tr>
-          <td class="name">${esc(b.host)}${attemptNote(b.lastAttempt)}</td>
+          <td class="name">${esc(b.host)}</td>
           <td class="pick"><select data-host="${esc(b.host)}" data-provider="claude">${opts(b.claudeAccount)}</select>
-              <button class="switch" data-host="${esc(b.host)}" data-provider="claude">switch</button></td>
+              <button class="switch" data-host="${esc(b.host)}" data-provider="claude" title="switch this machine to the selected account">⇄</button></td>
           ${cells(b.claudeAccount)}
           <td class="pick"><select data-host="${esc(b.host)}" data-provider="codex">${opts(b.codexAccount)}</select>
-              <button class="switch" data-host="${esc(b.host)}" data-provider="codex">switch</button></td>
+              <button class="switch" data-host="${esc(b.host)}" data-provider="codex" title="switch this machine to the selected account">⇄</button></td>
           ${cells(b.codexAccount)}
         </tr>`).join('') : `<tr><td colspan="7" class="muted">No machines declared.</td></tr>`}
         </tbody></table></div></section>`);
@@ -291,7 +265,7 @@
               value="${a.capacityLeft === null || a.capacityLeft === undefined ? '' : esc(a.capacityLeft)}"
               placeholder="—"> %</td>
           <td class="muted">${esc(a.capacitySource === 'none' ? '—' : a.capacitySource || '')}</td>
-          <td>${a.resetsWeeklyAt ? esc(a.resetsWeeklyAt) : '<span class="muted">—</span>'}</td>
+          <td>${slot(a.nextResetAt)}</td>
           <td>${a.nextResetAt ? when(a.nextResetAt) : '<span class="muted">—</span>'}</td>
           <td>${a.onBox ? esc(a.onBox)
                 : a.lastSeenOnHost ? `<span class="muted">last on ${esc(a.lastSeenOnHost)}</span>`
@@ -380,7 +354,7 @@
       const row = btn.closest('td');
       const account = row.querySelector('select')?.value;
       if (!account) { note('pick an account first'); return; }
-      btn.disabled = true; btn.textContent = 'sending…';
+      btn.disabled = true; btn.textContent = '…';
       try {
         const d = await post('/api/fleet/switch', {
           host: btn.dataset.host, provider: btn.dataset.provider, account,
@@ -388,7 +362,7 @@
         note(`asked ${d.dispatchedTo} to switch ${btn.dataset.provider} on ${btn.dataset.host} — not done yet, they will report back`);
         render(d);
       } catch (e) {
-        btn.disabled = false; btn.textContent = 'switch';
+        btn.disabled = false; btn.textContent = '⇄';
         note(`could not dispatch: ${e.message}`);
       }
     });
