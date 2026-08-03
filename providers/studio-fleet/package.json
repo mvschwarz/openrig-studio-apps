@@ -1,0 +1,11 @@
+{
+  "name": "@openrig/studio-fleet",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Reads which LLM account each box is signed in as, how much of its limit is spent, and when a parked account frees up again.",
+  "scripts": {
+    "test": "node --test ../../test/fleet-usage.test.mjs"
+  },
+  "_note": "NOTHING HERE READS, STORES OR TRANSPORTS A TOKEN. Usage can only be read by authenticating as the account, so the naive central dashboard ends up holding one credential per account — a monitoring feature with the blast radius of a credential store. This pulls the READING instead: the controller runs the probe ON each box, against the token that box already holds. If a future change needs a token here, that is a design change and not an implementation detail."
+}

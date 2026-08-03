@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Providers</title>
+  <style>
+    /* Same tokens and table idiom as FLOOR on purpose. This is the second
+       glanceable table in the studio; a second visual language for the same
+       kind of data would make both harder to read. */
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e13;
+      --panel: #121722;
+      --line: #252c3a;
+      --text: #f3f5f8;
+      --muted: #929cad;
+      --fresh: #47d18c;
+      --stale: #ffb44a;
+      --unknown: #77808f;
+      --hot: #ff795f;
+      --info: #6d9eff;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      background: radial-gradient(circle at 80% 0%, #172032 0, transparent 34%), var(--bg);
+      color: var(--text);
+      font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    main { width: min(1100px, 100%); margin: 0 auto; padding: 28px; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+    .eyebrow { color: var(--fresh); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 4px 0 0; font: 600 clamp(28px, 5vw, 46px)/1.05 system-ui, sans-serif; letter-spacing: -.04em; }
+
+    .actions { display: flex; align-items: center; gap: 10px; }
+    button {
+      font: inherit; font-size: 12px; cursor: pointer; color: var(--text);
+      background: rgba(255,255,255,.04); border: 1px solid var(--line);
+      border-radius: 4px; padding: 8px 14px;
+    }
+    button:hover:not(:disabled) { border-color: rgba(255,255,255,.4); }
+    button:disabled { cursor: default; color: var(--muted); }
+
+    .cost { color: var(--muted); font-size: 11px; max-width: 30ch; text-align: right; }
+
+    .metrics, .table-wrap, .notice { border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); border-radius: 8px; }
+    .metrics { display: flex; flex-wrap: wrap; align-items: center; margin-bottom: 20px; overflow: hidden; }
+    .metric { display: flex; align-items: baseline; gap: 8px; padding: 10px 14px; border-right: 1px solid var(--line); }
+    .metric:last-child { border-right: 0; }
+    .metric b { font: 650 17px/1 system-ui, sans-serif; }
+    .metric span { color: var(--muted); font-size: 11px; }
+
+    section { margin-top: 24px; }
+    h2 { margin: 0 0 10px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; min-width: 780px; border-collapse: collapse; text-align: left; }
+    th { padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--muted); background: rgba(255,255,255,.018); font-size: 9px; font-weight: 650; letter-spacing: .16em; text-transform: uppercase; white-space: nowrap; }
+    td { padding: 9px 12px; border-bottom: 1px solid var(--line); color: #cbd1db; font-size: 11px; vertical-align: middle; }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover td { background: rgba(255,255,255,.018); }
+    .name { color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
+    .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .muted { color: var(--muted); }
+
+    .tag { --state: var(--unknown); display: inline-flex; align-items: center; gap: 7px; color: var(--state); font-size: 10px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+    .pip { width: 7px; height: 7px; border-radius: 50%; background: var(--state); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state) 12%, transparent); }
+    .s-sampled { --state: var(--fresh); }
+    .s-stale { --state: var(--stale); }
+    .s-unsampled { --state: var(--hot); }
+    .s-never { --state: var(--unknown); }
+
+    /* A bar is a nudge toward reading a number that might be absent, so it is
+       only ever drawn when there IS a number. */
+    .bar { display: block; height: 3px; margin-top: 4px; border-radius: 2px; background: rgba(255,255,255,.08); overflow: hidden; }
+    .bar i { display: block; height: 100%; background: var(--fresh); }
+    .bar.warn i { background: var(--stale); }
+    .bar.hot i { background: var(--hot); }
+
+    .notice { padding: 16px 18px; color: var(--stale); font-size: 12px; line-height: 1.6; }
+    .notice b { color: var(--text); }
+    .notice code { color: var(--info); }
+    footer { margin-top: 22px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+
+    @media (max-width: 640px) {
+      main { padding: 18px; }
+      header { align-items: start; flex-direction: column; }
+      .cost { text-align: left; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><div class="eyebrow">Accounts</div><h1>Providers</h1></div>
+      <div class="actions">
+        <p class="cost" id="cost">reading what is already known — costs nothing</p>
+        <button id="sample" disabled>Sample now</button>
+      </div>
+    </header>
+
+    <div id="content"><div class="notice">Reading fleet state…</div></div>
+
+    <footer id="foot"></footer>
+  </main>
+
+  <script>
+    const content = document.querySelector('#content');
+    const sampleBtn = document.querySelector('#sample');
+    const costEl = document.querySelector('#cost');
+    const foot = document.querySelector('#foot');
+
+    const esc = (v) => String(v ?? '').replace(/[&<>'"]/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    })[c]);
+
+    // THE RULE THIS WHOLE FILE IS BUILT AROUND: an absent number must never
+    // render as a number. A missing utilization header reading as "0%" would
+    // say an exhausted account is completely fresh — the exact mistake this app
+    // exists to prevent, and the one that would send a box onto a dead account.
+    // Absent stays absent, all the way to the screen.
+    const pct = (v) => (v === null || v === undefined) ? '<span class="muted">—</span>' : `${esc(v)}%`;
+
+    const bar = (v) => {
+      if (v === null || v === undefined) return '';
+      const cls = v >= 85 ? 'hot' : v >= 60 ? 'warn' : '';
+      return `<span class="bar ${cls}"><i style="width:${Math.max(0, Math.min(100, v))}%"></i></span>`;
+    };
+
+    const when = (iso) => {
+      if (!iso) return '<span class="muted">—</span>';
+      const t = new Date(iso);
+      if (Number.isNaN(t.getTime())) return '<span class="muted">—</span>';
+      return `<span title="${esc(iso)}">${t.toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      })}</span>`;
+    };
+
+    // How old a reading is, said plainly. A number with no age invites someone
+    // to act on it as if it were current.
+    const age = (iso) => {
+      if (!iso) return '<span class="muted">never</span>';
+      const ms = Date.now() - new Date(iso).getTime();
+      if (!Number.isFinite(ms)) return '<span class="muted">—</span>';
+      const m = Math.round(ms / 60000);
+      if (m < 1) return 'just now';
+      if (m < 60) return `${m}m ago`;
+      const h = Math.round(m / 60);
+      if (h < 48) return `${h}h ago`;
+      return `${Math.round(h / 24)}d ago`;
+    };
+
+    const STATE_LABEL = {
+      sampled: ['s-sampled', 'sampled'],
+      'stale-but-last-known': ['s-stale', 'last known'],
+      unsampled: ['s-unsampled', 'unsampled'],
+      'never-sampled': ['s-never', 'never sampled'],
+    };
+
+    const stateTag = (state, reason) => {
+      const [cls, label] = STATE_LABEL[state] ?? ['s-never', esc(state || 'unknown')];
+      const title = reason ? ` title="${esc(reason)}"` : '';
+      return `<span class="tag ${cls}"${title}><span class="pip"></span>${esc(label)}</span>`;
+    };
+
+    function render(view) {
+      const boxes = view.boxes ?? [];
+      const accounts = view.accounts ?? [];
+      const parts = [];
+
+      // A config problem is shown IN THE UI, not the console. Without a declared
+      // fleet this app has nothing to say, and an empty table would read as
+      // "no boxes" rather than "you have not told me about any".
+      if (view.configError) {
+        parts.push(`<div class="notice"><b>No fleet declared.</b> ${esc(view.configError)}<br>
+          The fleet is declared, never discovered — scanning for boxes would make this list depend on
+          what happened to answer, so a box that was merely asleep would vanish from it.</div>`);
+      }
+
+      const parked = accounts.filter(a => a.availableAgainAt).length;
+      parts.push(`<div class="metrics">
+        <div class="metric"><b>${boxes.length}</b><span>box${boxes.length === 1 ? '' : 'es'}</span></div>
+        <div class="metric"><b>${accounts.length}</b><span>account${accounts.length === 1 ? '' : 's'} seen</span></div>
+        <div class="metric"><b>${parked}</b><span>parked</span></div>
+      </div>`);
+
+      parts.push(`<section><h2>Boxes</h2><div class="table-wrap"><table>
+        <thead><tr>
+          <th>Box</th><th>Account</th><th>State</th>
+          <th class="numeric">5h used</th><th class="numeric">7d used</th>
+          <th>7d resets</th><th class="numeric">Reading</th>
+        </tr></thead><tbody>
+        ${boxes.length ? boxes.map(b => `<tr>
+          <td class="name">${esc(b.host)}</td>
+          <td>${b.label ? esc(b.label) : '<span class="muted">—</span>'}</td>
+          <td>${stateTag(b.state, b.reason)}</td>
+          <td class="numeric">${pct(b.used5h)}${bar(b.used5h)}</td>
+          <td class="numeric">${pct(b.used7d)}${bar(b.used7d)}</td>
+          <td>${when(b.resets7d)}</td>
+          <td class="numeric muted">${age(b.readingFrom)}</td>
+        </tr>`).join('') : `<tr><td colspan="7" class="muted">No boxes declared.</td></tr>`}
+        </tbody></table></div></section>`);
+
+      // THE HEADLINE, and the reason the app exists: when does a parked account
+      // become usable again. It is derived from that account's last good
+      // reading, because nothing can sample an account attached to no box — and
+      // a reset timestamp is a fact about the past, so it stays true.
+      parts.push(`<section><h2>Accounts</h2><div class="table-wrap"><table>
+        <thead><tr>
+          <th>Account</th><th>On box</th>
+          <th class="numeric">5h used</th><th class="numeric">7d used</th>
+          <th>Available again</th><th class="numeric">Last good</th>
+        </tr></thead><tbody>
+        ${accounts.length ? accounts.map(a => `<tr>
+          <td class="name">${esc(a.label)}</td>
+          <td>${a.onBox ? esc(a.onBox) : '<span class="muted">parked</span>'}</td>
+          <td class="numeric">${pct(a.used5h)}${bar(a.used5h)}</td>
+          <td class="numeric">${pct(a.used7d)}${bar(a.used7d)}</td>
+          <td>${a.availableAgainAt ? when(a.availableAgainAt) : '<span class="muted">in use</span>'}</td>
+          <td class="numeric muted">${age(a.lastGoodAt)}</td>
+        </tr>`).join('') : `<tr><td colspan="6" class="muted">Nothing sampled yet.</td></tr>`}
+        </tbody></table></div></section>`);
+
+      content.innerHTML = parts.join('');
+
+      // Only quote a price when there is something to buy. "Spends 0 real
+      // requests" on an empty fleet is technically true and reads as broken.
+      const calls = view.cost?.callsLastPoll ?? 0;
+      costEl.textContent = calls
+        ? `sampling spends ${calls} real request${calls === 1 ? '' : 's'} — one per box`
+        : 'reading what is already known — costs nothing';
+      sampleBtn.disabled = !boxes.length;
+
+      foot.innerHTML = `Read at ${esc(view.generatedAt || '')}.
+        Usage is read on each box against the token that box already holds — no credential is stored here.`;
+    }
+
+    async function load() {
+      try {
+        const r = await fetch('/api/fleet/state');
+        const view = await r.json();
+        render(view);
+      } catch (e) {
+        // A failed load must never wear an empty state's clothes.
+        content.innerHTML = `<div class="notice"><b>Could not read fleet state.</b> ${esc(e.message)}<br>
+          This is a failure, not an empty fleet.</div>`;
+        sampleBtn.disabled = true;
+      }
+    }
+
+    // EXPLICIT ONLY. Never on a timer: a poll spends real requests against the
+    // very budget it reports, and an instrument that quietly consumes what it
+    // measures is not an instrument.
+    sampleBtn.addEventListener('click', async () => {
+      const label = sampleBtn.textContent;
+      sampleBtn.disabled = true;
+      sampleBtn.textContent = 'Sampling…';
+      try {
+        const r = await fetch('/api/fleet/sample', { method: 'POST' });
+        const view = await r.json();
+        if (!view.ok) {
+          content.innerHTML = `<div class="notice"><b>Sample refused.</b> ${esc(view.error)}</div>`;
+        } else {
+          render(view);
+        }
+      } catch (e) {
+        content.innerHTML = `<div class="notice"><b>Sample failed.</b> ${esc(e.message)}</div>`;
+      } finally {
+        sampleBtn.textContent = label;
+        sampleBtn.disabled = false;
+      }
+    });
+
+    load();
+    // Re-reading STATE is free, so this refresh costs nothing. It deliberately
+    // never triggers a sample.
+    setInterval(load, 30000);
+  </script>
+</body>
+</html>
