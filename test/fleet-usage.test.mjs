@@ -111,3 +111,20 @@ test("a box with no token anywhere degrades honestly and names what was tried", 
   assert.equal(r.sampled, false, "no token must never read as a sample");
   assert.match(r.reason, /tried/, "the refusal must name where it looked");
 });
+
+test("a rejected credential is not reported as a spent account", () => {
+  // MEASURED ON A REAL BOX, first live probe: matti's cached OAuth access token
+  // had expired minutes earlier (refresh token still valid, scopes correct), so
+  // the probe got 401. If that renders like at-or-over-limit, the dashboard
+  // argues for rotating AWAY from an account with full headroom — the same
+  // class of expensive lie as a missing header reading as 0%, pointing the
+  // other way.
+  const r = parseProbe(JSON.stringify({ ok: true, status: "401", src: "file:claude-credentials" }));
+  assert.equal(r.sampled, false);
+  assert.equal(r.authFailed, true, "an auth failure must be branchable without parsing prose");
+  assert.doesNotMatch(r.reason, /limit/, "must not read as an exhausted account");
+
+  const spent = parseProbe(JSON.stringify({ ok: true, status: "429", u5: "", u7: "" }));
+  assert.equal(spent.reason, "at-or-over-limit", "positive control: a real 429 still reads as spent");
+  assert.equal(spent.authFailed, undefined, "a spent account is not an auth failure");
+});

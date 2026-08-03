@@ -100,9 +100,26 @@ export function parseProbe(raw) {
 
   const u7 = num(d.u7), u5 = num(d.u5);
   if (u7 === null && u5 === null) {
+    // COULD-NOT-AUTHENTICATE AND ACCOUNT-IS-SPENT ARE DIFFERENT FACTS, and
+    // collapsing them is the failure this app exists to prevent in the other
+    // direction. Measured on a real box: a cached OAuth access token expires on
+    // the order of an hour, and the probe reads it from disk without refreshing,
+    // so a perfectly healthy account 401s routinely. If that rendered the same
+    // as at-or-over-limit, the reading would argue for rotating AWAY from an
+    // account with full headroom.
+    //
+    // The probe deliberately does NOT refresh it: refreshing writes the box's
+    // credential state, and this thing reads. The box's own agent refreshes on
+    // next use, so the honest report is "stale here, not spent there".
+    const auth = d.status === "401" || d.status === "403";
     return {
       sampled: false,
-      reason: d.status === "429" ? "at-or-over-limit" : `no-usage-headers (http ${d.status || "?"})`,
+      reason: d.status === "429" ? "at-or-over-limit"
+        : auth ? `auth-not-usable (http ${d.status}) — cached token stale or rejected; the box refreshes on next use`
+        : `no-usage-headers (http ${d.status || "?"})`,
+      // Named separately from the prose so a surface can branch on it without
+      // parsing a sentence.
+      authFailed: auth || undefined,
       org: d.org || null,
       httpStatus: d.status || null,
     };
