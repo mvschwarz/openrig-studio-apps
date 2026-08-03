@@ -14,31 +14,21 @@
     "glyph": "◈",
     "hint": "accounts across your boxes: usage, and when a parked one comes back"
   },
-  "provider": {
-    "package": "@openrig/studio-fleet",
-    "required": true,
-    "run": {
-      "entry": "fleet-server.mjs",
-      "args": [
-        "--port",
-        "{{port}}",
-        "--fleet",
-        "{{root:fleet}}"
-      ],
-      "_note": "One bound root, not a config flag plus a store flag. fleet.json is the DECLARED fleet and samples.jsonl is what we have read from it; splitting them lets the two disagree about which fleet you are looking at."
-    },
-    "_note": "No companion. Sampling costs a real API call against the very budget it reports, so it never runs on a timer — a background poller would be an instrument that quietly consumes what it measures. The caller asks."
-  },
   "roots": {
     "fleet": {
       "required": true
     }
   },
+  "calls": {
+    "/api/fleet/state": {
+      "required": true
+    },
+    "/api/fleet/sample": {
+      "required": true
+    }
+  },
+  "_calls_note": "What this app CALLS. Both are required: a dashboard that cannot read fleet state is a blank page, and one that cannot sample can never refresh a reading.",
   "_roots_note": "A NEW KIND, and it had to be. The fleet list is box-level — one box has many projects and one fleet — so project/media/canvas/footage are all wrong, and the runtime state dir is disposable while this config is AUTHORED. Declaring it surfaced that the root-kind vocabulary was a closed hardcoded set of four in the SDK; it is open now (studio.json roots{}), pinned by test/root-kinds.test.mjs.",
-  "verbs": [
-    "/api/fleet/state",
-    "/api/fleet/sample"
-  ],
   "_verbs_note": "Two verbs with deliberately different costs. /api/fleet/state is free and is what the surface polls, so opening the dashboard spends nothing. /api/fleet/sample spends one real request per box and is only ever reached by an explicit click.",
   "vendor": [],
   "requires": {
@@ -46,5 +36,10 @@
       "ssh"
     ],
     "_binaries_note": "The controller reaches IN. Boxes have one-way ACLs and cannot initiate back, so a pull is the only shape that works — and it is also what keeps the credential on the box instead of here. ssh targets are the operator's existing ones; this app deliberately manages no hosts file, no keys and no tunnels. If ssh to a declared name does not already work, that is a provisioning fact to report, not something a dashboard should paper over."
+  },
+  "provider": {
+    "package": "@openrig/studio-fleet",
+    "required": true,
+    "_note": "A REFERENCE, not a run spec. How to start this backend is declared by the provider itself in providers/studio-fleet/provider.json — including the deliberate ABSENCE of a companion, since sampling spends real API calls against the budget it reports and must never run on a timer."
   }
 }
