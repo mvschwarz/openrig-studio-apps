@@ -42,27 +42,26 @@ export const ROOT_ALLOW = new Set([
   ".DS_Store",
 ]);
 
-// the seat<->surface duality table (north star). The UI's lanes,
-// the seeded receivers, and the ownership default are projections of the
-// same topology. Static by design - the topology lives in the RigSpec; sync
-// from a live roster only if the roster starts churning.
-export const SEAT_LANES = {
-  audio: "",
-  visual: "",
-  capture: "",
-  assembly: "",
-  review: "",
+// Review lanes. The UI's lanes, the seeded receivers and the ownership
+// default are projections of one table, so they cannot disagree. Static by
+// design; derive from a live roster only if lanes start changing often.
+export const REVIEW_LANES = {
+  audio: "audio",
+  visual: "visual",
+  capture: "capture",
+  assembly: "assembly",
+  review: "review",
 };
 
 export function seededReceivers() {
   // review/producer first: it stays the note form's fallback default
-  return [SEAT_LANES.review, SEAT_LANES.audio, SEAT_LANES.visual, SEAT_LANES.capture, SEAT_LANES.assembly];
+  return [REVIEW_LANES.review, REVIEW_LANES.audio, REVIEW_LANES.visual, REVIEW_LANES.capture, REVIEW_LANES.assembly];
 }
 
 export function mutationOwnerSeed() {
   return {
     _note: "Session that owns the NEXT canonical timeline apply (one-writer rule, soft-enforced: mismatched actors WARN and are recorded, never blocked - graduation to a hard gate is a doctrine decision). Move ownership by editing this file; reference the handoff in handoff_ref.",
-    owner: SEAT_LANES.assembly,
+    owner: REVIEW_LANES.assembly,
     set_by: "video-new",
     set_at: new Date().toISOString(),
     handoff_ref: null,

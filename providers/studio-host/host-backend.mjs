@@ -427,7 +427,7 @@ export function filesSearch(q, roots) {
 export function filesTags(rootDir, roots) {
   const r = resolveInsideRoots(rootDir, roots);
   if (!r) return null;
-  const tagsPath = [path.join(r, "tags.jsonl"), path.join(r, "wedding/tags.jsonl")]
+  const tagsPath = [path.join(r, "tags.jsonl")]
     .find((p) => fs.existsSync(p));
   if (!tagsPath) return { tags: {} };
   const tags = {};

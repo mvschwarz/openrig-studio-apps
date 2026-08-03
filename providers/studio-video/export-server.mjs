@@ -18,7 +18,7 @@ import { appendEvents, bootstrapHistory, cardSnapshot, defaultPaths as historyPa
 import os from "node:os";
 import { defaultAssetPaths, generateProjectAssets, isAllowlisted, loadAllowlist, resolveRoots } from "./project-assets.mjs";
 import { runReconform } from "./timeline-reconform.mjs";
-import { checkBundle, loadTemplates, SEAT_LANES } from "./studio-bundle.mjs";
+import { checkBundle, loadTemplates, REVIEW_LANES } from "./studio-bundle.mjs";
 import { computeHealth } from "./health.mjs";
 import { applyCanvas, readCanvas } from "./canvas-rails.mjs";
 
@@ -324,7 +324,7 @@ function listTimelines() {
 // opportunity (server start or the next note). The note md is queue-body
 // shaped so the producer can forward it verbatim.
 
-const DEFAULT_RECEIVER = "orch-producer-lead@openrig-studio-v3";
+const DEFAULT_RECEIVER = process.env.STUDIO_NOTE_RECEIVER || "review";
 // Provenance (product decision 2026-07-03): actions raised through the browser
 // UI attribute to the person at the surface, not to whichever seat happens to run the
 // server - "if it ever comes down to who asked for this change, the record
@@ -738,8 +738,8 @@ async function handleNleApi(req, res, url) {
     });
   }
   // ---- media manager (sibling surface). License/attribution is
-  // INFORMATIONAL ONLY - displayed when known, NEVER a gate (product decision
-  // 2026-07-04: effortless > compliance while building).
+  // INFORMATIONAL ONLY - displayed when known, never a gate. Enforcement is
+  // the operator's call, not this server's.
   if (url.pathname === "/api/library" && req.method === "GET") {
     const roots = resolveRoots(args.mediaRoots);
     const assets = [];
@@ -825,7 +825,7 @@ async function handleNleApi(req, res, url) {
   }
   if (url.pathname === "/api/receivers" && req.method === "GET") {
     // lanes: seat<->surface duality  - the note form's geography
-    return sendJson(res, 200, { ok: true, receivers: loadReceivers(), default: loadReceivers()[0], lanes: SEAT_LANES });
+    return sendJson(res, 200, { ok: true, receivers: loadReceivers(), default: loadReceivers()[0], lanes: REVIEW_LANES });
   }
   if (url.pathname === "/api/history-since" && req.method === "GET") {
     // catch-up queue feed (drift-proof tier): everything that happened

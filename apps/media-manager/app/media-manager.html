@@ -322,7 +322,7 @@
     const h2 = document.createElement("h3");
     h2.innerHTML = `TAGS <button class="add" title="new tag (or just tell the agent)">+</button>`;
     h2.querySelector(".add").onclick = async () => {
-      const t = await ask("New tag name (tip: tell the agent 'ceremony is scene 2' to bind it to the storyboard)", "ceremony");
+      const t = await ask("New tag name (tip: tell the agent 'interviews is scene 2' to bind it to the storyboard)", "");
       if (t) postTags([{ op: "add", tag: t, asset: "__placeholder__" }])
         .then(() => postTags([{ op: "remove", tag: t, asset: "__placeholder__" }]))
         .then(refreshTags);
@@ -377,7 +377,7 @@
     drop.appendChild(inp);
     $("tagBtn").onclick = (e) => { e.stopPropagation(); drop.classList.toggle("open"); if (drop.classList.contains("open")) inp.focus(); };
     $("pinBtn").onclick = async () => {
-      const name = await ask("Name this selection (optional — e.g. 'ceremony picks')", "ceremony picks");
+      const name = await ask("Name this selection (optional — e.g. 'hero shots')", "");
       if (name === null) return;
       await api("/api/selections", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, assets: ctxAssets, surface: "media-manager" }) });
