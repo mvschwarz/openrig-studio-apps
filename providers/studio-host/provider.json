@@ -1,0 +1,41 @@
+{
+  "package": "@openrig/studio-host",
+  "run": {
+    "entry": "host-server.mjs",
+    "args": [
+      "--port",
+      "{{port}}",
+      "--root",
+      "{{root:project}}",
+      "--root",
+      "{{root:media}}"
+    ],
+    "companions": [
+      {
+        "label": "live rig state",
+        "entry": "live-state.mjs",
+        "args": [
+          "--out",
+          "{{state}}",
+          "--interval",
+          "10000"
+        ],
+        "_note": "Generates the box's REAL observe-state from the running rig, replacing the SDK's shipped demo fixture. Declaring {{state}} is what points the runtime here. Without it a deployed studio renders an invented rig under a live dot."
+      }
+    ]
+  },
+  "verbs": [
+    "/api/files/tree",
+    "/api/files/read",
+    "/api/files/write",
+    "/api/files/raw",
+    "/api/files/search",
+    "/api/files/tags",
+    "/api/files/goto",
+    "/api/files/roots",
+    "/api/seats",
+    "/api/seats/send",
+    "/api/seats/capture"
+  ],
+  "_why_this_file_exists": "THIS COMPANION USED TO LIVE ON AN APP, AND AN APP WAS DELETED. Retiring the AGENTS surface removed the only declaration of {{state}} anywhere, so nothing started the live-state generator and Matti's landing page served an invented rig with four invented seats under a green live signal — on a box running eleven real ones. FILES and AGENTS had both declared this same provider with byte-identical run specs; only AGENTS' copy carried the companion. Repairing it by moving the companion to FILES pinned the bug rather than removing it: retire FILES the same way and rig state dies again. The capability belongs to the package that ships live-state.mjs, which is this one, so it can no longer depend on which app happens to be installed."
+}

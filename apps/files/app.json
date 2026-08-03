@@ -22,47 +22,27 @@
       "required": false
     }
   },
-  "verbs": [
-    "/api/files/tree",
-    "/api/files/read",
-    "/api/files/write",
-    "/api/files/raw",
-    "/api/files/search",
-    "/api/files/tags",
-    "/api/files/goto",
-    "/api/files/roots"
-  ],
+  "calls": {
+    "/api/files/tree": { "required": true },
+    "/api/files/read": { "required": true },
+    "/api/files/write": { "required": true },
+    "/api/files/raw": { "required": true },
+    "/api/files/search": { "required": true },
+    "/api/files/tags": { "required": true },
+    "/api/files/goto": { "required": true },
+    "/api/files/roots": { "required": true },
+    "/api/focus": {
+      "required": false,
+      "_note": "DECLARED AT LAST, and deliberately optional. This surface has always CALLED focus and never declared it, so the route existed only because canvas, media-manager and mini-nle happen to be co-installed and THEIR declarations built it — a studio with just FILES lost focus silently. Optional is the honest setting: focus is a nicety for a file browser, and an unmatched optional call warns and starts nothing. Marking it required would start the whole video provider on a box that wanted a file browser."
+    }
+  },
+  "_calls_note": "What this app CALLS — a different fact from what a provider ANSWERS. It was `verbs`, a flat list doing double duty: authored by the app to mean a dependency, consumed by the composer as provider routing. That double duty is how a route could exist only because some unrelated app declared it.",
   "vendor": [
     "marked"
   ],
   "provider": {
     "package": "@openrig/studio-host",
     "required": true,
-    "run": {
-      "entry": "host-server.mjs",
-      "args": [
-        "--port",
-        "{{port}}",
-        "--root",
-        "{{root:project}}",
-        "--root",
-        "{{root:media}}"
-      ],
-      "_note": "Root KINDS, bound at install. The box supplies the paths; this provider never names one.",
-      "companions": [
-        {
-          "label": "live rig state",
-          "entry": "live-state.mjs",
-          "args": [
-            "--out",
-            "{{state}}",
-            "--interval",
-            "10000"
-          ],
-          "_note": "Generates the box's REAL observe-state from the running rig, replacing the SDK's shipped demo fixture. Declaring {{state}} is what points the runtime here. Without it a deployed studio renders an invented rig under a live dot, and on a box with no rig at all this writes an explicit no-rig state rather than leaving the fiction on screen."
-        }
-      ]
-    },
-    "_note": "These verbs were special-cased as requires.host_capabilities and served by a private box, so this app installed onto a public studio and rendered an EMPTY PANE. It is an ordinary provider now."
+    "_note": "A REFERENCE, not a run spec. How to start this backend, and the live-state companion that used to sit here, are declared by the provider itself in providers/studio-host/provider.json — the provider is authoritative about itself and an app has no standing to say otherwise. The companion moved because keeping it here pinned a bug rather than removing it: it arrived here only after being lost with the AGENTS app, and retiring FILES the same way would have lost it again."
   }
 }
