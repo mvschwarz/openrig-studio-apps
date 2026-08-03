@@ -107,9 +107,10 @@ test("ruled-out rig injection and Finder reveal have no live surface callers", (
   }
 });
 
-test("disabled review handoff explains the AGENTS path at the interaction point", () => {
+test("disabled review handoff points to the agent sidebar at the interaction point", () => {
   const { surface } = readContract();
-  assert.match(surface, /review handoff[^<\n]*AGENTS|AGENTS[^<\n]*review handoff/i);
+  assert.match(surface, /review handoff[^<\n]*agent sidebar|agent sidebar[^<\n]*review handoff/i);
+  assert.doesNotMatch(surface, /AGENTS/);
 });
 
 test("dynamic export mode resolves to concrete declared review and final routes", () => {

@@ -2104,19 +2104,19 @@
     <div id="nleNoteOverlay" class="nle-overlay" hidden>
       <div class="nle-note-panel">
         <h3>Review note <i id="nleNoteContext"></i></h3>
-        <p class="nle-safe-note">Review handoff lives in AGENTS. MINI-NLE does not inject work into a rig.</p>
+        <p class="nle-safe-note">Review handoff lives in the agent sidebar. MINI-NLE does not inject work into a rig.</p>
         <div class="nle-note-row">
           kind <select id="nleNoteKind" disabled><option>general</option><option>regen</option><option>timing</option><option>audio</option><option>other</option></select>
-          to <select id="nleNoteReceiver" disabled><option>Use AGENTS</option></select>
-          <input id="nleNoteNewReceiver" class="grow" type="text" placeholder="Use AGENTS for review handoff" disabled>
+          to <select id="nleNoteReceiver" disabled><option>Use the agent sidebar</option></select>
+          <input id="nleNoteNewReceiver" class="grow" type="text" placeholder="Use the agent sidebar for review handoff" disabled>
         </div>
-        <textarea id="nleNoteText" placeholder="Use the AGENTS surface to hand review work to a seat" disabled></textarea>
+        <textarea id="nleNoteText" placeholder="Use the agent sidebar to hand review work to a seat" disabled></textarea>
         <div class="nle-note-row">
           <button id="nleNoteAnnotate" type="button" disabled>Annotate frame...</button>
           <span id="nleNoteAnnotChip" class="nle-annot-chip"></span>
           <span class="grow"></span>
-          <button id="nleNoteSave" type="button" class="m-ib primary" disabled>Use AGENTS</button>
-          <button id="nleNoteSend" type="button" disabled>Use AGENTS</button>
+          <button id="nleNoteSave" type="button" class="m-ib primary" disabled>Use the agent sidebar</button>
+          <button id="nleNoteSend" type="button" disabled>Use the agent sidebar</button>
           <button id="nleNoteCancel" type="button">Cancel</button>
         </div>
       </div>
@@ -5206,7 +5206,7 @@
 
     async function nleLoadReceivers() {
       const note = nleNoteState();
-      nleEls.nleNoteReceiver.innerHTML = '<option value="">Use AGENTS for review handoff</option>';
+      nleEls.nleNoteReceiver.innerHTML = '<option value="">Use the agent sidebar for review handoff</option>';
       note.lanes = null;
       note.receiversLoaded = true;
     }
@@ -5304,7 +5304,7 @@
     async function nleLoadFeedbackDrafts({ silent = true, rerenderStrip = true } = {}) {
       nle.feedbackDrafts = [];
       nleUpdateFeedbackSurfaces({ rerenderStrip });
-      if (!silent) nlePatchStatusShow("Review handoff lives in AGENTS.", "warn");
+      if (!silent) nlePatchStatusShow("Review handoff lives in the agent sidebar.", "warn");
       return nle.feedbackDrafts;
     }
 
@@ -5313,7 +5313,7 @@
     }
 
     async function nleSaveFeedbackDraft({ slot, timestamp, kind, text, receiver, annotation }) {
-      throw new Error("Review handoff lives in AGENTS; MINI-NLE does not inject rig work.");
+      throw new Error("Review handoff lives in the agent sidebar; MINI-NLE does not inject rig work.");
     }
 
     async function nleSaveNoteDraft() {
@@ -5338,7 +5338,7 @@
     }
 
     async function nleFlushFeedbackDrafts(receiver = "") {
-      throw new Error("Review handoff lives in AGENTS; MINI-NLE does not inject rig work.");
+      throw new Error("Review handoff lives in the agent sidebar; MINI-NLE does not inject rig work.");
     }
 
     async function nleSendNote() {
@@ -5728,7 +5728,7 @@
             try { window.parent?.postMessage({ t: "open-agent" }, "*"); } catch {}
           });
           body.querySelector("[data-cu-dismiss]").addEventListener("click", async () => {
-            nleEditStatusShow("Review handoff lives in AGENTS; MINI-NLE does not close rig work.", "warn");
+            nleEditStatusShow("Review handoff lives in the agent sidebar; MINI-NLE does not close rig work.", "warn");
           });
           wrap.appendChild(node);
         }
