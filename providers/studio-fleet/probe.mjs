@@ -71,8 +71,24 @@ H=$(curl -s -D - -o /dev/null --max-time 25 https://api.anthropic.com/v1/message
 g(){ printf '%s' "$H" | grep -i "^$1:" | tr -d '\r' | awk '{print $2}' | head -1; }
 STATUS=$(printf '%s' "$H" | head -1 | awk '{print $2}')
 [ -z "$META" ] && META='{}'
-printf '{"ok":true,"status":"%s","src":"%s","meta":%s,"org":"%s","u5":"%s","u7":"%s","r5":"%s","r7":"%s"}\n' \
-  "$STATUS" "$SRC" "$META" "$(g anthropic-organization-id)" \
+# CODEX, and it costs nothing. Claude hides the account behind an API call; codex
+# writes an id_token whose JWT claims already name the account and its plan. Decode
+# it HERE and send back only the claims — the token never travels, same rule.
+CODEX='{}'
+if [ -f "$HOME/.codex/auth.json" ] && command -v python3 >/dev/null 2>&1; then
+  CODEX=$(python3 -c 'import json,sys,base64
+try:
+    t=json.load(open(sys.argv[1])).get("tokens",{}).get("id_token","")
+    b=t.split(".")[1]; b+="="*(-len(b)%4)
+    c=json.loads(base64.urlsafe_b64decode(b))
+    a=c.get("https://api.openai.com/auth",{}) or {}
+    print(json.dumps({"email":c.get("email"),"plan":a.get("chatgpt_plan_type"),
+      "accountId":a.get("chatgpt_account_id"),"until":a.get("chatgpt_subscription_active_until")}))
+except Exception: print("{}")' "$HOME/.codex/auth.json" 2>/dev/null)
+  [ -z "$CODEX" ] && CODEX='{}'
+fi
+printf '{"ok":true,"status":"%s","src":"%s","meta":%s,"codex":%s,"org":"%s","u5":"%s","u7":"%s","r5":"%s","r7":"%s"}\n' \
+  "$STATUS" "$SRC" "$META" "$CODEX" "$(g anthropic-organization-id)" \
   "$(g anthropic-ratelimit-unified-5h-utilization)" "$(g anthropic-ratelimit-unified-7d-utilization)" \
   "$(g anthropic-ratelimit-unified-5h-reset)" "$(g anthropic-ratelimit-unified-7d-reset)"
 `;
@@ -82,6 +98,15 @@ printf '{"ok":true,"status":"%s","src":"%s","meta":%s,"org":"%s","u5":"%s","u7":
 // headers did not come back would read as completely fresh, and the one thing
 // this app exists to prevent is rotating a box INTO an account that is already
 // spent. Absent must stay absent all the way to the screen.
+// The two providers on a machine are independent: a lapsed Claude credential says
+// nothing about the codex account sitting beside it, so this is read out separately
+// and attached to every result shape.
+const codexOf = (d) => {
+  const c = d.codex || {};
+  return c.email ? { email: c.email, plan: c.plan || null, accountId: c.accountId || null,
+                     subscriptionUntil: c.until || null } : null;
+};
+
 const num = (v) => {
   if (v === null || v === undefined || String(v).trim() === "") return null;
   const n = Number(v);
@@ -135,13 +160,14 @@ export function parseProbe(raw) {
     return { sampled: false, reason: `idle — credential lapsed ${hours(m.staleSeconds)} ago; a real use refreshes it`,
       idle: true, credentialExpiredAt: m.expiresAt ? new Date(m.expiresAt).toISOString() : null,
       plan: m.plan || null, tier: m.tier || null, tokenSource: d.src || null,
-      org: d.org || null, httpStatus: d.status || null };
+      codex: codexOf(d), org: d.org || null, httpStatus: d.status || null };
   }
     return {
       sampled: false,
       reason: d.status === "429" ? "at-or-over-limit"
         : auth ? `auth-not-usable (http ${d.status}) — cached token stale or rejected; the box refreshes on next use`
         : `no-usage-headers (http ${d.status || "?"})`,
+    codex: codexOf(d),
       // Named separately from the prose so a surface can branch on it without
       // parsing a sentence.
       authFailed: auth || undefined,
@@ -156,6 +182,7 @@ export function parseProbe(raw) {
     // WHERE the token came from. Boxes differ, and a reading you cannot
     // attribute to a source cannot be compared against one from another box.
     tokenSource: d.src || null, plan: (d.meta||{}).plan || null, tier: (d.meta||{}).tier || null,
+    codex: codexOf(d),
     used5h: u5 === null ? null : Math.round(u5 * 100),
     used7d: u7 === null ? null : Math.round(u7 * 100),
     resets5h: ts(d.r5),

@@ -232,3 +232,29 @@ test("a 401 with a VALID credential is still a real auth failure", () => {
   assert.equal(r.authFailed, true);
   assert.match(r.reason, /auth-not-usable/);
 });
+
+test("the codex account is read even when the claude credential has lapsed", () => {
+  // Two providers live on one machine and they fail independently. A lapsed Claude
+  // credential says nothing about the codex account beside it, so a machine that
+  // cannot be sampled for usage can still answer the question that matters most
+  // day to day: WHICH ACCOUNT IS THIS MACHINE ON.
+  const r = parseProbe(JSON.stringify({
+    ok: true, status: "401", src: "file:claude-credentials",
+    meta: { expired: true, staleSeconds: 7200, plan: "max" },
+    codex: { email: "someone@example.com", plan: "pro",
+             accountId: "acct-1", until: "2026-08-25T15:57:45+00:00" },
+  }));
+  assert.equal(r.idle, true, "the claude side is still idle");
+  assert.equal(r.codex.email, "someone@example.com", "and the codex account is still known");
+  assert.equal(r.codex.plan, "pro");
+});
+
+test("a machine with no codex account reports none rather than an empty shape", () => {
+  // Positive control: an empty object must not render as an account with a blank
+  // email, which would read on the dashboard as a real account nobody can identify.
+  const r = parseProbe(JSON.stringify({
+    ok: true, status: "200", u5: "0.1", u7: "0.2", codex: {},
+  }));
+  assert.equal(r.sampled, true);
+  assert.equal(r.codex, null, "absent must stay absent, here as everywhere");
+});
