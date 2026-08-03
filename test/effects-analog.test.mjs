@@ -37,7 +37,11 @@ test("the surface takes its sampling geometry from the engine and defines none o
   // The failure mode being prevented: the surface computing its own window while
   // the shader walks a different reach. That disagreement does not error — it
   // leaks luma into chroma and tints flat bright areas.
-  assert.match(SURFACE, /ANALOG\.analogWindows\(params, canvas\.width\)/);
+  // Deliberately NOT pinned to the argument's NAME — that is an implementation
+  // detail, and pinning it made this fail when the surface started passing the
+  // curve-resolved values instead of the authored ones. The property is that the
+  // surface delegates the computation, not what it calls its own variable.
+  assert.match(SURFACE, /ANALOG\.analogWindows\(/);
   assert.match(SURFACE, /ANALOG\.ANALOG_INTERNAL_WIDTH/);
   assert.equal(/const ANALOG_TAP_REACH\s*=/.test(SURFACE), false, "surface must not redefine the reach");
   assert.equal(/const ANALOG_INTERNAL_WIDTH\s*=/.test(SURFACE), false, "surface must not redefine the width");

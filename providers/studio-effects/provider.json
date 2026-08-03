@@ -2,17 +2,26 @@
   "package": "@openrig/studio-effects",
   "run": {
     "entry": "effects-server.mjs",
-    "args": ["--port", "{{port}}", "--media", "{{root:media}}"]
+    "args": [
+      "--port",
+      "{{port}}",
+      "--media",
+      "{{root:media}}"
+    ]
   },
-  "serves": ["/media/"],
-  "_serves_note": "Byte route for source images. Declared here because a route the surface fetches but no manifest declares reaches the runtime instead of this provider and 404s — measured twice on other providers before it was understood as a class.",
+  "serves": [
+    "/media/"
+  ],
+  "_serves_note": "Byte route for source images. Declared here because a route the surface fetches but no manifest declares reaches the runtime instead of this provider and 404s \u2014 measured twice on other providers before it was understood as a class.",
   "verbs": [
     "/api/effects/families",
     "/api/effects/shader",
     "/api/effects/resolve",
     "/api/effects/path",
-    "/api/effects/sources"
+    "/api/effects/sources",
+    "/api/effects/curve",
+    "/api/effects/curve/build"
   ],
-  "_verbs_note": "/api/effects/families is the load-bearing one: it publishes every knob, its range, what it means in plain words, the named looks, and how to disambiguate a vague request. An agent drives the effect from that rather than from our source, which is what makes this agent-drivable rather than merely scriptable.",
-  "_why_this_file_exists": "The effect capability belongs to the package that implements it, so an app is a client that names it. That is what lets a timeline app apply a look without owning any of this — and means retiring any single app cannot take the effects with it."
+  "_verbs_note": "/api/effects/families is the load-bearing one: it publishes every knob, its range, what it means in plain words, the named looks, and how to disambiguate a vague request. An agent drives the effect from that rather than from our source, which is what makes this agent-drivable rather than merely scriptable. The curve verbs are declared for the same reason as the rest: an undeclared route reaches the SDK runtime instead of this provider and 404s, which has cost this repo three live defects.",
+  "_why_this_file_exists": "The effect capability belongs to the package that implements it, so an app is a client that names it. That is what lets a timeline app apply a look without owning any of this \u2014 and means retiring any single app cannot take the effects with it."
 }

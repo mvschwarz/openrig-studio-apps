@@ -18,6 +18,7 @@ import { FAMILIES, coerce, applyPreset } from "./engine/schema.mjs";
 import { SCAN_FRAGMENT, SCAN_VERTEX, buildPath } from "./engine/scan.mjs";
 import { TILE_FAMILIES, PALETTES } from "./engine/tile.mjs";
 import { ANALOG_FRAGMENT, ANALOG_VERTEX } from "./engine/analog.mjs";
+import { evalCurves, pulses, ramp, EASING_NAMES } from "./engine/curves.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const arg = (flag, fallback) => {
@@ -92,6 +93,42 @@ http.createServer(async (req, res) => {
       const r = body.preset ? applyPreset(family, body.preset) : coerce(family, body.params || {});
       if (r.error) return json(res, 400, { ok: false, ...r });
       return json(res, 200, { ok: true, family, preset: body.preset ?? null, ...r });
+    }
+
+    // A PARAMETER AS A FUNCTION OF TIME, resolved here for the same reason a
+    // preset is: so a curve means the same thing to the surface, to an agent, and
+    // to a headless render. Evaluating it in the surface would put the definition
+    // of "what this look does at 2.5 seconds" in the one place that cannot render
+    // the final output.
+    //
+    // Returns the patch for ONE instant, so the caller layers it over whatever it
+    // already has rather than being handed a whole parameter set it did not ask
+    // for.
+    if (url.pathname === "/api/effects/curve" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const family = body.family || "scan";
+      if (!FAMILIES[family]) return json(res, 400, { ok: false, error: `no such effect family: ${family}` });
+      const r = evalCurves(body.curves || {}, FAMILIES[family], Number(body.time) || 0, Number(body.duration) || 0);
+      return json(res, 200, { ok: true, family, ...r });
+    }
+
+    // Generators, served rather than reimplemented by every caller. They emit
+    // KEYFRAMES, so what comes back is an ordinary track — there is no second
+    // kind of curve that only one consumer understands.
+    if (url.pathname === "/api/effects/curve/build" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const kind = body.kind || "pulses";
+      try {
+        if (kind === "pulses" || kind === "beats") {
+          const times = Array.isArray(body.times) ? body.times.map(Number).filter(Number.isFinite) : [];
+          if (!times.length) return json(res, 400, { ok: false, error: "times must be a non-empty list of numbers" });
+          return json(res, 200, { ok: true, kind, track: pulses(times, body.options || {}) });
+        }
+        if (kind === "ramp") {
+          return json(res, 200, { ok: true, kind, track: ramp(Number(body.from) || 0, Number(body.to) || 0, body.options || {}) });
+        }
+        return json(res, 400, { ok: false, error: `no such generator: ${kind}`, available: ["pulses", "beats", "ramp"] });
+      } catch (e) { return json(res, 400, { ok: false, error: String(e.message || e) }); }
     }
 
     // The displacement path, computed here so the surface and any headless render
