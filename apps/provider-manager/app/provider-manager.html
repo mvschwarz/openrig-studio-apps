@@ -66,10 +66,15 @@
 
     .tag { --state: var(--unknown); display: inline-flex; align-items: center; gap: 7px; color: var(--state); font-size: 10px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
     .pip { width: 7px; height: 7px; border-radius: 50%; background: var(--state); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state) 12%, transparent); }
+    /* Age of the READING, not a verdict on it. Green is recent, amber is hours,
+       grey is old — none of them mean the number is wrong, only how far back it
+       was taken. A failed refresh is annotated below the box name instead, so a
+       stale credential never wears the colour of a usage problem. */
     .s-sampled { --state: var(--fresh); }
     .s-stale { --state: var(--stale); }
-    .s-unsampled { --state: var(--hot); }
+    .s-old { --state: var(--unknown); }
     .s-never { --state: var(--unknown); }
+    .note { margin-top: 3px; color: var(--stale); font-size: 10px; font-weight: 500; letter-spacing: 0; }
 
     /* A bar is a nudge toward reading a number that might be absent, so it is
        only ever drawn when there IS a number. */
@@ -151,17 +156,32 @@
       return `${Math.round(h / 24)}d ago`;
     };
 
-    const STATE_LABEL = {
-      sampled: ['s-sampled', 'sampled'],
-      'stale-but-last-known': ['s-stale', 'last known'],
-      unsampled: ['s-unsampled', 'unsampled'],
-      'never-sampled': ['s-never', 'never sampled'],
+    // THE READING IS THE LAST GOOD ONE, ALWAYS. Its AGE is the qualifier, not a
+    // separate kind of state — a cached token expires hourly and only refreshes
+    // when a seat uses it, so finding the credential stale is the normal case
+    // and rendering it as degradation would make the normal case look broken.
+    //
+    // What the age must never do is disappear. A number with no age invites
+    // someone to act on it as current, so it leads the column rather than
+    // hiding in a tooltip.
+    const readingTag = (row) => {
+      if (!row.hasReading) {
+        return `<span class="tag s-never"><span class="pip"></span>never read</span>`;
+      }
+      const ms = Date.now() - new Date(row.readingFrom).getTime();
+      const h = ms / 3600000;
+      const cls = h < 1 ? 's-sampled' : h < 24 ? 's-stale' : 's-old';
+      return `<span class="tag ${cls}"><span class="pip"></span>${esc(age(row.readingFrom).replace(/<[^>]*>/g, ''))}</span>`;
     };
 
-    const stateTag = (state, reason) => {
-      const [cls, label] = STATE_LABEL[state] ?? ['s-never', esc(state || 'unknown')];
-      const title = reason ? ` title="${esc(reason)}"` : '';
-      return `<span class="tag ${cls}"${title}><span class="pip"></span>${esc(label)}</span>`;
+    // The attempt is SECONDARY and is annotated, not alarmed. A stale credential
+    // on the box says nothing about the account's headroom, and showing it with
+    // the same weight as a real usage problem is what would argue for rotating
+    // away from a healthy account.
+    const attemptNote = (a) => {
+      if (!a || a.ok) return '';
+      const what = a.authFailed ? 'credential stale on the box' : esc(a.reason || 'probe failed');
+      return `<div class="note" title="${esc(a.reason || '')}">not refreshed — ${what}</div>`;
     };
 
     function render(view) {
@@ -187,19 +207,18 @@
 
       parts.push(`<section><h2>Boxes</h2><div class="table-wrap"><table>
         <thead><tr>
-          <th>Box</th><th>Account</th><th>State</th>
+          <th>Box</th><th>Account</th>
           <th class="numeric">5h used</th><th class="numeric">7d used</th>
-          <th>7d resets</th><th class="numeric">Reading</th>
+          <th>7d resets</th><th>Reading</th>
         </tr></thead><tbody>
         ${boxes.length ? boxes.map(b => `<tr>
-          <td class="name">${esc(b.host)}</td>
+          <td class="name">${esc(b.host)}${attemptNote(b.lastAttempt)}</td>
           <td>${b.label ? esc(b.label) : '<span class="muted">—</span>'}</td>
-          <td>${stateTag(b.state, b.reason)}</td>
           <td class="numeric">${pct(b.used5h)}${bar(b.used5h)}</td>
           <td class="numeric">${pct(b.used7d)}${bar(b.used7d)}</td>
           <td>${when(b.resets7d)}</td>
-          <td class="numeric muted">${age(b.readingFrom)}</td>
-        </tr>`).join('') : `<tr><td colspan="7" class="muted">No boxes declared.</td></tr>`}
+          <td>${readingTag(b)}</td>
+        </tr>`).join('') : `<tr><td colspan="6" class="muted">No boxes declared.</td></tr>`}
         </tbody></table></div></section>`);
 
       // THE HEADLINE, and the reason the app exists: when does a parked account

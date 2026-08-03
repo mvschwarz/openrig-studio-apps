@@ -39,33 +39,61 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
   // Latest sample per box, and the latest SUCCESSFUL sample per account. Those
   // are different questions: the first says what a box is on, the second says
   // what we last knew about an account wherever it was seen.
-  const latestByBox = new Map();
+  // LAST-KNOWN IS THE READING. Not a fallback — the primary.
+  //
+  // The first shape treated a fresh sample as the real answer and last-known as
+  // a degraded substitute. Measured against a real box, that is backwards: a
+  // cached OAuth token expires on the order of an hour and only refreshes when
+  // a seat on that box happens to use it, so an occasional dashboard will find
+  // the credential stale far more often than fresh. Under the old shape the
+  // normal case rendered as degradation.
+  //
+  // So a box's reading is the last good reading we have, and FRESHNESS IS AN
+  // ATTRIBUTE OF IT rather than a different kind of state. Sampling does not
+  // produce a different sort of answer; it makes the same answer younger.
+  //
+  // What that does NOT license is hiding age. A number with no age invites
+  // someone to act on it as current, which is why readingFrom is not optional
+  // and the surface leads with how old it is.
+  const lastGoodByBox = new Map();
+  const lastAttemptByBox = new Map();
   const lastGoodByOrg = new Map();
   for (const s of samples) {
-    if (s.host) latestByBox.set(s.host, s);
-    if (s.sampled && s.org) lastGoodByOrg.set(s.org, s);
+    if (!s.host) continue;
+    lastAttemptByBox.set(s.host, s);
+    if (s.sampled) {
+      lastGoodByBox.set(s.host, s);
+      if (s.org) lastGoodByOrg.set(s.org, s);
+    }
   }
 
   const boxRows = boxes.map((host) => {
-    const s = latestByBox.get(host);
-    if (!s) return { host, state: "never-sampled", account: null, label: null, reason: null,
-      used5h: null, used7d: null, resets5h: null, resets7d: null, readingFrom: null, lastSeen: null };
-    const good = s.sampled ? s : (s.org ? lastGoodByOrg.get(s.org) : null);
+    // Keyed on the BOX, not the org. A failed probe often carries no org at all
+    // — the live 401 did — so an org-keyed lookup loses the box's own history
+    // exactly when it is needed, and every column renders as a dash while a
+    // perfectly good reading from an hour ago sits in the store.
+    const good = lastGoodByBox.get(host) || null;
+    const attempt = lastAttemptByBox.get(host) || null;
     return {
       host,
-      account: s.org || good?.org || null,
-      label: labelFor(labels, s.org || good?.org),
-      // Fresh reading, or an honest fallback that says which it is. A dashboard
-      // that shows a number without saying how old it is invites someone to act
-      // on it as if it were current.
-      state: s.sampled ? "sampled" : (good ? "stale-but-last-known" : "unsampled"),
-      reason: s.sampled ? null : s.reason || null,
-      used5h: (s.sampled ? s : good)?.used5h ?? null,
-      used7d: (s.sampled ? s : good)?.used7d ?? null,
-      resets5h: (s.sampled ? s : good)?.resets5h ?? null,
-      resets7d: (s.sampled ? s : good)?.resets7d ?? null,
-      readingFrom: s.sampled ? s.at : good?.at ?? null,
-      lastSeen: s.at,
+      account: good?.org ?? attempt?.org ?? null,
+      label: (good?.org ?? attempt?.org) ? labelFor(labels, good?.org ?? attempt?.org) : null,
+      // The reading. Always the last good one; null only if there has never been one.
+      used5h: good?.used5h ?? null,
+      used7d: good?.used7d ?? null,
+      resets5h: good?.resets5h ?? null,
+      resets7d: good?.resets7d ?? null,
+      readingFrom: good?.at ?? null,
+      hasReading: Boolean(good),
+      // The attempt is SECONDARY — it says whether the reading got any younger,
+      // not whether the reading is trustworthy. An auth failure here means the
+      // credential on that box is stale; it says nothing about the account.
+      lastAttempt: attempt && {
+        at: attempt.at,
+        ok: Boolean(attempt.sampled),
+        reason: attempt.sampled ? null : attempt.reason ?? null,
+        authFailed: attempt.authFailed ?? undefined,
+      },
     };
   });
 

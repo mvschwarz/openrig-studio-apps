@@ -37,22 +37,43 @@ test("rate-limited responses that DO carry headers are read normally", () => {
   assert.equal(r.used7d, 100);
 });
 
-test("a failed sample falls back to the last good one and says so", () => {
+test("the last good reading IS the reading, and a failed probe does not disturb it", () => {
+  // Same property the old shape pinned, re-expressed: last-known is primary, not
+  // a degraded substitute. A failed probe means the reading did not get younger.
   const samples = [
     { host: "box-b", sampled: true, org: "org-b", used7d: 97, resets7d: "2026-08-04T09:00:00Z", at: "2026-08-03T00:00:00Z" },
     { host: "box-b", sampled: false, org: "org-b", reason: "at-or-over-limit", at: "2026-08-03T01:00:00Z" },
   ];
-  const v = buildView({ samples, boxes: ["box-b"] });
-  const b = v.boxes[0];
-  assert.equal(b.state, "stale-but-last-known", "staleness is information, not an error");
-  assert.equal(b.used7d, 97, "the last good reading survives a failed probe");
-  assert.equal(b.reason, "at-or-over-limit", "and it says why it could not be refreshed");
+  const b = buildView({ samples, boxes: ["box-b"] }).boxes[0];
+  assert.equal(b.used7d, 97, "the reading survives a failed probe");
+  assert.equal(b.readingFrom, "2026-08-03T00:00:00Z", "and carries the age of the reading, not of the attempt");
+  assert.equal(b.hasReading, true);
+  assert.equal(b.lastAttempt.ok, false, "the attempt is recorded separately");
+  assert.equal(b.lastAttempt.reason, "at-or-over-limit", "and says why it could not be refreshed");
 });
 
-test("an unreachable box invents nothing", () => {
+test("a box whose probe carried no account still keeps its own reading", () => {
+  // THE LIVE 401 CASE. A failed probe often carries no org — matti's did — and
+  // the earlier shape looked the last-good reading up BY ORG, so it lost the
+  // box's own history exactly when it was needed and rendered every column as a
+  // dash while a good reading sat in the store. Keyed on the box now.
+  const samples = [
+    { host: "box-d", sampled: true, org: "org-d", used5h: 4, used7d: 41, at: "2026-08-03T00:00:00Z" },
+    { host: "box-d", sampled: false, reason: "auth-not-usable (http 401)", authFailed: true, at: "2026-08-03T01:00:00Z" },
+  ];
+  const b = buildView({ samples, boxes: ["box-d"] }).boxes[0];
+  assert.equal(b.used7d, 41, "an org-less failure must not erase the box's reading");
+  assert.equal(b.account, "org-d", "and the account is still known from the last good reading");
+  assert.equal(b.lastAttempt.authFailed, true, "the stale credential is reported as its own fact");
+});
+
+test("a box that has never been read shows nothing rather than zero", () => {
   const v = buildView({ samples: [{ host: "box-c", sampled: false, reason: "unreachable: ssh timeout", at: "2026-08-03T01:00:00Z" }], boxes: ["box-c"] });
-  assert.equal(v.boxes[0].state, "unsampled");
-  assert.equal(v.boxes[0].used7d, null, "an unreachable box must show no number at all");
+  const b = v.boxes[0];
+  assert.equal(b.hasReading, false);
+  assert.equal(b.used7d, null, "never read must show no number at all");
+  assert.equal(b.readingFrom, null, "and no reading age to imply one exists");
+  assert.equal(b.lastAttempt.ok, false);
 });
 
 test("a parked account still reports when it frees up", () => {
