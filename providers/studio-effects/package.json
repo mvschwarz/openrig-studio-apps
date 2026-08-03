@@ -1,0 +1,9 @@
+{
+  "name": "@openrig/studio-effects",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Frame effects for the studio: a scanner-glass warp, with an analog-video and a tile-mosaic family to follow. Parameters are named for what a person perceives, so an agent can drive them from a description.",
+  "main": "effects-server.mjs"
+}

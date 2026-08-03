@@ -1,0 +1,30 @@
+{
+  "manifest_version": 1,
+  "id": "effects",
+  "name": "EFFECTS",
+  "summary": "Dial a look on a frame — scanner glass now, analog video and tile mosaic to follow. Every knob is named for what you see, so an agent can drive it from a description.",
+  "category": "create",
+  "maker": { "name": "OpenRig", "url": "https://github.com/openrig" },
+  "surface": {
+    "entry": "app/effects.html",
+    "path": "/surfaces/effects.html",
+    "glyph": "◎",
+    "hint": "put a look on a frame — and tell an agent to change it"
+  },
+  "roots": {
+    "media": { "required": false }
+  },
+  "_roots_note": "Optional on purpose. With no media bound the app renders a built-in test frame rather than an empty stage, so the effect can be seen and driven on a machine that has no pictures on it yet. An app that needs content to prove it works cannot be evaluated before someone commits content to it.",
+  "calls": {
+    "/api/effects/families": { "required": true },
+    "/api/effects/shader": { "required": true },
+    "/api/effects/resolve": { "required": true },
+    "/api/effects/path": { "required": true },
+    "/api/effects/sources": { "required": false }
+  },
+  "provider": {
+    "package": "@openrig/studio-effects",
+    "required": true,
+    "_note": "A reference, not a run spec. The effect capability belongs to the package that implements it, which is what lets a timeline app apply the same look without owning any of this."
+  }
+}
