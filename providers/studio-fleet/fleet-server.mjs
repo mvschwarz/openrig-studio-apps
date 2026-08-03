@@ -24,6 +24,9 @@
 // disposable location is a file that vanishes on a reset nobody connected to it.
 import http from "node:http";
 import fs from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+const execFileP = promisify(execFile);
 import path from "node:path";
 import { probeBox } from "./probe.mjs";
 import { appendSample, readSamples, buildView } from "./fleet-state.mjs";
@@ -50,8 +53,32 @@ function loadConfig() {
   };
   try {
     const c = JSON.parse(fs.readFileSync(CONFIG, "utf8"));
-    return { boxes: Array.isArray(c.boxes) ? c.boxes : [], labels: c.labels || {}, error: null };
+    return { boxes: Array.isArray(c.boxes) ? c.boxes : [], labels: c.labels || {}, operator: c.operator || null, error: null };
   } catch (e) { return { boxes: [], labels: {}, error: `fleet config unreadable: ${e.message}` }; }
+}
+
+
+// Operator-supplied facts live beside the samples and never inside them: a typed
+// value must never be mistaken for something we measured.
+const OVERRIDES = path.join(FLEET_DIR, "overrides.json");
+function loadOverrides() {
+  try {
+    const o = JSON.parse(fs.readFileSync(OVERRIDES, "utf8"));
+    return { accounts: o.accounts || {}, assignments: o.assignments || {} };
+  } catch { return { accounts: {}, assignments: {} }; }
+}
+function saveOverrides(o) {
+  fs.mkdirSync(FLEET_DIR, { recursive: true });
+  fs.writeFileSync(OVERRIDES, JSON.stringify(o, null, 2) + "\n");
+}
+const readBody = (req) => new Promise((resolve) => {
+  let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => resolve(b));
+});
+function viewNow() {
+  const cfg = loadConfig();
+  const ov = loadOverrides();
+  return { ...buildView({ samples: readSamples(STORE), boxes: cfg.boxes, labels: cfg.labels, overrides: ov }),
+           configError: cfg.error };
 }
 
 http.createServer(async (req, res) => {
@@ -62,9 +89,7 @@ http.createServer(async (req, res) => {
     // What we know, without touching anything. Cheap, spends nothing, and is
     // what the surface polls — so opening the dashboard costs no budget.
     if (url.pathname === "/api/fleet/state") {
-      const cfg = loadConfig();
-      const view = buildView({ samples: readSamples(STORE), boxes: cfg.boxes, labels: cfg.labels });
-      return json(res, 200, { ok: true, ...view, configError: cfg.error });
+      return json(res, 200, { ok: true, ...viewNow() });
     }
 
     // Spend real requests, deliberately, because someone asked. Never on a timer.
@@ -82,8 +107,113 @@ http.createServer(async (req, res) => {
         appendSample(STORE, r);
         results.push(r);
       }
-      const view = buildView({ samples: readSamples(STORE), boxes: cfg.boxes, labels: cfg.labels });
-      return json(res, 200, { ok: true, sampled: results.length, spentCalls: results.length, ...view });
+      return json(res, 200, { ok: true, sampled: results.length, spentCalls: results.length, ...viewNow() });
+    }
+
+    // WHAT THE OPERATOR KNOWS THAT THE PROBE CANNOT READ. Two facts fall in this
+    // category and both are permanent, not stopgaps:
+    //
+    //   the account's NAME — the credential exposes an opaque org id, and the
+    //     human-meaningful identity is the email on the subscription;
+    //   the CAPACITY — a live percentage needs a live credential, which an idle
+    //     machine does not have, and the provider warns the human directly long
+    //     before this dashboard could.
+    //
+    // So the operator types them, and a measured reading overrides a typed one
+    // whenever a measurement actually happens. Typed values are marked as typed
+    // rather than blended into readings — a number whose provenance is unknown
+    // cannot be trusted at a glance, which is the whole point of the surface.
+    if (url.pathname === "/api/fleet/account" && req.method === "POST") {
+      const body = JSON.parse(await readBody(req) || "{}");
+      const id = String(body.account || "").trim();
+      if (!id) return json(res, 400, { ok: false, error: "account id is required" });
+      const ov = loadOverrides();
+      const cur = ov.accounts[id] || {};
+      if (body.label !== undefined) cur.label = String(body.label).trim() || undefined;
+      if (body.capacityLeft !== undefined) {
+        const n = body.capacityLeft === null || body.capacityLeft === "" ? null : Number(body.capacityLeft);
+        if (n !== null && (!Number.isFinite(n) || n < 0 || n > 100)) {
+          return json(res, 400, { ok: false, error: "capacityLeft must be 0-100, or null to clear it" });
+        }
+        cur.capacityLeft = n;
+        cur.capacitySetAt = n === null ? undefined : new Date().toISOString();
+      }
+      ov.accounts[id] = cur;
+      saveOverrides(ov);
+      return json(res, 200, { ok: true, ...viewNow() });
+    }
+
+    // WHICH ACCOUNT A MACHINE IS ON. This RECORDS the assignment; it does not
+    // perform the switch. Saying so plainly matters — a control that looks like
+    // it rotated a credential and only wrote a note would be worse than no
+    // control at all.
+    if (url.pathname === "/api/fleet/assign" && req.method === "POST") {
+      const body = JSON.parse(await readBody(req) || "{}");
+      const host = String(body.host || "").trim();
+      const provider = String(body.provider || "").trim();
+      if (!host) return json(res, 400, { ok: false, error: "host is required" });
+      if (provider !== "claude" && provider !== "codex") {
+        return json(res, 400, { ok: false, error: "provider must be claude or codex" });
+      }
+      const ov = loadOverrides();
+      const cur = ov.assignments[host] || {};
+      cur[provider] = String(body.account || "").trim() || undefined;
+      cur[provider + "SetAt"] = cur[provider] ? new Date().toISOString() : undefined;
+      ov.assignments[host] = cur;
+      saveOverrides(ov);
+      return json(res, 200, { ok: true, recorded: true, performed: false, ...viewNow() });
+    }
+
+    // THE SWITCH. This dispatches the work to an agent; it does not rotate the
+    // credential itself, and the response says which of those happened.
+    //
+    // WHY AN AGENT AND NOT THIS SERVER. The two providers need different things.
+    // A Claude switch is close to programmatic — one token file on the machine,
+    // and every session picks it up on its next login shell. A Codex switch is
+    // per-agent: each running session holds its own copy and has to be restarted
+    // individually. Encoding both here would put credential-rotation logic in a
+    // dashboard, on every machine, forever. An agent on the target machine already
+    // has the reach and the judgement, so the dashboard states the intent and the
+    // agent carries it out.
+    if (url.pathname === "/api/fleet/switch" && req.method === "POST") {
+      const body = JSON.parse(await readBody(req) || "{}");
+      const host = String(body.host || "").trim();
+      const provider = String(body.provider || "").trim();
+      const account = String(body.account || "").trim();
+      if (!host || !account) return json(res, 400, { ok: false, error: "host and account are required" });
+      if (provider !== "claude" && provider !== "codex") {
+        return json(res, 400, { ok: false, error: "provider must be claude or codex" });
+      }
+      const cfg = loadConfig();
+      const seat = cfg.operator || null;
+      if (!seat) {
+        return json(res, 400, { ok: false,
+          error: 'no operator seat declared — add "operator": "<session>" to fleet.json so the request has somewhere to go' });
+      }
+
+      // Record the intent FIRST. If the dispatch fails the operator still has a
+      // durable note of what was asked for, rather than a button that did nothing.
+      const ov = loadOverrides();
+      ov.assignments[host] = { ...(ov.assignments[host] || {}),
+        [provider]: account, [provider + "SetAt"]: new Date().toISOString(),
+        [provider + "Pending"]: true };
+      saveOverrides(ov);
+
+      const instruction = [
+        `Switch the ${provider} account on ${host} to ${account}.`,
+        provider === "claude"
+          ? "Claude reads one token file per machine and every session picks it up on its next login shell, so this is a single credential update plus whatever re-auth link the operator needs."
+          : "Codex holds a copy per running session, so each agent on that machine has to be restarted individually after the credential changes.",
+        "Report back what you actually changed and what still needs the operator.",
+      ].join(" ");
+
+      try {
+        await execFileP("rig", ["send", seat, instruction]);
+        return json(res, 200, { ok: true, dispatchedTo: seat, performed: false, instruction, ...viewNow() });
+      } catch (e) {
+        return json(res, 502, { ok: false, recorded: true, dispatchedTo: null,
+          error: `recorded the intent, but could not reach ${seat}: ${String(e.message || e).split("\n")[0]}` });
+      }
     }
 
     res.writeHead(404); res.end();

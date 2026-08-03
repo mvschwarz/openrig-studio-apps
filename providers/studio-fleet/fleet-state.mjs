@@ -68,7 +68,11 @@ export function weeklySlot(observedIso) {
   return `${day}s ${hh}:${mm} UTC`;
 }
 
-export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
+export function buildView({ samples, boxes, labels = {}, now = Date.now(), overrides = {} }) {
+  // Operator-supplied facts, kept separate from samples all the way through so a
+  // typed number is never silently presented as something we measured.
+  const ovAccounts = overrides.accounts || {};
+  const ovAssign = overrides.assignments || {};
   // Latest sample per box, and the latest SUCCESSFUL sample per account. Those
   // are different questions: the first says what a box is on, the second says
   // what we last knew about an account wherever it was seen.
@@ -124,6 +128,20 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
       resets7d: good?.resets7d ?? null,
       readingFrom: good?.at ?? null,
       hasReading: Boolean(good),
+      // Identity and plan come from whichever observation is NEWEST, good or not.
+      // They are read off disk and do not depend on the usage call succeeding, so
+      // tying them to the last GOOD sample would blank the account name on exactly
+      // the machines that could not be sampled — which is when you most want to
+      // know what they are running.
+      plan: attempt?.plan ?? good?.plan ?? null,
+      tier: attempt?.tier ?? good?.tier ?? null,
+      codex: attempt?.codex ?? good?.codex ?? null,
+      // An operator assignment is the authority on which account a machine is on.
+      // The probe reports what it FOUND; the operator is who put it there, and
+      // right after a switch the probe has not looked again yet.
+      claudeAccount: ovAssign[host]?.claude ?? good?.org ?? attempt?.org ?? null,
+      codexAccount: ovAssign[host]?.codex ?? (attempt?.codex ?? good?.codex)?.email ?? null,
+      idle: attempt?.idle ?? undefined,
       // The attempt is SECONDARY — it says whether the reading got any younger,
       // not whether the reading is trustworthy. An auth failure here means the
       // credential on that box is stale; it says nothing about the account.
@@ -140,8 +158,45 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
   // account is the case the human most often forgets, so it belongs in the view
   // rather than dropping out of it when it stops being attached to anything.
   const onBoxNow = new Set(boxRows.map((b) => b.account).filter(Boolean));
+
+  // CODEX ACCOUNTS ARE ACCOUNTS TOO. They are identified by email rather than by
+  // an opaque id, they are read off disk rather than measured, and they carry no
+  // usage figure — but they are still a thing you assign to a machine and still a
+  // thing you need to see the capacity of. Leaving them out meant the dropdown for
+  // one of the two providers had nothing to choose from.
+  const codexSeen = new Map();
+  for (const s2 of samples) {
+    const c = s2.codex;
+    if (c?.email && !codexSeen.has(c.email)) codexSeen.set(c.email, { ...c, host: s2.host, at: s2.at });
+  }
+  const codexRows = [...codexSeen.values()].map((c) => {
+    const ov = ovAccounts[c.email] || {};
+    const onBox = boxRows.find((b) => b.codexAccount === c.email)?.host ?? null;
+    const cap = ov.capacityLeft === undefined ? null : ov.capacityLeft;
+    return {
+      account: c.email,
+      provider: "codex",
+      label: ov.label || c.email,
+      plan: c.plan ?? null,
+      capacityLeft: cap,
+      // Typed or nothing: no probe reads a codex usage figure today, so claiming
+      // anything else here would be inventing a measurement.
+      capacitySource: cap === null ? "none" : "typed",
+      capacitySetAt: ov.capacitySetAt ?? null,
+      resetsWeeklyAt: ov.resetsWeeklyAt ?? null,
+      nextResetAt: null,
+      onBox,
+      lastSeenOnHost: onBox ?? c.host ?? null,
+      lastSeenAt: c.at ?? null,
+      subscriptionUntil: c.subscriptionUntil ?? null,
+      state: cap === null ? "not measured — usage unreadable for this provider"
+           : cap <= 5 ? "nearly spent" : cap <= 25 ? "running low" : "has room",
+      readyToSwitchTo: !onBox && (cap ?? 0) >= 50,
+    };
+  });
   const accountRows = [...lastGoodByOrg.values()].map((s) => ({
     account: s.org,
+    provider: "claude",
     label: labelFor(labels, s.org),
     used5h: s.used5h ?? null,
     used7d: s.used7d ?? null,
@@ -175,10 +230,37 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
     // drove anything. That answer needs no live credential at all.
     lastSeenOnHost: a.onBox ?? lastHostByOrg.get(a.account) ?? null,
     lastSeenAt: lastSeenByOrg.get(a.account) ?? a.lastGoodAt ?? null,
-    // Presumed, never measured. After a reset the account is usable again; how
-    // much has been spent SINCE is unknown until something samples it.
-    capacityLeft: a.readingSupersededByReset ? null : a.capacityLeft,
-    state: a.readingSupersededByReset ? "reset-since-last-reading — presumed clear, unmeasured"
+
+    // A MEASUREMENT BEATS A TYPED VALUE, but only when it is NEWER. Otherwise an
+    // operator correcting a stale number gets overwritten by the stale number on
+    // the next render, which makes the field feel broken and teaches people not
+    // to trust it. Typed values are LABELLED as typed rather than blended in — a
+    // number whose provenance is unknown cannot be read at a glance, which is the
+    // whole purpose of this surface.
+    ...(() => {
+      const ov = ovAccounts[a.account] || {};
+      const typedAt = ov.capacitySetAt ? Date.parse(ov.capacitySetAt) : null;
+      const measuredAt = a.lastGoodAt ? Date.parse(a.lastGoodAt) : null;
+      const typedWins = ov.capacityLeft !== undefined && ov.capacityLeft !== null &&
+        (measuredAt === null || (typedAt !== null && typedAt >= measuredAt));
+      return {
+        label: ov.label || a.label,
+        capacityLeft: typedWins ? ov.capacityLeft : a.capacityLeft,
+        capacitySource: typedWins ? "typed" : (a.capacityLeft === null ? "none" : "measured"),
+        capacitySetAt: typedWins ? ov.capacitySetAt : null,
+      };
+    })(),
+
+    // A PASSED RESET RESTORES THE CAPACITY, and the surface says 100 rather than
+    // "unknown". The weekly refresh is the one thing here we can be certain of —
+    // it is a schedule, not a measurement — so reporting nothing would hide the
+    // very answer this tool exists to give. What is NOT certain is how much has
+    // been spent since, so the source stays "presumed" and never claims to be a
+    // reading. An operator who has used it since can type over the top.
+    capacityLeft: a.readingSupersededByReset ? 100 : a.capacityLeft,
+    capacitySource: a.readingSupersededByReset ? "presumed" : a.capacitySource,
+    justReset: a.readingSupersededByReset || undefined,
+    state: a.readingSupersededByReset ? "reset — full capacity, presumed"
          : a.capacityLeft === null ? "never measured"
          : a.capacityLeft <= 5 ? "nearly spent"
          : a.capacityLeft <= 25 ? "running low" : "has room",
@@ -194,7 +276,7 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
     if (x.readyToSwitchTo !== y.readyToSwitchTo) return x.readyToSwitchTo ? -1 : 1;
     const cap = (a) => a.readingSupersededByReset ? 100 : (a.capacityLeft ?? -1);
     return cap(y) - cap(x);
-  });
+  }).concat(codexRows.sort((x, y) => (y.capacityLeft ?? -1) - (x.capacityLeft ?? -1)));
 
   return {
     generatedAt: new Date(now).toISOString(),

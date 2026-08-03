@@ -63,6 +63,27 @@
     .name { color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
     .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .muted { color: var(--muted); }
+    /* Editable cells look editable but stay quiet — this is a reference table
+       people read far more often than they type into. */
+    .edit, select {
+      font: inherit; font-size: 11px; color: var(--text);
+      background: rgba(255,255,255,.04); border: 1px solid var(--line);
+      border-radius: 4px; padding: 4px 7px; max-width: 100%;
+    }
+    .edit:focus, select:focus { outline: none; border-color: var(--info); }
+    .edit.num { width: 62px; text-align: right; }
+    select { min-width: 160px; }
+    /* An account you can switch to is the answer to the question being asked, so
+       it is marked in the row rather than left to be worked out from a number. */
+    tr.ready td { background: color-mix(in srgb, var(--fresh) 7%, transparent); }
+    /* An account that has just refilled is the answer to "what do I switch to",
+       so it is the loudest thing on the page for as long as that is true. */
+    tr.just-reset td { background: color-mix(in srgb, var(--fresh) 15%, transparent); box-shadow: inset 2px 0 0 var(--fresh); }
+    .pick { white-space: nowrap; }
+    .switch { padding: 4px 9px; margin-left: 6px; font-size: 11px; }
+    .switch:hover:not(:disabled) { border-color: var(--fresh); color: var(--fresh); }
+    .hint { margin: -4px 0 10px; color: var(--muted); font-size: 11px; }
+    .tag.ok { --state: var(--fresh); }
 
     .tag { --state: var(--unknown); display: inline-flex; align-items: center; gap: 7px; color: var(--state); font-size: 10px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
     .pip { width: 7px; height: 7px; border-radius: 50%; background: var(--state); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state) 12%, transparent); }
@@ -126,6 +147,11 @@
     // exists to prevent, and the one that would send a box onto a dead account.
     // Absent stays absent, all the way to the screen.
     const pct = (v) => (v === null || v === undefined) ? '<span class="muted">—</span>' : `${esc(v)}%`;
+    // Room LEFT is the number the decision is made on. Same absent-never-zero
+    // rule as pct: an unknown capacity must not render as a full account, which
+    // would invite switching onto something already spent.
+    const left = (v) => (v === null || v === undefined)
+      ? '<span class="muted">unknown</span>' : `${esc(v)}%`;
 
     const bar = (v) => {
       if (v === null || v === undefined) return '';
@@ -198,50 +224,90 @@
           what happened to answer, so a box that was merely asleep would vanish from it.</div>`);
       }
 
-      const parked = accounts.filter(a => a.availableAgainAt).length;
+      const ready = accounts.filter(a => a.readyToSwitchTo).length;
       parts.push(`<div class="metrics">
-        <div class="metric"><b>${boxes.length}</b><span>box${boxes.length === 1 ? '' : 'es'}</span></div>
+        <div class="metric"><b>${ready}</b><span>ready to switch to</span></div>
+        <div class="metric"><b>${boxes.length}</b><span>machine${boxes.length === 1 ? '' : 's'}</span></div>
         <div class="metric"><b>${accounts.length}</b><span>account${accounts.length === 1 ? '' : 's'} seen</span></div>
-        <div class="metric"><b>${parked}</b><span>parked</span></div>
       </div>`);
 
-      parts.push(`<section><h2>Boxes</h2><div class="table-wrap"><table>
+      // MACHINES FIRST, because this is the table being read. The question is
+      // "what is each machine on, how much has it got, and when does it refill" —
+      // so both providers sit side by side on one row and nothing has to be joined
+      // in the reader's head.
+      const byId = new Map(accounts.map(a => [a.account, a]));
+      const opts = (sel) => ['<option value="">— none —</option>'].concat(
+        accounts.map(a => `<option value="${esc(a.account)}"${a.account === sel ? ' selected' : ''}>${
+          esc(a.label || a.account)}${a.capacityLeft === null || a.capacityLeft === undefined ? '' : ` · ${esc(a.capacityLeft)}% left`}</option>`)
+      ).join('');
+      const cells = (id) => {
+        const a = byId.get(id);
+        if (!a) return '<td class="numeric muted">—</td><td class="muted">—</td>';
+        return `<td class="numeric">${left(a.capacityLeft)}</td>
+                <td>${a.resetsWeeklyAt ? esc(a.resetsWeeklyAt) : '<span class="muted">—</span>'}</td>`;
+      };
+
+      parts.push(`<section><h2>Machines</h2><div class="table-wrap"><table>
         <thead><tr>
-          <th>Box</th><th>Account</th>
-          <th class="numeric">5h used</th><th class="numeric">7d used</th>
-          <th>7d resets</th><th>Reading</th>
+          <th>Machine</th>
+          <th>Claude account</th><th class="numeric">left</th><th>resets</th>
+          <th>Codex account</th><th class="numeric">left</th><th>resets</th>
         </tr></thead><tbody>
         ${boxes.length ? boxes.map(b => `<tr>
           <td class="name">${esc(b.host)}${attemptNote(b.lastAttempt)}</td>
-          <td>${b.label ? esc(b.label) : '<span class="muted">—</span>'}</td>
-          <td class="numeric">${pct(b.used5h)}${bar(b.used5h)}</td>
-          <td class="numeric">${pct(b.used7d)}${bar(b.used7d)}</td>
-          <td>${when(b.resets7d)}</td>
-          <td>${readingTag(b)}</td>
-        </tr>`).join('') : `<tr><td colspan="6" class="muted">No boxes declared.</td></tr>`}
+          <td class="pick"><select data-host="${esc(b.host)}" data-provider="claude">${opts(b.claudeAccount)}</select>
+              <button class="switch" data-host="${esc(b.host)}" data-provider="claude">switch</button></td>
+          ${cells(b.claudeAccount)}
+          <td class="pick"><select data-host="${esc(b.host)}" data-provider="codex">${opts(b.codexAccount)}</select>
+              <button class="switch" data-host="${esc(b.host)}" data-provider="codex">switch</button></td>
+          ${cells(b.codexAccount)}
+        </tr>`).join('') : `<tr><td colspan="7" class="muted">No machines declared.</td></tr>`}
         </tbody></table></div></section>`);
 
-      // THE HEADLINE, and the reason the app exists: when does a parked account
-      // become usable again. It is derived from that account's last good
-      // reading, because nothing can sample an account attached to no box — and
-      // a reset timestamp is a fact about the past, so it stays true.
-      parts.push(`<section><h2>Accounts</h2><div class="table-wrap"><table>
+      // ONE TABLE PER PROVIDER. The two are not comparable: a Claude account has a
+      // measurable usage figure and a weekly reset, a Codex account has neither
+      // today. Mixing them puts permanent dashes in half the rows and invites the
+      // reader to think something is broken.
+      //
+      // Name and capacity are EDITABLE because neither can always be measured: the
+      // credential exposes an opaque id rather than the email on the subscription,
+      // and a live percentage needs a live credential, which an idle machine does
+      // not have. A real measurement overrides a typed value whenever one happens.
+      const accountTable = (title, rows, note) => `<section><h2>${esc(title)}</h2>
+        ${note ? `<p class="hint">${note}</p>` : ''}
+        <div class="table-wrap"><table>
         <thead><tr>
-          <th>Account</th><th>On box</th>
-          <th class="numeric">5h used</th><th class="numeric">7d used</th>
-          <th>Available again</th><th class="numeric">Last good</th>
+          <th>Account</th><th class="numeric">Capacity left</th><th>Source</th>
+          <th>Resets</th><th>Next reset</th><th>On</th>
         </tr></thead><tbody>
-        ${accounts.length ? accounts.map(a => `<tr>
-          <td class="name">${esc(a.label)}</td>
-          <td>${a.onBox ? esc(a.onBox) : '<span class="muted">parked</span>'}</td>
-          <td class="numeric">${pct(a.used5h)}${bar(a.used5h)}</td>
-          <td class="numeric">${pct(a.used7d)}${bar(a.used7d)}</td>
-          <td>${a.availableAgainAt ? when(a.availableAgainAt) : '<span class="muted">in use</span>'}</td>
-          <td class="numeric muted">${age(a.lastGoodAt)}</td>
-        </tr>`).join('') : `<tr><td colspan="6" class="muted">Nothing sampled yet.</td></tr>`}
-        </tbody></table></div></section>`);
+        ${rows.length ? rows.map(a => `<tr class="${a.justReset ? 'just-reset' : a.readyToSwitchTo ? 'ready' : ''}">
+          <td class="name"><input class="edit" data-account="${esc(a.account)}" data-field="label"
+              value="${esc(a.label && a.label !== a.account ? a.label : '')}"
+              placeholder="${esc(a.account)}" title="${esc(a.account)}"
+              >${a.justReset ? ' <span class="tag ok">just reset</span>'
+                : a.readyToSwitchTo ? ' <span class="tag ok">ready</span>' : ''}</td>
+          <td class="numeric"><input class="edit num" type="number" min="0" max="100"
+              data-account="${esc(a.account)}" data-field="capacityLeft"
+              value="${a.capacityLeft === null || a.capacityLeft === undefined ? '' : esc(a.capacityLeft)}"
+              placeholder="—"> %</td>
+          <td class="muted">${esc(a.capacitySource === 'none' ? '—' : a.capacitySource || '')}</td>
+          <td>${a.resetsWeeklyAt ? esc(a.resetsWeeklyAt) : '<span class="muted">—</span>'}</td>
+          <td>${a.nextResetAt ? when(a.nextResetAt) : '<span class="muted">—</span>'}</td>
+          <td>${a.onBox ? esc(a.onBox)
+                : a.lastSeenOnHost ? `<span class="muted">last on ${esc(a.lastSeenOnHost)}</span>`
+                : '<span class="muted">parked</span>'}</td>
+        </tr>`).join('') : `<tr><td colspan="6" class="muted">None seen yet.</td></tr>`}
+        </tbody></table></div></section>`;
+
+      parts.push(accountTable('Claude accounts', accounts.filter(a => a.provider !== 'codex')));
+      parts.push(accountTable('Codex accounts', accounts.filter(a => a.provider === 'codex'),
+        'Usage is not readable for this provider yet, so capacity here is whatever you type.'));
 
       content.innerHTML = parts.join('');
+
+      // DELEGATED, and deliberately so: this surface rewrites its own content on
+      // every refresh, so a handler bound to an element would be detached the
+      // first time anything changed and the control would silently stop working.
 
       // Only quote a price when there is something to buy. "Spends 0 real
       // requests" on an empty fleet is technically true and reads as broken.
@@ -295,6 +361,71 @@
     // Re-reading STATE is free, so this refresh costs nothing. It deliberately
     // never triggers a sample.
     setInterval(load, 30000);
+    // A failed write must SAY so. Silently reverting a dropdown would look like
+    // the control simply does not work, which is worse than an error.
+    let noteTimer = null;
+    function note(msg) {
+      costEl.textContent = msg;
+      clearTimeout(noteTimer);
+      noteTimer = setTimeout(() => { costEl.textContent = 'reading what is already known — costs nothing'; }, 6000);
+    }
+
+    // The switch button. It DISPATCHES the work to an agent — it does not rotate
+    // the credential here — and the wording says so, because a control that looked
+    // like it had switched something while only writing a note would be worse than
+    // no control at all.
+    content.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('button.switch');
+      if (!btn) return;
+      const row = btn.closest('td');
+      const account = row.querySelector('select')?.value;
+      if (!account) { note('pick an account first'); return; }
+      btn.disabled = true; btn.textContent = 'sending…';
+      try {
+        const d = await post('/api/fleet/switch', {
+          host: btn.dataset.host, provider: btn.dataset.provider, account,
+        });
+        note(`asked ${d.dispatchedTo} to switch ${btn.dataset.provider} on ${btn.dataset.host} — not done yet, they will report back`);
+        render(d);
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'switch';
+        note(`could not dispatch: ${e.message}`);
+      }
+    });
+
+    const post = async (path, body) => {
+      const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' },
+                                    body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || `HTTP ${r.status}`);
+      return d;
+    };
+
+    // Which account a machine is on. This RECORDS the assignment — it does not
+    // rotate the credential. The surface says so out loud rather than letting a
+    // dropdown imply it did something it did not.
+    content.addEventListener('change', async (ev) => {
+      const sel = ev.target.closest('select[data-host]');
+      if (sel) {
+        sel.disabled = true;
+        try {
+          render(await post('/api/fleet/assign', {
+            host: sel.dataset.host, provider: sel.dataset.provider, account: sel.value,
+          }));
+        } catch (e) { sel.disabled = false; note(`could not record that: ${e.message}`); }
+        return;
+      }
+      const inp = ev.target.closest('input.edit[data-account]');
+      if (inp) {
+        const field = inp.dataset.field;
+        try {
+          render(await post('/api/fleet/account', {
+            account: inp.dataset.account,
+            [field]: field === 'capacityLeft' ? (inp.value === '' ? null : Number(inp.value)) : inp.value,
+          }));
+        } catch (e) { note(`could not save that: ${e.message}`); }
+      }
+    });
   </script>
 </body>
 </html>

@@ -282,8 +282,14 @@ test("a reading the reset has overtaken is retired, not carried forward", () => 
   const v = buildView({ samples, boxes: [], now: Date.parse("2026-08-06T00:00:00Z") });
   const a = v.accounts[0];
   assert.equal(a.readingSupersededByReset, true);
-  assert.equal(a.capacityLeft, null, "no number may be invented for a period nobody sampled");
-  assert.match(a.state, /presumed clear/);
+  // The weekly refresh is a SCHEDULE, not a measurement, so the capacity it
+  // restores is knowable with certainty and is reported as 100. What is not
+  // knowable is how much has been spent since, which is why the source says
+  // presumed and never claims to be a reading.
+  assert.equal(a.capacityLeft, 100, "a passed reset restores the capacity");
+  assert.equal(a.capacitySource, "presumed", "and never presents itself as measured");
+  assert.equal(a.justReset, true, "so the surface can highlight it");
+  assert.match(a.state, /full capacity, presumed/);
   assert.equal(a.nextResetAt, "2026-08-11T03:00:00.000Z", "and the next refill is still known exactly");
 });
 
@@ -332,4 +338,20 @@ test("an account keeps its host mapping even when its usage cannot be read", () 
   const a = v.accounts[0];
   assert.equal(a.lastSeenOnHost, "box-a", "the mapping survives an unreadable sample");
   assert.equal(a.lastSeenAt, "2026-08-03T09:00:00Z", "and it is the LATEST sighting, not the last good read");
+});
+
+test("identity survives a machine that could not be sampled", () => {
+  // Plan and account are read off disk, so they do not depend on the usage call
+  // succeeding. Tying them to the last GOOD sample blanks the account name on
+  // exactly the machines that could not be sampled — which is when you most want
+  // to know what they are running.
+  const samples = [
+    { host: "box-a", sampled: true, org: "acct-1", used7d: 20, at: "2026-08-01T00:00:00Z" },
+    { host: "box-a", sampled: false, idle: true, reason: "idle", plan: "max",
+      codex: { email: "someone@example.com", plan: "pro" }, at: "2026-08-03T09:00:00Z" },
+  ];
+  const b = buildView({ samples, boxes: ["box-a"], now: Date.parse("2026-08-03T10:00:00Z") }).boxes[0];
+  assert.equal(b.plan, "max", "the plan came from the newest observation, not the last good one");
+  assert.equal(b.codex.email, "someone@example.com");
+  assert.equal(b.used7d, 20, "and the usage reading is still the last good one");
 });
