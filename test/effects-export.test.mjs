@@ -179,9 +179,14 @@ function scan(src) {
   // survives as code: noisy at worst, and it cannot hide a bind.
   //
   // For a guard, prefer an over-approximation that can only be TOO STRICT over a
-  // precise rule that can be silently TOO LOOSE. So the list stays short, the
-  // undecidable case is asserted ABSENT by a test of its own, and the
-  // interpolation check no longer depends on this heuristic being right at all.
+  // precise rule that can be silently TOO LOOSE. So the list stays short.
+  //
+  // (This paragraph used to continue "…the undecidable case is asserted ABSENT by
+  // a test of its own, and the interpolation check no longer depends on this
+  // heuristic being right at all." BOTH HALVES WENT FALSE when those two things
+  // were deleted — stale on success, in the commit that earned it. The surviving
+  // statement is smaller and better: this heuristic's blast radius is ORDINARY
+  // CODE ONLY, because there is no separate interpolation path left to get wrong.)
   const opensRegex = (at) => {
     for (let k = at - 1; k >= 0; k--) {
       const c = src[k];
@@ -264,6 +269,26 @@ function scan(src) {
 
 const SCAN = scan(SURFACE);
 const CODE = SCAN.code;
+
+test("the scanner reads code and only code — the control for the guard below", () => {
+  // A CONTROL HARNESS NEEDS ITS OWN CONTROL. The guard is only as good as what it
+  // is looking at, and the last two defects were both in this layer rather than
+  // in the rule. These are review's exact defeating inputs, committed so they
+  // re-run rather than being a claim I made once.
+  const stripped = scan([
+    `// gl.bindTexture(gl.TEXTURE_2D, deadTex);`,
+    `const endpoint = "https://example.test"; gl.bindTexture(gl.TEXTURE_2D, liveTex);`,
+    `if (/\\/\\/'"/.test(x)) gl.bindTexture(gl.TEXTURE_2D, afterRegexTex);`,
+    `/* gl.bindTexture(gl.TEXTURE_2D, blockTex); */ gl.bindTexture(gl.TEXTURE_2D, afterBlockTex);`,
+  ].join("\n")).code;
+  const seen = [...stripped.matchAll(/gl\.bindTexture/g)].length;
+  assert.equal(seen, 3,
+    `expected the live binds only: commented-out gone, the ones after a string, a\n` +
+    `quote-bearing regex and a block comment kept. Saw ${seen}.`);
+  assert.equal(stripped.split("\n").length, 4, "line count must be preserved for line numbers");
+  assert.ok(!stripped.includes("deadTex") && !stripped.includes("blockTex"), "dead code survived");
+  assert.ok(stripped.includes("liveTex") && stripped.includes("afterRegexTex"), "live code was eaten");
+});
 
 test("CONVENTION: each texture bind spells out its own unit selection", () => {
   // WHAT THIS IS, AND THE NAME NOW SAYS IT: a CONVENTION about how binds are
@@ -424,8 +449,14 @@ test("CONVENTION: each texture bind spells out its own unit selection", () => {
 // a bind satisfies it. So does one activation outside a loop whose body binds
 // twice — traced, and the second iteration puts the path texture on unit 0, which
 // is the original corruption passing the guard that exists for it.
-// It cannot follow a helper, an alias, or a bind reached through either, and it
-// does not read inside template interpolation.
+// It cannot follow a helper, an alias, or a bind reached through either.
+//
+// IT DOES NOW READ INSIDE A TEMPLATE INTERPOLATION — that line used to say it did
+// not, and it is the one item in this block that was ever false. Under the current
+// scan a `${...}` is walked as code, so a bind written there is subject to the
+// convention like any other. Worth correcting loudly rather than quietly: review
+// singled this block out as demonstrated rather than imagined, which is exactly
+// what makes a stale item in it more expensive than one anywhere else in the file.
 //
 // THERE WAS A TEST HERE ASSERTING THE COVERED BINDS ARE STRAIGHT-LINE. It is
 // deleted, not repaired. It searched two preceding lines for a control-flow
