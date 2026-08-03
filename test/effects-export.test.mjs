@@ -292,37 +292,57 @@ test("CONVENTION: each texture bind spells out its own unit selection", () => {
   // Both are the proximity proxy that three earlier rounds already removed from
   // this file — so the answer is to stop advertising the capability, not to
   // measure it slightly better.
-  // AND PAIR ONLY WITHIN A BLOCK. Deleting the helper layer did NOT fix review's
-  // uncalled-helper case, and I verified that by planting it rather than assuming
-  // the smaller guard was safer: the BASE scan already counted a gl.activeTexture
-  // sitting inside a function body as though it had executed, so
+  // ADJACENCY, NOT SCOPE. This replaces a brace-depth rule that review defeated
+  // in both directions, and the reason it was defeated is the point:
   //
-  //     function activate() { gl.activeTexture(gl.TEXTURE0 + UNIT_SRC); }
-  //     gl.bindTexture(gl.TEXTURE_2D, srcTex);          // helper never called
+  //   ACCEPTED BUT WRONG: `const act = () => gl.activeTexture(...)` never called,
+  //   then a bind. An expression-bodied arrow opens no block, so its activation
+  //   had the same computed depth as the later bind. The braced form failed and
+  //   the arrow form passed — the SAME uncalled helper, discriminated by syntax.
+  //   That is the uncalled-helper defect relocated from a character window to a
+  //   brace shape, which is the third proxy this guard has worn.
   //
-  // still passed with the bind landing on whatever unit was current. The root
-  // cause was one level below the layer I removed.
+  //   REJECTED BUT RIGHT: `if (true) /[{]/.test("{");` between an activation and
+  //   its bind. The regex heuristic reads `/` after `)` as division, so the `{`
+  //   inside the character class counted as a real block opener and correct code
+  //   was rejected. Two heuristics COMPOUNDED: a grammar misread became a scope
+  //   error. Deriving scope needs JavaScript statement grammar, and a hand-written
+  //   lexer does not have it. No parser is available here and this repository has
+  //   no dependencies at all, so the answer is to stop needing one.
   //
-  // Brace depth settles it exactly, and it is structure rather than distance: an
-  // activation can only be consumed by a bind in the SAME block, with no block
-  // closing between them. A body-scoped activation therefore cannot pay for a
-  // bind outside that body, however near it sits. This is computable precisely
-  // from the token stream — no window, no threshold, nothing to tune.
-  const depth = new Array(CODE.length);
-  { let d = 0;
-    for (let i = 0; i < CODE.length; i++) {
-      if (CODE[i] === "}") d--;
-      depth[i] = d;
-      if (CODE[i] === "{") d++;
-    } }
-  const minDepthBetween = (a, b) => {
-    let m = Infinity;
-    for (let i = a; i <= b; i++) if (depth[i] < m) m = depth[i];
-    return m;
-  };
+  // SO THE RULE ASKS ONLY WHAT A TOKEN STREAM CAN ANSWER EXACTLY: the activation
+  // must be the statement IMMEDIATELY BEFORE the bind — nothing between them but
+  // whitespace and semicolons — and it must stand in STATEMENT POSITION, i.e.
+  // preceded by `;`, `{`, `}` or the start of the file. No depth, no window, no
+  // inference about what executes.
+  //
+  // Both defeating cases die on the definition rather than on a better guess: an
+  // arrow helper's activation is preceded by `=>` so it is not a statement, and a
+  // braced helper's activation has a `}` between it and the bind. A regex
+  // misclassification can no longer become a scope error because there is no
+  // scope being computed.
   const calls = [...CODE.matchAll(/gl\.(activeTexture|bindTexture)\s*\(/g)]
     .map((m) => ({ kind: m[1], at: m.index }));
   const lineOf = (idx) => CODE.slice(0, idx).split("\n").length;
+
+  // end of a call's argument list, by paren matching over already-lexed code
+  const callEnd = (at) => {
+    let i = CODE.indexOf("(", at), d = 0;
+    for (; i < CODE.length; i++) {
+      if (CODE[i] === "(") d++;
+      else if (CODE[i] === ")" && --d === 0) return i + 1;
+    }
+    return CODE.length;
+  };
+  const inStatementPosition = (at) => {
+    for (let i = at - 1; i >= 0; i--) {
+      const c = CODE[i];
+      if (c === " " || c === "\t" || c === "\n" || c === "\r") continue;
+      return c === ";" || c === "{" || c === "}";
+    }
+    return true;                                   // start of file
+  };
+  const onlyGapBetween = (a, b) => /^[\s;]*$/.test(CODE.slice(a, b));
 
   assert.ok(calls.filter((c) => c.kind === "bindTexture").length >= 3,
     "expected the source, path and draw-time binds to be present");
@@ -331,10 +351,10 @@ test("CONVENTION: each texture bind spells out its own unit selection", () => {
   let pending = null;              // an activation not yet claimed by a bind
   for (const c of calls) {
     if (c.kind === "activeTexture") { pending = c.at; continue; }
-    const sameBlock = pending !== null
-      && depth[pending] === depth[c.at]
-      && minDepthBetween(pending, c.at) >= depth[c.at];
-    if (!sameBlock) unowned.push(lineOf(c.at));
+    const owns = pending !== null
+      && inStatementPosition(pending)
+      && onlyGapBetween(callEnd(pending), c.at);
+    if (!owns) unowned.push(lineOf(c.at));
     pending = null;                // a bind CONSUMES it; the next needs its own
   }
   assert.deepEqual(unowned, [],
@@ -347,9 +367,16 @@ test("CONVENTION: each texture bind spells out its own unit selection", () => {
     `human can audit by reading, and because a bind inheriting someone else's\n` +
     `active unit is the defect that put both samplers on the path texture.\n` +
     `\n` +
+    `THE SUPPORTED FORM IS EXACTLY ONE SHAPE: gl.activeTexture(...) as the\n` +
+    `statement immediately before the bind, with nothing between them but\n` +
+    `whitespace and semicolons. Anything else fails, on purpose — this asks only\n` +
+    `what a token stream can answer exactly, because every earlier version that\n` +
+    `tried to infer SCOPE was defeated by a syntax it had not anticipated.\n` +
+    `\n` +
     `SO YOUR CODE MAY WELL BE CORRECT AND STILL FAIL HERE. Cases that are correct\n` +
     `at runtime and rejected anyway, all measured rather than supposed:\n` +
-    `  - the activation factored into a helper. Helpers are NOT analysed at all.\n` +
+    `  - the activation factored into a helper, braced or arrow. NOT analysed.\n` +
+    `  - any statement between the activation and its bind, even a harmless one.\n` +
     `  - an unbind (binding null) while its unit is already current. Traced: that\n` +
     `    genuinely clears the right unit. It is rejected because this check cannot\n` +
     `    tell it apart from the same call made while a DIFFERENT unit is current,\n` +
