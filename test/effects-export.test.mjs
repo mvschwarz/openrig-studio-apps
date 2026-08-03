@@ -124,15 +124,35 @@ test("every texture bind selects its unit first", () => {
   // leaves unit 0 intact. FAILS ONCE, RECOVERS ON REPEAT, ONLY ON THE FIRST DRAW
   // AFTER A CHANGE is the signature of a race, which is why it survived a
   // serialisation fix aimed at the wrong cause.
-  const lines = SURFACE.split("\n");
-  const unguarded = [];
-  lines.forEach((line, i) => {
-    if (!line.includes("bindTexture")) return;
-    const window = lines.slice(Math.max(0, i - 3), i + 1).join("\n");
-    if (!window.includes("activeTexture")) unguarded.push(i + 1);
-  });
-  assert.deepEqual(unguarded, [],
-    `bindTexture without selecting a unit writes into state it does not own (lines ${unguarded})`);
+  //
+  // THE FIRST VERSION OF THIS TEST WAS DEFEATED IN REVIEW, and the reason is worth
+  // more than the fix: it asked whether ANY activeTexture appeared within three
+  // preceding LINES. So an unguarded bind placed immediately after a guarded one
+  // inherited its neighbour's evidence and passed. That is a PROXY for the
+  // property — proximity to an activation — rather than the property itself, and
+  // a test that pins a proxy is a status line that reports on something adjacent
+  // to what it claims.
+  //
+  // THE PROPERTY IS ORDINAL, NOT POSITIONAL: between any two consecutive binds
+  // there must be an activation, because each bind needs a unit selected for IT.
+  // Distance is irrelevant; order is everything.
+  const calls = [...SURFACE.matchAll(/gl\.(activeTexture|bindTexture)\s*\(/g)]
+    .map((m) => ({ kind: m[1], at: m.index }));
+  const lineOf = (idx) => SURFACE.slice(0, idx).split("\n").length;
+
+  assert.ok(calls.filter((c) => c.kind === "bindTexture").length >= 3,
+    "expected the source, path and draw-time binds to be present");
+
+  const unowned = [];
+  let sinceActivate = null;            // the last activation seen, or null if consumed
+  for (const c of calls) {
+    if (c.kind === "activeTexture") { sinceActivate = c.at; continue; }
+    // a bind CONSUMES the activation before it; the next bind needs its own
+    if (sinceActivate === null) unowned.push(lineOf(c.at));
+    sinceActivate = null;
+  }
+  assert.deepEqual(unowned, [],
+    `these binds do not select a unit of their own (lines ${unowned}) — each one writes into whichever unit the previous caller left active`);
 });
 
 test("the sampler units are named once rather than spelled out at each call", () => {
