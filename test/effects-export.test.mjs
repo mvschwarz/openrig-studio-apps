@@ -126,7 +126,15 @@ test("save-frame reads the live canvas rather than assuming one renderer", () =>
 // KNOWN AND DELIBERATE: the inside of a template literal is blanked whole,
 // including any `${...}` interpolation. The shader lives in one of those, so
 // treating it as code would scan GLSL as JavaScript. A bind written inside an
-// interpolation would be missed; none is, and the limits test below says so.
+// interpolation would therefore be MISSED.
+//
+// That gap is held by a TEST, not by a sentence — see "no texture call hides
+// inside a template interpolation" below. The first draft of this comment said
+// "none is", which was true when measured and is exactly the status line that
+// goes stale silently on the day someone adds one. Orch-lead caught that I had
+// refused that reasoning for regex literals one paragraph earlier and handled
+// them with a mechanism: same shape, same hand, two treatments. Both are
+// mechanisms now.
 function codeOnly(src) {
   const out = src.split("");
   const blank = (i) => { if (out[i] !== "\n") out[i] = " "; };
@@ -188,6 +196,60 @@ function codeOnly(src) {
 }
 
 const CODE = codeOnly(SURFACE);
+
+// The interpolations the scanner above deliberately cannot see. Same walk, but
+// recording `${...}` spans instead of blanking them, so the blind spot can be
+// asserted on rather than described.
+function templateInterpolations(src) {
+  const spans = [];
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i], d = src[i + 1];
+    if (c === "/" && d === "/") { while (i < n && src[i] !== "\n") i++; continue; }
+    if (c === "/" && d === "*") { i += 2; while (i < n && !(src[i] === "*" && src[i + 1] === "/")) i++; i += 2; continue; }
+    if (c === '"' || c === "'") {
+      i++;
+      while (i < n && src[i] !== c) { if (src[i] === "\\") i++; i++; }
+      i++; continue;
+    }
+    if (c === "`") {
+      i++;
+      while (i < n && src[i] !== "`") {
+        if (src[i] === "\\") { i += 2; continue; }
+        if (src[i] === "$" && src[i + 1] === "{") {
+          const start = i + 2;
+          let d2 = 1; i += 2;
+          while (i < n && d2 > 0) { if (src[i] === "{") d2++; else if (src[i] === "}") d2--; if (d2) i++; }
+          spans.push(src.slice(start, i));
+          i++; continue;
+        }
+        i++;
+      }
+      i++; continue;
+    }
+    i++;
+  }
+  return spans;
+}
+
+test("no texture call hides inside a template interpolation", () => {
+  // MECHANISM FOR A GAP I FIRST WROTE AS A STATUS LINE. The scanner blanks
+  // template bodies whole, so a bind inside `${...}` is invisible to the guard.
+  // Saying "there aren't any" was true the day I measured it and would stay in
+  // the file, unchanged and wrong, the day someone adds one.
+  const hits = templateInterpolations(SURFACE)
+    .filter((s) => /gl\.(bindTexture|activeTexture)\s*\(/.test(s));
+  assert.deepEqual(hits, [],
+    `a texture bind or activation is written inside a template interpolation.\n` +
+    `The convention guard cannot see in there — it blanks template bodies so the\n` +
+    `shader is not scanned as JavaScript. Move the call into ordinary code, or\n` +
+    `widen the scanner deliberately and say what covers this instead.`);
+  // Positive control: the walker must actually be finding interpolations, or the
+  // assertion above is an empty set proving nothing.
+  assert.ok(templateInterpolations(SURFACE).length >= 5,
+    "found almost no interpolations — the walker is broken, not the source clean");
+});
 
 test("the scanner reads code and only code — the control for the guard below", () => {
   // A CONTROL HARNESS NEEDS ITS OWN CONTROL. The guard is only as good as what it
