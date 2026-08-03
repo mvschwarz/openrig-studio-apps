@@ -124,9 +124,18 @@ test("save-frame reads the live canvas rather than assuming one renderer", () =>
 // breaks so reported line numbers stay true.
 //
 // KNOWN AND DELIBERATE: the inside of a template literal is blanked whole,
-// including any `${...}` interpolation. The shader lives in one of those, so
-// treating it as code would scan GLSL as JavaScript. A bind written inside an
-// interpolation would therefore be MISSED.
+// including any `${...}` interpolation. A bind written inside an interpolation
+// is therefore MISSED by the convention guard.
+//
+// 🛑 THE STATED REASON FOR THAT WAS FALSE AND IS WITHDRAWN. This comment said
+// "the shader lives in one of those, so treating it as code would scan GLSL as
+// JavaScript." MEASURED: this surface contains ZERO occurrences of
+// `#version 300 es` — the shaders are FETCHED from /api/effects/shader and
+// compiled from the response. `scan(SURFACE)` never sees them. The rationale was
+// inherited from an earlier shape of this file and I never re-measured it, so a
+// design decision stood on a premise nobody had checked. Blanking template bodies
+// is still right — a template body is not executable code — but that is the
+// reason, not the shader.
 //
 // That gap is held by a TEST, not by a sentence. The first draft of this comment
 // said "none is", which was true when measured and is exactly the status line
@@ -280,15 +289,31 @@ test("no texture call hides inside a template interpolation", () => {
   // bind fell outside it. The pattern is that any check depending on finding the
   // exact END of an interpolation inherits every gap in the lexer's grammar.
   //
-  // So the load-bearing assertion asks a SMALLER question that cannot be defeated
-  // that way: does a texture call appear ANYWHERE inside a template body? Span
-  // boundaries are irrelevant to it. Truncating a `${...}` cannot hide a call from
-  // it, because it never consults the span at all.
+  // So the load-bearing assertion asks a SMALLER question: does a texture call
+  // appear ANYWHERE inside a template body? Span boundaries are irrelevant to it,
+  // so a truncated `${...}` cannot hide a call from it.
   //
-  // The span check is kept as well — it localises the finding and reads better in
-  // a failure — but it is no longer the only thing standing between a live bind
-  // and a green suite. This is the same move as the guard itself: when a mechanism
-  // keeps losing to grammar, ask something grammar cannot swallow.
+  // 🛑 AND THAT IS STILL NOT ENOUGH. THIS COMPANION IS A PARTIAL MECHANISM AND
+  // REVIEW HAS DEFEATED IT. Reproduced by me at this pin — it passes 13/13 while
+  // the bind executes:
+  //
+  //     void `${await /* c */ /}`/.test(""), (() => {
+  //       gl.activeTexture(...); gl.bindTexture(...); })(), ""}`;
+  //
+  // A block comment after `await` slips past the slash-absence assertion; the
+  // unrecognised regex then carries BOTH a `}` and a BACKTICK, which ends the
+  // recorded template body early, so the later pair sits outside every recorded
+  // view — and the pair itself satisfies the adjacency convention. Three lexer
+  // gaps compounding, which is the shape of every defeat in this loop.
+  //
+  // DO NOT READ A GREEN RUN HERE AS "NO TEXTURE CALL IS HIDDEN IN A TEMPLATE."
+  // It means no SIMPLE one is. The honest boundary is that a hand-written lexer
+  // cannot answer this question about arbitrary JavaScript, and the runtime
+  // evidence has always been the GL-level trace in review, never this file.
+  // Whether this companion should exist at all, be deleted like the straight-line
+  // one, or wait for real grammar is a SCOPE question and is routed, not decided
+  // here. It is left in place, honest about its limit, rather than removed
+  // silently or widened a seventh time.
   const bodyHits = SCAN.templateBodies
     .filter((b) => /gl\.(bindTexture|activeTexture)\s*\(/.test(b));
   assert.deepEqual(bodyHits.map((b) => b.slice(0, 60)), [],
