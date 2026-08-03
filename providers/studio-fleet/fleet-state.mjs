@@ -35,6 +35,39 @@ export function labelFor(labels, org) {
   return (org && labels[org]) || (org ? `${String(org).slice(0, 8)}…` : "unknown account");
 }
 
+
+// THE WEEKLY RESET IS THE ONE THING WE CAN KNOW EXACTLY, AND IT IS THE ANSWER
+// THAT MATTERS MOST. Usage is a live number that needs a live credential; the
+// reset is a SCHEDULE. Limits refresh weekly at the same day and time for a
+// given account, so a single observed reset timestamp projects forward forever:
+// add seven days until it lands in the future.
+//
+// That is what makes a parked account answerable. Nothing can sample an account
+// attached to no box — but "when does it come back" was never a question about
+// now. It is arithmetic on a fact from the past.
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function projectWeeklyReset(observedIso, now = Date.now()) {
+  if (!observedIso) return null;
+  const t = Date.parse(observedIso);
+  if (!Number.isFinite(t)) return null;
+  let next = t;
+  while (next <= now) next += WEEK_MS;
+  return new Date(next).toISOString();
+}
+
+// The recurring slot in words, because "Tuesdays 09:00 UTC" is what a person
+// plans around, and it is stable even when the next date is not memorable.
+export function weeklySlot(observedIso) {
+  if (!observedIso) return null;
+  const d = new Date(observedIso);
+  if (Number.isNaN(d.getTime())) return null;
+  const day = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getUTCDay()];
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${day}s ${hh}:${mm} UTC`;
+}
+
 export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
   // Latest sample per box, and the latest SUCCESSFUL sample per account. Those
   // are different questions: the first says what a box is on, the second says
@@ -114,7 +147,31 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
     // become usable again. Derived from the last good reading, because nothing
     // can sample an account that is attached to nothing.
     availableAgainAt: onBoxNow.has(s.org) ? null : s.resets7d ?? null,
-  })).sort((a, b) => (b.used7d ?? -1) - (a.used7d ?? -1));
+
+    // WHAT YOU ACTUALLY DECIDE ON: how much room is left, and when it refills.
+    // `used` and `left` are the same fact, but the decision is "can I send work
+    // here", so the view states it that way round.
+    capacityLeft: s.used7d === null || s.used7d === undefined ? null : Math.max(0, 100 - s.used7d),
+    resetsWeeklyAt: weeklySlot(s.resets7d),
+    nextResetAt: projectWeeklyReset(s.resets7d, now),
+
+    // A reading taken BEFORE its own reset has been overtaken by it. The limit
+    // refreshed, so an old 97% no longer describes this account — but we did not
+    // measure the new value and must not invent one. Say the reading is spent,
+    // say why, and let a fresh sample replace it.
+    readingSupersededByReset: Boolean(
+      s.resets7d && Date.parse(s.resets7d) <= now && Date.parse(s.at) < Date.parse(s.resets7d),
+    ),
+  })).map((a) => ({
+    ...a,
+    // Presumed, never measured. After a reset the account is usable again; how
+    // much has been spent SINCE is unknown until something samples it.
+    capacityLeft: a.readingSupersededByReset ? null : a.capacityLeft,
+    state: a.readingSupersededByReset ? "reset-since-last-reading — presumed clear, unmeasured"
+         : a.capacityLeft === null ? "never measured"
+         : a.capacityLeft <= 5 ? "nearly spent"
+         : a.capacityLeft <= 25 ? "running low" : "has room",
+  })).sort((a, b) => (a.capacityLeft ?? 999) - (b.capacityLeft ?? 999));
 
   return {
     generatedAt: new Date(now).toISOString(),

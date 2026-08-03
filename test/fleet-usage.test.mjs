@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseProbe } from "../providers/studio-fleet/probe.mjs";
-import { buildView } from "../providers/studio-fleet/fleet-state.mjs";
+import { buildView, projectWeeklyReset, weeklySlot } from "../providers/studio-fleet/fleet-state.mjs";
 import fs from "node:fs";
 
 const probe = (o) => JSON.stringify({ ok: true, status: "200", org: "org-a", ...o });
@@ -257,4 +257,42 @@ test("a machine with no codex account reports none rather than an empty shape", 
   }));
   assert.equal(r.sampled, true);
   assert.equal(r.codex, null, "absent must stay absent, here as everywhere");
+});
+
+test("a weekly reset observed once projects forward forever", () => {
+  // THE THING THAT MAKES A PARKED ACCOUNT ANSWERABLE. Limits refresh weekly at
+  // the same day and time, so one observed reset is a schedule, not a snapshot.
+  // "When is it safe to switch back" is then arithmetic on a past fact, and needs
+  // no live credential — which is the whole problem with sampling an idle account.
+  const observed = "2026-08-05T03:00:00.000Z";              // a Wednesday
+  const twoWeeksLater = Date.parse("2026-08-17T00:00:00Z");
+  assert.equal(projectWeeklyReset(observed, twoWeeksLater), "2026-08-19T03:00:00.000Z");
+  assert.equal(projectWeeklyReset(observed, Date.parse("2026-08-04T00:00:00Z")), observed,
+    "a reset still in the future is already the answer");
+  assert.equal(weeklySlot(observed), "Wednesdays 03:00 UTC", "the recurring slot is what a person plans around");
+  assert.equal(projectWeeklyReset(null), null, "no observation, no projection — never a guess");
+});
+
+test("a reading the reset has overtaken is retired, not carried forward", () => {
+  // An account measured at 97% BEFORE its reset is not 97% now. The limit
+  // refreshed. But we did not measure the new value, so the honest report is
+  // "presumed clear, unmeasured" — not 0%, and not a stale 97%.
+  const samples = [{ host: "box-a", sampled: true, org: "acct-1", used7d: 97,
+                     resets7d: "2026-08-04T03:00:00.000Z", at: "2026-08-03T00:00:00.000Z" }];
+  const v = buildView({ samples, boxes: [], now: Date.parse("2026-08-06T00:00:00Z") });
+  const a = v.accounts[0];
+  assert.equal(a.readingSupersededByReset, true);
+  assert.equal(a.capacityLeft, null, "no number may be invented for a period nobody sampled");
+  assert.match(a.state, /presumed clear/);
+  assert.equal(a.nextResetAt, "2026-08-11T03:00:00.000Z", "and the next refill is still known exactly");
+});
+
+test("capacity is reported as room LEFT, because that is the decision", () => {
+  const samples = [{ host: "box-a", sampled: true, org: "acct-1", used7d: 97,
+                     resets7d: "2026-08-09T03:00:00.000Z", at: "2026-08-03T00:00:00.000Z" }];
+  const v = buildView({ samples, boxes: ["box-a"], now: Date.parse("2026-08-03T06:00:00Z") });
+  const a = v.accounts[0];
+  assert.equal(a.capacityLeft, 3, "97% used is 3% left — same fact, decision-shaped");
+  assert.equal(a.state, "nearly spent");
+  assert.equal(a.resetsWeeklyAt, "Sundays 03:00 UTC");
 });
