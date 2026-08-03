@@ -110,7 +110,7 @@
     let ALL = null, FAMILY = null, familyId = 'scan';
     let PROGRAM = null, params = {}, srcTex = null, pathTex = null;
     let srcW = 0, srcH = 0;
-    let TILE = null, atlas = [], atlasFor = '';
+    let TILE = null, ANALOG = null, atlas = [], atlasFor = '';
     let srcEl = null, isVideo = false, videoLoop = null;
     const c2d = $('#c2d'), vid = $('#vid');
 
@@ -125,6 +125,8 @@
       families: () => ALL,
       family: (id) => { if (id) { familyId = id; $('#family').value = id; return useFamily(); } return familyId; },
       stats: () => lastStats,
+      windows: () => lastWindows,
+      renderSize: () => ({ width: canvas.width, height: canvas.height, sourceWidth: srcW, sourceHeight: srcH }),
       frameHash: () => frameHash(),
     };
 
@@ -132,6 +134,9 @@
       try {
         ALL = (await (await fetch('/api/effects/families')).json()).families;
         TILE = await import('/api/effects/engine/tile.mjs');
+        // Imported, not copied. The sampling geometry has to be identical here and
+        // in any headless render, and the only way to guarantee that is one file.
+        ANALOG = await import('/api/effects/engine/analog.mjs');
         const sel = $('#family');
         sel.innerHTML = '';
         for (const [id, f] of Object.entries(ALL)) {
@@ -139,8 +144,6 @@
         }
         sel.value = familyId;
         sel.addEventListener('change', async () => { familyId = sel.value; await useFamily(); });
-        const sh = await (await fetch('/api/effects/shader?family=scan')).json();
-        PROGRAM = build(sh.vertex, sh.fragment);
         await useFamily();
         await loadSources();
         await useSource('');
@@ -153,12 +156,28 @@
     // gather that belongs on the GPU, tile is a few hundred independent block draws
     // that does not. Forcing one path on both would cost performance in one
     // direction and complexity in the other.
+    const programs = {};
     async function useFamily() {
       FAMILY = ALL[familyId];
+      if (FAMILY.engine === 'webgl2') {
+        // Each GPU family has its own shader, fetched from the provider rather than
+        // carried here. Cached per family so switching back and forth does not
+        // recompile.
+        if (!programs[familyId]) {
+          const sh = await (await fetch(`/api/effects/shader?family=${familyId}`)).json();
+          if (!sh.ok) { fail(sh.error || 'no shader'); return; }
+          programs[familyId] = build(sh.vertex, sh.fragment);
+        }
+        PROGRAM = programs[familyId];
+      }
       $('#eyebrow').textContent = FAMILY.name;
       $('#summary').textContent = FAMILY.summary;
       const gpu = FAMILY.engine === 'webgl2';
       canvas.hidden = !gpu; c2d.hidden = gpu;
+      // Families do not agree on render size — analog caps its internal width —
+      // so a switch has to re-upload rather than inherit the previous family's
+      // canvas dimensions.
+      if (srcEl && gpu) upload(srcEl, srcW, srcH);
       buildControls();
       applyDefaults();
       atlasFor = '';
@@ -233,7 +252,7 @@
       syncInputs(); draw();
     }
     // GENERATION COUNTER, and it is not defensive programming — it fixes a real
-    // defect studio-qa reproduced: preset() is asynchronous because the PROVIDER
+    // defect an independent QA drive reproduced: preset() is asynchronous because the PROVIDER
     // resolves it, so a set() issued while that request was in flight was applied,
     // returned to the caller as applied, and then silently overwritten when the
     // preset's response landed. The control appeared to do nothing, and a LATER
@@ -284,9 +303,16 @@
       return c;
     }
 
+    // ANALOG RENDERS AT A REDUCED INTERNAL WIDTH, and this is a CORRECTNESS
+    // requirement before it is a performance one — the width, the tap reach and
+    // the window formula all come from the engine module so there is exactly one
+    // definition of the sampling geometry. See analog.mjs for why.
     function upload(img, w, h) {
       srcW = w; srcH = h;
-      canvas.width = w; canvas.height = h;
+      const scale = (familyId === 'analog' && ANALOG)
+        ? Math.min(1, ANALOG.ANALOG_INTERNAL_WIDTH / w) : 1;
+      canvas.width = Math.max(2, Math.round(w * scale));
+      canvas.height = Math.max(2, Math.round(h * scale));
       if (!srcTex) srcTex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, srcTex);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -347,7 +373,7 @@
       if (!isVideo || vid.paused) return;
       // Re-upload the current frame, then draw. The frame clock is the VIDEO's,
       // not the render loop's, so playback speed does not depend on refresh rate.
-      if (FAMILY.engine === 'webgl2') { upload(vid, vid.videoWidth, vid.videoHeight); }
+      if (FAMILY.engine === 'webgl2') { frameCounter++; upload(vid, vid.videoWidth, vid.videoHeight); }
       else { draw(); }
       videoLoop = requestAnimationFrame(videoTick);
     }
@@ -359,8 +385,24 @@
 
     // The path is built in the PROVIDER so the preview and any headless render
     // agree exactly. Rebuilt only when a parameter changes — never per frame.
-    let pathPending = null;
+    // THE COMMENT ABOVE WAS ASPIRATIONAL AND THE CODE WAS NOT. `draw()` awaited
+    // this on EVERY frame, so playing a video did one provider round-trip per
+    // frame for a path that only depends on the parameters. Measured on a playing
+    // clip: 0.5 distinct rendered frames per second while the animation loop was
+    // running at 16 — the picture was effectively frozen and nothing errored.
+    //
+    // The path is keyed on exactly the inputs buildPath() reads, so a parameter
+    // change still rebuilds it and a new frame does not.
+    let pathPending = null, pathKey = '';
+    const pathInputs = () => JSON.stringify([
+      params.scanAxis === 'horizontal' ? srcW : srcH, params.scanAxis,
+      params.wobbleAmount, params.wobbleFrequency, params.wobblePhase,
+      params.jitterAmount, params.jitterScale, params.tearAmount, params.tearFrequency,
+      params.drift, params.rotationDrift, params.scaleDrift, params.seed,
+    ]);
     async function refreshPath() {
+      const key = pathInputs();
+      if (key === pathKey && pathTex) return;
       const len = Math.max(2, params.scanAxis === 'horizontal' ? srcW : srcH);
       const r = await (await fetch('/api/effects/path', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -387,8 +429,10 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, r.length, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+      pathKey = key;
     }
 
+    let frameCounter = 0;
     let drawQueued = false;
     async function draw() {
       if (drawQueued) return;
@@ -406,11 +450,47 @@
         drawQueued = false;
         try {
           if (!gl.getExtension('EXT_color_buffer_float')) { /* path texture only; sampling is fine */ }
-          await refreshPath();
           gl.viewport(0, 0, canvas.width, canvas.height);
           gl.useProgram(PROGRAM);
           const u = (n) => gl.getUniformLocation(PROGRAM, n);
           gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, srcTex); gl.uniform1i(u('uSrc'), 0);
+
+          if (familyId === 'analog') {
+            gl.uniform2f(u('uRes'), canvas.width, canvas.height);
+            gl.uniform1f(u('uCycles'), params.subcarrierCycles);
+            gl.uniform1f(u('uPhaseAlt'), params.phaseAlternation ? 1 : 0);
+            gl.uniform1f(u('uPhaseJitter'), params.phaseJitter);
+            gl.uniform1f(u('uHueError'), (params.hueError * Math.PI) / 180);
+            // THE FRAME INDEX COMES FROM THE VIDEO CLOCK, never from the render
+            // loop. Driven by rAF the crawl speed would change with the monitor's
+            // refresh rate — correct on 60Hz, visibly wrong on 120Hz — and that is
+            // the bug most implementations of this ship with.
+            gl.uniform1i(u('uFrame'), isVideo && vid.duration
+              ? Math.floor(vid.currentTime * 59.94) : frameCounter);
+            gl.uniform1f(u('uCombMix'), params.combMix);
+            // A luma window one carrier period wide is a perfect null; detuning it
+            // is precisely what leaks residual carrier into brightness, which IS
+            // dot crawl. So the knob is physical rather than a fudge.
+            // Computed by the engine, never here — the shader walks the same
+            // reach and a disagreement tints the picture instead of erroring.
+            const win = ANALOG.analogWindows(params, canvas.width);
+            gl.uniform1f(u('uLumaTaps'), win.lumaTaps);
+            gl.uniform1f(u('uChromaTaps'), win.chromaTaps);
+            lastWindows = win;
+            gl.uniform1f(u('uChromaQRatio'), params.chromaQRatio);
+            gl.uniform1f(u('uSharpen'), params.sharpen);
+            gl.uniform1f(u('uSmear'), params.smear);
+            gl.uniform1f(u('uNoise'), params.noise);
+            gl.uniform1f(u('uChromaNoise'), params.chromaNoise);
+            gl.uniform2f(u('uChromaDelay'), params.chromaDelayX, params.chromaDelayY);
+            gl.uniform1f(u('uVertBlend'), params.chromaVertBlend);
+            gl.uniform1f(u('uScanlines'), params.scanlines);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            errEl.textContent = '';
+            return;
+          }
+
+          await refreshPath();
           gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, pathTex); gl.uniform1i(u('uPath'), 1);
           gl.uniform2f(u('uRes'), canvas.width, canvas.height);
           gl.uniform2f(u('uAxis'), params.scanAxis === 'horizontal' ? 1 : 0, params.scanAxis === 'horizontal' ? 0 : 1);
@@ -543,6 +623,11 @@
                     meanBlockCells: +(blocks.reduce((a, b) => a + b.w * b.h, 0) / blocks.length).toFixed(2) };
     }
     let lastStats = null;
+    // The sampling geometry actually sent to the GPU. Exposed for the same reason
+    // stats() is: a checker should be able to ask what the engine did, not infer
+    // it from pixels — and a clamped window is the one failure here that looks
+    // like a style choice.
+    let lastWindows = null;
 
     // A cheap fingerprint of what is actually on screen. Lets a check assert that
     // a parameter CHANGED THE IMAGE, rather than only that the call returned —

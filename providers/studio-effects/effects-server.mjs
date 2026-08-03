@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { FAMILIES, coerce, applyPreset } from "./engine/schema.mjs";
 import { SCAN_FRAGMENT, SCAN_VERTEX, buildPath } from "./engine/scan.mjs";
 import { TILE_FAMILIES, PALETTES } from "./engine/tile.mjs";
+import { ANALOG_FRAGMENT, ANALOG_VERTEX } from "./engine/analog.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const arg = (flag, fallback) => {
@@ -60,8 +61,12 @@ http.createServer(async (req, res) => {
     // two consumers.
     if (url.pathname === "/api/effects/shader") {
       const family = url.searchParams.get("family") || "scan";
-      if (family !== "scan") return json(res, 404, { ok: false, error: `no shader for family: ${family}` });
-      return json(res, 200, { ok: true, family, vertex: SCAN_VERTEX, fragment: SCAN_FRAGMENT });
+      const SHADERS = {
+        scan:   { vertex: SCAN_VERTEX,   fragment: SCAN_FRAGMENT },
+        analog: { vertex: ANALOG_VERTEX, fragment: ANALOG_FRAGMENT },
+      };
+      if (!SHADERS[family]) return json(res, 404, { ok: false, error: `no shader for family: ${family}` });
+      return json(res, 200, { ok: true, family, ...SHADERS[family] });
     }
 
     // The engine modules, served so the surface IMPORTS them rather than carrying a

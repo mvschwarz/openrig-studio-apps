@@ -18,9 +18,9 @@ import {
 } from "./timeline-export-probe.mjs";
 
 const DEFAULT_SLICE_ROOT = path.resolve(new URL("../../", import.meta.url).pathname);
-// DE-BESPOKED (rig-studio port): this used to be
-//   "/Users/wrandom/openrig-videos/content-piece-1/assembly"
-// a specific project on a specific machine, from when this was a bespoke tool.
+// DE-BESPOKED (rig-studio port): this used to be an absolute path to one
+// project's assembly directory on one particular machine, from when this was a
+// bespoke tool.
 // Exports belong IN the bundle so they travel with it, which the code below
 // already did for every project EXCEPT the original one. Removing the special
 // case makes that the rule instead of the exception.

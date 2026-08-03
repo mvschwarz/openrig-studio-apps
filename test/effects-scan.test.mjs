@@ -65,7 +65,7 @@ test("an out-of-range request is corrected and reported, never refused", () => {
 });
 
 test("a preset resolved by the provider cannot overwrite a later change", () => {
-  // FOUND BY studio-qa, reproduced, and it is the MAIN PATH rather than an edge
+  // FOUND BY an independent QA drive, reproduced, and it is the MAIN PATH rather than an edge
   // case: applying a look and then adjusting one knob is exactly how an agent
   // drives this. Because the preset is resolved by the provider, it is async — so a
   // set() issued while that request was in flight was applied, RETURNED TO THE

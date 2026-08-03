@@ -2,7 +2,7 @@
   "manifest_version": 1,
   "id": "effects",
   "name": "EFFECTS",
-  "summary": "Dial a look on a frame — scanner glass now, analog video and tile mosaic to follow. Every knob is named for what you see, so an agent can drive it from a description.",
+  "summary": "Dial a look on a frame or a clip — scanner glass, analog video, or a mosaic of tiles. Every knob is named for what you see, so an agent can drive it from a description.",
   "category": "create",
   "maker": { "name": "OpenRig", "url": "https://github.com/openrig" },
   "surface": {
