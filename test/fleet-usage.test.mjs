@@ -355,3 +355,43 @@ test("identity survives a machine that could not be sampled", () => {
   assert.equal(b.codex.email, "someone@example.com");
   assert.equal(b.used7d, 20, "and the usage reading is still the last good one");
 });
+
+test("an account spread across machines says so, because the pool is shared", () => {
+  // Capacity belongs to the ACCOUNT, not the machine. One account on three
+  // machines drains three times as fast, and no per-machine view shows that —
+  // you would have to hold the whole fleet in your head to notice. Splitting
+  // accounts across machines is the entire reason for rotating them.
+  const samples = [{ host: "box-a", sampled: true, org: "shared", used7d: 38, at: "2026-08-03T00:00:00Z" }];
+  const v = buildView({
+    samples, boxes: ["box-a", "box-b", "box-c"],
+    overrides: { assignments: {
+      "box-a": { claude: "shared" }, "box-b": { claude: "shared" }, "box-c": { claude: "shared" },
+    } },
+  });
+  const a = v.accounts.find((x) => x.account === "shared");
+  assert.equal(a.sharedBy, 3, "three machines are drawing on one pool");
+  assert.deepEqual(a.machines, ["box-a", "box-b", "box-c"]);
+  assert.equal(a.capacityLeft, 62, "and it is one capacity, not three");
+});
+
+test("the source column always says where the number came from", () => {
+  // Regression: capacity, its source and the reset override were decided in two
+  // places, and the later one silently overwrote the first with undefined — so the
+  // source read blank on exactly the rows that had a real number in them. A number
+  // whose provenance is missing is worse than no number, because it still invites
+  // a decision.
+  const measured = buildView({
+    samples: [{ host: "b", sampled: true, org: "a1", used7d: 38, at: "2026-08-03T00:00:00Z" }],
+    boxes: ["b"], now: Date.parse("2026-08-03T06:00:00Z"),
+  }).accounts[0];
+  assert.equal(measured.capacityLeft, 62);
+  assert.equal(measured.capacitySource, "measured");
+
+  const typed = buildView({
+    samples: [{ host: "b", sampled: true, org: "a1", used7d: 38, at: "2026-08-03T00:00:00Z" }],
+    boxes: ["b"], now: Date.parse("2026-08-03T06:00:00Z"),
+    overrides: { accounts: { a1: { capacityLeft: 90, capacitySetAt: "2026-08-03T05:00:00Z" } } },
+  }).accounts[0];
+  assert.equal(typed.capacityLeft, 90, "a newer typed value wins");
+  assert.equal(typed.capacitySource, "typed", "and says so");
+});

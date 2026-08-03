@@ -187,6 +187,8 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now(), overr
       nextResetAt: null,
       onBox,
       lastSeenOnHost: onBox ?? c.host ?? null,
+      machines: boxRows.filter((b) => b.codexAccount === c.email).map((b) => b.host),
+      sharedBy: boxRows.filter((b) => b.codexAccount === c.email).length,
       lastSeenAt: c.at ?? null,
       subscriptionUntil: c.subscriptionUntil ?? null,
       state: cap === null ? "not measured — usage unreadable for this provider"
@@ -203,7 +205,7 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now(), overr
     resets5h: s.resets5h ?? null,
     resets7d: s.resets7d ?? null,
     lastGoodAt: s.at,
-    onBox: boxRows.find((b) => b.account === s.org)?.host ?? null,
+    onBox: boxRows.find((b) => b.claudeAccount === s.org)?.host ?? null,
     // THE HEADLINE. For a parked account this is the whole point: when does it
     // become usable again. Derived from the last good reading, because nothing
     // can sample an account that is attached to nothing.
@@ -231,18 +233,43 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now(), overr
     lastSeenOnHost: a.onBox ?? lastHostByOrg.get(a.account) ?? null,
     lastSeenAt: lastSeenByOrg.get(a.account) ?? a.lastGoodAt ?? null,
 
+    // CAPACITY BELONGS TO THE ACCOUNT AND IS SHARED BY EVERY MACHINE ON IT. One
+    // account across three machines drains three times as fast, and nothing on a
+    // per-machine view shows that — you have to hold the whole fleet in your head
+    // to notice. Splitting accounts across machines is the entire point of
+    // rotating them, so the count of machines sharing one account is a first-class
+    // fact here rather than something to work out from the table below.
+    machines: boxRows.filter((b) => b.claudeAccount === a.account).map((b) => b.host),
+    sharedBy: boxRows.filter((b) => b.claudeAccount === a.account).length,
+
     // A MEASUREMENT BEATS A TYPED VALUE, but only when it is NEWER. Otherwise an
     // operator correcting a stale number gets overwritten by the stale number on
     // the next render, which makes the field feel broken and teaches people not
     // to trust it. Typed values are LABELLED as typed rather than blended in — a
     // number whose provenance is unknown cannot be read at a glance, which is the
     // whole purpose of this surface.
+    //
+    // A PASSED RESET RESTORES THE CAPACITY, and the surface says 100 rather than
+    // "unknown". The weekly refresh is a schedule rather than a measurement, so it
+    // is the one thing here that can be known with certainty, and reporting
+    // nothing would hide the very answer this tool exists to give. What is NOT
+    // certain is how much has been spent since, so the source reads "presumed".
+    //
+    // All three outcomes are decided in ONE place deliberately. They were briefly
+    // split across a spread and a later key, and the later key silently overwrote
+    // the spread with undefined — the source column read blank on exactly the row
+    // that had a real number in it.
     ...(() => {
       const ov = ovAccounts[a.account] || {};
       const typedAt = ov.capacitySetAt ? Date.parse(ov.capacitySetAt) : null;
       const measuredAt = a.lastGoodAt ? Date.parse(a.lastGoodAt) : null;
       const typedWins = ov.capacityLeft !== undefined && ov.capacityLeft !== null &&
         (measuredAt === null || (typedAt !== null && typedAt >= measuredAt));
+
+      if (a.readingSupersededByReset) {
+        return { label: ov.label || a.label, capacityLeft: 100,
+                 capacitySource: "presumed", capacitySetAt: null, justReset: true };
+      }
       return {
         label: ov.label || a.label,
         capacityLeft: typedWins ? ov.capacityLeft : a.capacityLeft,
@@ -250,16 +277,6 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now(), overr
         capacitySetAt: typedWins ? ov.capacitySetAt : null,
       };
     })(),
-
-    // A PASSED RESET RESTORES THE CAPACITY, and the surface says 100 rather than
-    // "unknown". The weekly refresh is the one thing here we can be certain of —
-    // it is a schedule, not a measurement — so reporting nothing would hide the
-    // very answer this tool exists to give. What is NOT certain is how much has
-    // been spent since, so the source stays "presumed" and never claims to be a
-    // reading. An operator who has used it since can type over the top.
-    capacityLeft: a.readingSupersededByReset ? 100 : a.capacityLeft,
-    capacitySource: a.readingSupersededByReset ? "presumed" : a.capacitySource,
-    justReset: a.readingSupersededByReset || undefined,
     state: a.readingSupersededByReset ? "reset — full capacity, presumed"
          : a.capacityLeft === null ? "never measured"
          : a.capacityLeft <= 5 ? "nearly spent"
