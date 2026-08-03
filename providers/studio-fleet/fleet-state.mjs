@@ -91,6 +91,11 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
   const lastGoodByBox = new Map();
   const lastAttemptByBox = new Map();
   const lastGoodByOrg = new Map();
+  // Account -> where it was last seen and when. Distinct from the last GOOD
+  // reading: an account can be observed on a machine without its usage being
+  // readable, and that observation is still the mapping this tool is for.
+  const lastHostByOrg = new Map();
+  const lastSeenByOrg = new Map();
   for (const s of samples) {
     if (!s.host) continue;
     lastAttemptByBox.set(s.host, s);
@@ -98,6 +103,7 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
       lastGoodByBox.set(s.host, s);
       if (s.org) lastGoodByOrg.set(s.org, s);
     }
+    if (s.org) { lastHostByOrg.set(s.org, s.host); lastSeenByOrg.set(s.org, s.at); }
   }
 
   const boxRows = boxes.map((host) => {
@@ -164,6 +170,11 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
     ),
   })).map((a) => ({
     ...a,
+    // WHEN THIS ACCOUNT WAS LAST IN USE, and on what. Half the value of this tool
+    // is the mapping alone: which account is on which machine, and when it last
+    // drove anything. That answer needs no live credential at all.
+    lastSeenOnHost: a.onBox ?? lastHostByOrg.get(a.account) ?? null,
+    lastSeenAt: lastSeenByOrg.get(a.account) ?? a.lastGoodAt ?? null,
     // Presumed, never measured. After a reset the account is usable again; how
     // much has been spent SINCE is unknown until something samples it.
     capacityLeft: a.readingSupersededByReset ? null : a.capacityLeft,
@@ -171,7 +182,19 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now() }) {
          : a.capacityLeft === null ? "never measured"
          : a.capacityLeft <= 5 ? "nearly spent"
          : a.capacityLeft <= 25 ? "running low" : "has room",
-  })).sort((a, b) => (a.capacityLeft ?? 999) - (b.capacityLeft ?? 999));
+
+    // THE QUESTION THIS TOOL EXISTS TO ANSWER: which account can I switch TO.
+    // Not which is nearly spent — the provider already warns about that one,
+    // loudly and in time. The unanswered question is which account quietly
+    // refilled while nobody was looking.
+    readyToSwitchTo: !a.onBox && (a.readingSupersededByReset || (a.capacityLeft ?? 0) >= 50),
+  })).sort((x, y) => {
+    // Most capacity FIRST. Sorting by nearest-to-empty puts the accounts you
+    // cannot use at the top and buries the one you are actually looking for.
+    if (x.readyToSwitchTo !== y.readyToSwitchTo) return x.readyToSwitchTo ? -1 : 1;
+    const cap = (a) => a.readingSupersededByReset ? 100 : (a.capacityLeft ?? -1);
+    return cap(y) - cap(x);
+  });
 
   return {
     generatedAt: new Date(now).toISOString(),

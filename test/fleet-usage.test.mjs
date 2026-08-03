@@ -296,3 +296,40 @@ test("capacity is reported as room LEFT, because that is the decision", () => {
   assert.equal(a.state, "nearly spent");
   assert.equal(a.resetsWeeklyAt, "Sundays 03:00 UTC");
 });
+
+test("the account you can switch TO comes first, not the one running out", () => {
+  // The provider warns you about the account you are ON, loudly and in time. The
+  // question nobody answers is which account quietly refilled while you were not
+  // looking — so the list leads with capacity, and a nearly-spent account sorts
+  // last where it belongs.
+  const samples = [
+    { host: "box-a", sampled: true, org: "spent",  used7d: 96, at: "2026-08-03T00:00:00Z",
+      resets7d: "2026-08-09T03:00:00.000Z" },
+    { host: "box-b", sampled: true, org: "onbox",  used7d: 10, at: "2026-08-03T00:00:00Z",
+      resets7d: "2026-08-09T03:00:00.000Z" },
+    { host: "box-c", sampled: true, org: "parked", used7d: 4,  at: "2026-08-02T00:00:00Z",
+      resets7d: "2026-08-09T03:00:00.000Z" },
+  ];
+  // box-c is gone from the fleet, so "parked" is attached to nothing.
+  const v = buildView({ samples, boxes: ["box-a", "box-b"], now: Date.parse("2026-08-03T06:00:00Z") });
+
+  assert.equal(v.accounts[0].account, "parked", "a free, unattached account leads the list");
+  assert.equal(v.accounts[0].readyToSwitchTo, true);
+  assert.equal(v.accounts.at(-1).account, "spent", "and the nearly-spent one sorts last");
+  assert.equal(v.accounts.find((a) => a.account === "onbox").readyToSwitchTo, false,
+    "an account already driving a machine is not a switch target");
+});
+
+test("an account keeps its host mapping even when its usage cannot be read", () => {
+  // Half the value is the mapping alone. An account observed on a machine whose
+  // credential could not be sampled is still known to be THERE, and that must not
+  // fall out of the view just because no number came back with it.
+  const samples = [
+    { host: "box-a", sampled: true,  org: "acct-1", used7d: 20, at: "2026-08-01T00:00:00Z" },
+    { host: "box-a", sampled: false, org: "acct-1", reason: "idle", at: "2026-08-03T09:00:00Z" },
+  ];
+  const v = buildView({ samples, boxes: ["box-a"], now: Date.parse("2026-08-03T10:00:00Z") });
+  const a = v.accounts[0];
+  assert.equal(a.lastSeenOnHost, "box-a", "the mapping survives an unreadable sample");
+  assert.equal(a.lastSeenAt, "2026-08-03T09:00:00Z", "and it is the LATEST sighting, not the last good read");
+});
