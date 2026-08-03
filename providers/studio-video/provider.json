@@ -19,7 +19,7 @@
   "serves": [
     "/canvas-license.json"
   ],
-  "_serves_note": "FOUND BY DOING THIS LIFT, AND IT WAS BROKEN ON EVERY STUDIO. canvas.html fetches /canvas-license.json; this provider answers it (export-server.mjs:664) and deliberately returns {} rather than 404 because the canvas probe's console gate treats a 404 as an error. But NO app ever declared it, and it is not an /api/ path — so studio.mjs:474 finds no `serves` prefix, :475 skips it (the sole-provider fallback covers /api/ ONLY), and :479 hands it to the SDK runtime, which 404s. The provider's own defensive answer was unreachable. WHY IT STAYED INVISIBLE: unkeyed tldraw only unmounts the editor on a PRODUCTION https non-loopback origin, so on 127.0.0.1 dev it looks perfect and on a deployed box CANVAS DIES AFTER 5 SECONDS. Same family as `rig ps` needing -A: a dev machine cannot see it. Declaring the route is half the fix; the box must also carry the canvas-license.json file, which is operator-side and separate.",
+  "_serves_note": "canvas.html fetches /canvas-license.json and this provider answers it, returning {} when no key file is present. It is not an /api/ path, so it matched no serves prefix and never reached the provider at all — an undeclared byte route falls through to the SDK runtime. Declaring it is what makes the provider's answer reachable. tldraw licensing itself is bring-your-own: a box that carries app/canvas-license.json is keyed, and one that does not shows a header link to tldraw.dev. Neither state is a defect and neither is this route's concern.",
   "verbs": [
     "/api/annotation",
     "/api/approve",
