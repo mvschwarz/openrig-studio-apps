@@ -154,13 +154,23 @@ function scan(src) {
   const n = src.length;
   const out = src.split("");
   const interpolations = [];
+  const templateBodies = [];
   const blank = (i) => { if (out[i] !== "\n") out[i] = " "; };
   const OPENS_REGEX = "(,=:[!&|?{};+-*%~^<>";
-  const KEYWORDS = ["return", "typeof", "case", "in", "of", "new", "delete", "void", "instanceof"];
+  const KEYWORDS = ["return", "typeof", "case", "in", "of", "new", "delete", "void",
+                   "instanceof", "await", "yield"];
   // Does the '/' at `at` open a regex literal, or is it division? Decided by the
-  // previous significant character — the standard disambiguation. Without this a
-  // regex containing a quote or a `//` would flip the scanner into a phantom
-  // string and silently blank real code after it.
+  // previous significant character. Without it a regex containing a quote or a
+  // `//` would flip the scanner into a phantom string and silently blank real code.
+  //
+  // THIS IS A HEURISTIC WITH AN ENUMERATED KEYWORD SET, NOT COMPLETE
+  // DISAMBIGUATION, and an earlier version of this comment called it "the standard
+  // disambiguation" — a claim review then falsified by leaving `await` and `yield`
+  // out of it: `await /}/.test("}")` read as division, and the brace in the regex
+  // truncated an interpolation around a live bind. Adding those two keywords fixes
+  // the demonstrated case and does NOT complete JavaScript grammar; the enumeration
+  // can be short again. That is why the interpolation check below does not rely on
+  // this being right — see the body-level backstop there.
   const opensRegex = (at) => {
     for (let k = at - 1; k >= 0; k--) {
       const c = src[k];
@@ -217,6 +227,7 @@ function scan(src) {
   // `i` sits on the opening backtick — return the index after the closing one,
   // recording every interpolation encountered, including nested templates'.
   function skipTemplate(i) {
+    const bodyStart = i + 1;
     i++;
     while (i < n && src[i] !== "`") {
       if (src[i] === "\\") { i += 2; continue; }
@@ -229,6 +240,7 @@ function scan(src) {
       }
       i++;
     }
+    templateBodies.push(src.slice(bodyStart, i));
     return Math.min(n, i + 1);
   }
   const blankBody = (i, end) => { i++; while (i < end - 1) blank(i++); return end; };
@@ -242,7 +254,7 @@ function scan(src) {
     if (c === "/" && opensRegex(i)) { i = blankBody(i, skipRegex(i)); continue; }
     i++;
   }
-  return { code: out.join(""), interpolations };
+  return { code: out.join(""), interpolations, templateBodies };
 }
 
 const SCAN = scan(SURFACE);
@@ -253,6 +265,30 @@ test("no texture call hides inside a template interpolation", () => {
   // template bodies whole, so a bind inside `${...}` is invisible to the guard.
   // Saying "there aren't any" was true the day I measured it and would stay in
   // the file, unchanged and wrong, the day someone adds one.
+  // TWO CHECKS AT DIFFERENT GRAIN, AND THE COARSE ONE IS THE POINT.
+  //
+  // Review has now defeated interpolation-SPAN delimitation twice — once with a
+  // brace inside a string, once with a brace inside a regex that `opensRegex` did
+  // not recognise (`await /}/...`). Both truncated the recorded span so a live
+  // bind fell outside it. The pattern is that any check depending on finding the
+  // exact END of an interpolation inherits every gap in the lexer's grammar.
+  //
+  // So the load-bearing assertion asks a SMALLER question that cannot be defeated
+  // that way: does a texture call appear ANYWHERE inside a template body? Span
+  // boundaries are irrelevant to it. Truncating a `${...}` cannot hide a call from
+  // it, because it never consults the span at all.
+  //
+  // The span check is kept as well — it localises the finding and reads better in
+  // a failure — but it is no longer the only thing standing between a live bind
+  // and a green suite. This is the same move as the guard itself: when a mechanism
+  // keeps losing to grammar, ask something grammar cannot swallow.
+  const bodyHits = SCAN.templateBodies
+    .filter((b) => /gl\.(bindTexture|activeTexture)\s*\(/.test(b));
+  assert.deepEqual(bodyHits.map((b) => b.slice(0, 60)), [],
+    `a texture call appears inside a template literal. This is the coarse check —\n` +
+    `it does not care where the interpolation starts or ends, so a mis-delimited\n` +
+    `span cannot hide the call from it.`);
+
   const hits = SCAN.interpolations
     .filter((s) => /gl\.(bindTexture|activeTexture)\s*\(/.test(s));
   assert.deepEqual(hits, [],
