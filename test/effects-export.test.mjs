@@ -157,20 +157,27 @@ function scan(src) {
   const templateBodies = [];
   const blank = (i) => { if (out[i] !== "\n") out[i] = " "; };
   const OPENS_REGEX = "(,=:[!&|?{};+-*%~^<>";
-  const KEYWORDS = ["return", "typeof", "case", "in", "of", "new", "delete", "void",
-                   "instanceof", "await", "yield"];
+  const KEYWORDS = ["return", "typeof", "case", "in", "of", "new", "delete", "void", "instanceof"];
   // Does the '/' at `at` open a regex literal, or is it division? Decided by the
   // previous significant character. Without it a regex containing a quote or a
   // `//` would flip the scanner into a phantom string and silently blank real code.
   //
-  // THIS IS A HEURISTIC WITH AN ENUMERATED KEYWORD SET, NOT COMPLETE
-  // DISAMBIGUATION, and an earlier version of this comment called it "the standard
-  // disambiguation" — a claim review then falsified by leaving `await` and `yield`
-  // out of it: `await /}/.test("}")` read as division, and the brace in the regex
-  // truncated an interpolation around a live bind. Adding those two keywords fixes
-  // the demonstrated case and does NOT complete JavaScript grammar; the enumeration
-  // can be short again. That is why the interpolation check below does not rely on
-  // this being right — see the body-level backstop there.
+  // THIS IS A HEURISTIC OVER AN ENUMERATED KEYWORD SET, NOT COMPLETE
+  // DISAMBIGUATION. An earlier comment called it "the standard disambiguation" and
+  // review falsified that by finding `await` and `yield` missing.
+  //
+  // I ADDED THOSE TWO KEYWORDS AND THEN TOOK THEM BACK OUT. Adding them makes the
+  // demonstrated case pass, which is exactly why it is the wrong fix: it is the
+  // sixth widening of a check narrowed five times, and it makes the errors point
+  // the WRONG WAY. With `await` in the list, `await / 2` — legal division — reads
+  // as a regex and blanks live code after it: silent, and the direction that ships
+  // a bug. Without it, `await /re/` reads as division and the regex text merely
+  // survives as code: noisy at worst, and it cannot hide a bind.
+  //
+  // For a guard, prefer an over-approximation that can only be TOO STRICT over a
+  // precise rule that can be silently TOO LOOSE. So the list stays short, the
+  // undecidable case is asserted ABSENT by a test of its own, and the
+  // interpolation check no longer depends on this heuristic being right at all.
   const opensRegex = (at) => {
     for (let k = at - 1; k >= 0; k--) {
       const c = src[k];
@@ -329,6 +336,46 @@ test("the scanner reads code and only code — the control for the guard below",
   assert.equal(stripped.split("\n").length, 4, "line count must be preserved for line numbers");
   assert.ok(!stripped.includes("deadTex") && !stripped.includes("blockTex"), "dead code survived");
   assert.ok(stripped.includes("liveTex") && stripped.includes("afterRegexTex"), "live code was eaten");
+});
+
+test("no regex literal sits where this scanner has to GUESS whether it is one", () => {
+  // MAKE THE ASSUMPTION LOUD RATHER THAN DECIDE IT — orch-lead's, and it is the
+  // same move that fixed the interpolation gap in an earlier round: when a check
+  // cannot decide something, assert that the undecidable case is ABSENT, so the
+  // day it appears you get a failing test instead of a wrong texture unit.
+  //
+  // regex-vs-division is the last grammar guess in this file. `opensRegex` decides
+  // it from the previous significant token, and that keyword list is an
+  // ENUMERATION OF A GRAMMAR which has now been short twice — the `if (...)` case,
+  // then `await` / `yield`. Extending it again is the sixth widening of a check
+  // narrowed five times, and it cuts both ways: with `await` now in the list,
+  // `await / 2` — legal division — would be misread as a regex and blank real code.
+  //
+  // So instead of trusting the list, refuse the ambiguity. Measured today: the
+  // surface has 24 `await`s and NOT ONE is followed by a regex; they are all
+  // `await fetch` / `await import`. Nothing is broken — this fails the day that
+  // stops being true.
+  //
+  // DELIBERATELY OVER-STRICT: `await /x/` and `await / x` both trip it, and the
+  // second is division. That is the trade orch-lead named from five rounds — for a
+  // GUARD, prefer an over-approximation that can only be TOO STRICT over a precise
+  // rule that can be silently TOO LOOSE. Too strict announces itself the first
+  // time it fires on correct code; too loose ships the bug and reports 12/12.
+  const risky = [];
+  for (const m of SURFACE.matchAll(/\b(await|yield)\s*\/(?![/*])/g)) {
+    risky.push(`line ${SURFACE.slice(0, m.index).split("\n").length}: ${m[0].trim()}`);
+  }
+  assert.deepEqual(risky, [],
+    `a '/' follows await or yield, where this scanner must GUESS regex vs division.\n` +
+    `It guesses from an enumerated keyword list that has been wrong twice.\n` +
+    `\n` +
+    `If that '/' is a REGEX: the guess is currently right, but you are relying on\n` +
+    `the enumeration, which is the thing that keeps failing. If it is DIVISION:\n` +
+    `the guess is WRONG and the scanner will blank live code after it.\n` +
+    `\n` +
+    `This assertion exists because neither case is decidable here without real\n` +
+    `JavaScript grammar, and a wrong answer is silent. Rewrite the expression, or\n` +
+    `route the grammar question rather than extending the list a third time.`);
 });
 
 test("CONVENTION: each texture bind spells out its own unit selection", () => {
