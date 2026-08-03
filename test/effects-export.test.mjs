@@ -128,15 +128,32 @@ test("save-frame reads the live canvas rather than assuming one renderer", () =>
 // treating it as code would scan GLSL as JavaScript. A bind written inside an
 // interpolation would therefore be MISSED.
 //
-// That gap is held by a TEST, not by a sentence — see "no texture call hides
-// inside a template interpolation" below. The first draft of this comment said
-// "none is", which was true when measured and is exactly the status line that
-// goes stale silently on the day someone adds one. Orch-lead caught that I had
-// refused that reasoning for regex literals one paragraph earlier and handled
-// them with a mechanism: same shape, same hand, two treatments. Both are
-// mechanisms now.
-function codeOnly(src) {
+// That gap is held by a TEST, not by a sentence. The first draft of this comment
+// said "none is", which was true when measured and is exactly the status line
+// that goes stale silently on the day someone adds one.
+//
+// ONE SCANNER, TWO OUTPUTS — AND THAT IS THE FIX FOR A REAL DEFECT, not tidiness.
+// This was two functions: this one lexed properly, and a separate interpolation
+// walker counted braces WITHOUT lexing. They drifted exactly where you would
+// expect, and review found it:
+//
+//     fail(`could not start: ${"}", gl.bindTexture(gl.TEXTURE_2D, pathTex), e.message}`);
+//
+// The `}` inside an ordinary JavaScript STRING ended the walker's span early, so
+// the live bind fell outside the recorded interpolation and vanished from both
+// checks — while the `>= 5` control stayed green, because the file's other
+// interpolations kept the count up. Review confirmed it executes, not merely
+// resembles a call.
+//
+// Two places computing one property WILL diverge; that is this rig's
+// one-discovery-function rule, and I wrote the second walker anyway one commit
+// after citing the rule. Now a single walk produces the blanked code AND the
+// interpolation spans, so they cannot disagree: the same string, comment, regex
+// and nested-template handling delimits both.
+function scan(src) {
+  const n = src.length;
   const out = src.split("");
+  const interpolations = [];
   const blank = (i) => { if (out[i] !== "\n") out[i] = " "; };
   const OPENS_REGEX = "(,=:[!&|?{};+-*%~^<>";
   const KEYWORDS = ["return", "typeof", "case", "in", "of", "new", "delete", "void", "instanceof"];
@@ -157,98 +174,105 @@ function codeOnly(src) {
     }
     return true;
   };
+  const skipLineComment = (i) => { while (i < n && src[i] !== "\n") i++; return i; };
+  const skipBlockComment = (i) => {
+    i += 2;
+    while (i < n && !(src[i] === "*" && src[i + 1] === "/")) i++;
+    return Math.min(n, i + 2);
+  };
+  const skipString = (i) => {
+    const q = src[i++];
+    while (i < n && src[i] !== q) { if (src[i] === "\\") i++; i++; }
+    return Math.min(n, i + 1);
+  };
+  const skipRegex = (i) => {
+    i++;
+    let inClass = false;
+    while (i < n && src[i] !== "\n") {
+      if (src[i] === "\\") { i += 2; continue; }
+      if (src[i] === "[") inClass = true;
+      else if (src[i] === "]") inClass = false;
+      else if (src[i] === "/" && !inClass) return i + 1;
+      i++;
+    }
+    return i;
+  };
+  // `i` sits just after "${" — return the index of the brace that closes it,
+  // lexing the interpolation as the JavaScript it is.
+  function endOfInterpolation(i) {
+    let depth = 0;
+    while (i < n) {
+      const c = src[i], d = src[i + 1];
+      if (c === "}") { if (depth === 0) return i; depth--; i++; continue; }
+      if (c === "{") { depth++; i++; continue; }
+      if (c === "/" && d === "/") { i = skipLineComment(i); continue; }
+      if (c === "/" && d === "*") { i = skipBlockComment(i); continue; }
+      if (c === '"' || c === "'") { i = skipString(i); continue; }
+      if (c === "`") { i = skipTemplate(i); continue; }
+      if (c === "/" && opensRegex(i)) { i = skipRegex(i); continue; }
+      i++;
+    }
+    return n;
+  }
+  // `i` sits on the opening backtick — return the index after the closing one,
+  // recording every interpolation encountered, including nested templates'.
+  function skipTemplate(i) {
+    i++;
+    while (i < n && src[i] !== "`") {
+      if (src[i] === "\\") { i += 2; continue; }
+      if (src[i] === "$" && src[i + 1] === "{") {
+        const start = i + 2;
+        const end = endOfInterpolation(start);
+        interpolations.push(src.slice(start, end));
+        i = end + 1;
+        continue;
+      }
+      i++;
+    }
+    return Math.min(n, i + 1);
+  }
+  const blankBody = (i, end) => { i++; while (i < end - 1) blank(i++); return end; };
   let i = 0;
-  const n = src.length;
   while (i < n) {
     const c = src[i], d = src[i + 1];
-    if (c === "/" && d === "/") { while (i < n && src[i] !== "\n") blank(i++); continue; }
-    if (c === "/" && d === "*") {
-      blank(i++); blank(i++);
-      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) blank(i++);
-      if (i < n) { blank(i++); blank(i++); }
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      i++;                                        // keep the delimiter, blank the body
-      while (i < n && src[i] !== c) {
-        if (src[i] === "\\") { blank(i++); if (i < n) blank(i++); continue; }
-        blank(i++);
-      }
-      if (i < n) i++;
-      continue;
-    }
-    if (c === "/" && opensRegex(i)) {
-      i++;
-      let inClass = false;
-      while (i < n && src[i] !== "\n") {
-        if (src[i] === "\\") { blank(i++); if (i < n) blank(i++); continue; }
-        if (src[i] === "[") inClass = true;
-        else if (src[i] === "]") inClass = false;
-        else if (src[i] === "/" && !inClass) break;
-        blank(i++);
-      }
-      if (i < n && src[i] === "/") i++;
-      continue;
-    }
+    if (c === "/" && d === "/") { const e = skipLineComment(i); while (i < e) blank(i++); continue; }
+    if (c === "/" && d === "*") { const e = skipBlockComment(i); while (i < e) blank(i++); continue; }
+    if (c === '"' || c === "'") { i = blankBody(i, skipString(i)); continue; }
+    if (c === "`") { i = blankBody(i, skipTemplate(i)); continue; }
+    if (c === "/" && opensRegex(i)) { i = blankBody(i, skipRegex(i)); continue; }
     i++;
   }
-  return out.join("");
+  return { code: out.join(""), interpolations };
 }
 
-const CODE = codeOnly(SURFACE);
-
-// The interpolations the scanner above deliberately cannot see. Same walk, but
-// recording `${...}` spans instead of blanking them, so the blind spot can be
-// asserted on rather than described.
-function templateInterpolations(src) {
-  const spans = [];
-  let i = 0;
-  const n = src.length;
-  while (i < n) {
-    const c = src[i], d = src[i + 1];
-    if (c === "/" && d === "/") { while (i < n && src[i] !== "\n") i++; continue; }
-    if (c === "/" && d === "*") { i += 2; while (i < n && !(src[i] === "*" && src[i + 1] === "/")) i++; i += 2; continue; }
-    if (c === '"' || c === "'") {
-      i++;
-      while (i < n && src[i] !== c) { if (src[i] === "\\") i++; i++; }
-      i++; continue;
-    }
-    if (c === "`") {
-      i++;
-      while (i < n && src[i] !== "`") {
-        if (src[i] === "\\") { i += 2; continue; }
-        if (src[i] === "$" && src[i + 1] === "{") {
-          const start = i + 2;
-          let d2 = 1; i += 2;
-          while (i < n && d2 > 0) { if (src[i] === "{") d2++; else if (src[i] === "}") d2--; if (d2) i++; }
-          spans.push(src.slice(start, i));
-          i++; continue;
-        }
-        i++;
-      }
-      i++; continue;
-    }
-    i++;
-  }
-  return spans;
-}
+const SCAN = scan(SURFACE);
+const CODE = SCAN.code;
 
 test("no texture call hides inside a template interpolation", () => {
   // MECHANISM FOR A GAP I FIRST WROTE AS A STATUS LINE. The scanner blanks
   // template bodies whole, so a bind inside `${...}` is invisible to the guard.
   // Saying "there aren't any" was true the day I measured it and would stay in
   // the file, unchanged and wrong, the day someone adds one.
-  const hits = templateInterpolations(SURFACE)
+  const hits = SCAN.interpolations
     .filter((s) => /gl\.(bindTexture|activeTexture)\s*\(/.test(s));
   assert.deepEqual(hits, [],
     `a texture bind or activation is written inside a template interpolation.\n` +
     `The convention guard cannot see in there — it blanks template bodies so the\n` +
     `shader is not scanned as JavaScript. Move the call into ordinary code, or\n` +
     `widen the scanner deliberately and say what covers this instead.`);
-  // Positive control: the walker must actually be finding interpolations, or the
-  // assertion above is an empty set proving nothing.
-  assert.ok(templateInterpolations(SURFACE).length >= 5,
+  // POSITIVE CONTROLS. The `>= 5` count alone was NOT enough and review proved it:
+  // a span truncated at a `}` inside a string still left five other interpolations
+  // standing, so the count stayed green while the walker was losing content. A
+  // count proves the walker finds SOME interpolations; it says nothing about
+  // whether it finds each one WHOLE.
+  assert.ok(SCAN.interpolations.length >= 5,
     "found almost no interpolations — the walker is broken, not the source clean");
+  // So also assert it can carry the exact shape that defeated the old walker: a
+  // string containing a brace, followed by more of the same interpolation.
+  const probe = scan('const s = `x${"}", gl.bindTexture(a, b), y}`;').interpolations;
+  assert.equal(probe.length, 1, "a brace inside a string must not end the span");
+  assert.match(probe[0], /gl\.bindTexture/,
+    "the span was truncated at the string's brace — content after it was lost");
 });
 
 test("the scanner reads code and only code — the control for the guard below", () => {
@@ -256,12 +280,12 @@ test("the scanner reads code and only code — the control for the guard below",
   // is looking at, and the last two defects were both in this layer rather than
   // in the rule. These are review's exact defeating inputs, committed so they
   // re-run rather than being a claim I made once.
-  const stripped = codeOnly([
+  const stripped = scan([
     `// gl.bindTexture(gl.TEXTURE_2D, deadTex);`,
     `const endpoint = "https://example.test"; gl.bindTexture(gl.TEXTURE_2D, liveTex);`,
     `if (/\\/\\/'"/.test(x)) gl.bindTexture(gl.TEXTURE_2D, afterRegexTex);`,
     `/* gl.bindTexture(gl.TEXTURE_2D, blockTex); */ gl.bindTexture(gl.TEXTURE_2D, afterBlockTex);`,
-  ].join("\n"));
+  ].join("\n")).code;
   const seen = [...stripped.matchAll(/gl\.bindTexture/g)].length;
   assert.equal(seen, 3,
     `expected the live binds only: commented-out gone, the ones after a string, a\n` +
@@ -307,20 +331,48 @@ test("CONVENTION: each texture bind spells out its own unit selection", () => {
   //   inside the character class counted as a real block opener and correct code
   //   was rejected. Two heuristics COMPOUNDED: a grammar misread became a scope
   //   error. Deriving scope needs JavaScript statement grammar, and a hand-written
-  //   lexer does not have it. No parser is available here and this repository has
-  //   no dependencies at all, so the answer is to stop needing one.
+  //   lexer does not have it.
+  //
+  // A PARSER WOULD SETTLE IT AND WAS NOT TAKEN. The first version of this comment
+  // justified that with "this repository has no dependencies at all", which is
+  // FALSE — five provider packages carry lockfiles and two declare four
+  // third-party dependencies (ffmpeg-static, ffprobe-static). Corrected wording,
+  // taken verbatim from the review that measured it:
+  //
+  //   "The root test surface has no package, lockfile, dependency install, or
+  //    test-tool dependency. A parser would introduce the first dependency and
+  //    install step for that test surface; provider runtime dependencies are a
+  //    separate existing category."
+  //
+  // The gate is unchanged; the premise supporting it was wrong, and a public
+  // artifact explaining a design decision is the worst place to leave that
+  // standing.
   //
   // SO THE RULE ASKS ONLY WHAT A TOKEN STREAM CAN ANSWER EXACTLY: the activation
-  // must be the statement IMMEDIATELY BEFORE the bind — nothing between them but
-  // whitespace and semicolons — and it must stand in STATEMENT POSITION, i.e.
-  // preceded by `;`, `{`, `}` or the start of the file. No depth, no window, no
-  // inference about what executes.
+  // must sit IMMEDIATELY BEFORE the bind — nothing between them but whitespace and
+  // semicolons — and must itself follow a STATEMENT DELIMITER (`;`, `{`, `}`, or
+  // the start of the file). No depth, no window, no inference about what executes.
   //
-  // Both defeating cases die on the definition rather than on a better guess: an
-  // arrow helper's activation is preceded by `=>` so it is not a statement, and a
-  // braced helper's activation has a `}` between it and the bind. A regex
-  // misclassification can no longer become a scope error because there is no
-  // scope being computed.
+  // THAT IS DELIMITER ADJACENCY, NOT STATEMENT POSITION, and the distinction is
+  // review's, earned against an earlier version of this comment that claimed the
+  // stronger thing. A `for` header satisfies it:
+  //
+  //     for (; gl.activeTexture(gl.TEXTURE0 + UNIT_SRC);
+  //            gl.bindTexture(gl.TEXTURE_2D, srcTex)) break;
+  //
+  // Neither call is a standalone statement — the semicolons are the header's, not
+  // statement terminators — and the check accepts them. Review measured that this
+  // does NOT reproduce the original wrong-unit corruption (with `break`, the
+  // update expression never runs), so it is a coverage mismatch rather than a
+  // product defect. It is recorded here rather than patched because closing it
+  // means telling a `for` header apart from a statement list, which is grammar,
+  // which is the inference that has been defeated three times in this file.
+  //
+  // Both defeating cases still die on the definition rather than on a better
+  // guess: an arrow helper's activation is preceded by `=>`, which is not a
+  // delimiter, and a braced helper's activation has a `}` between it and the bind.
+  // A regex misclassification can no longer become a scope error because there is
+  // no scope being computed.
   const calls = [...CODE.matchAll(/gl\.(activeTexture|bindTexture)\s*\(/g)]
     .map((m) => ({ kind: m[1], at: m.index }));
   const lineOf = (idx) => CODE.slice(0, idx).split("\n").length;
@@ -334,7 +386,7 @@ test("CONVENTION: each texture bind spells out its own unit selection", () => {
     }
     return CODE.length;
   };
-  const inStatementPosition = (at) => {
+  const afterStatementDelimiter = (at) => {
     for (let i = at - 1; i >= 0; i--) {
       const c = CODE[i];
       if (c === " " || c === "\t" || c === "\n" || c === "\r") continue;
@@ -352,7 +404,7 @@ test("CONVENTION: each texture bind spells out its own unit selection", () => {
   for (const c of calls) {
     if (c.kind === "activeTexture") { pending = c.at; continue; }
     const owns = pending !== null
-      && inStatementPosition(pending)
+      && afterStatementDelimiter(pending)
       && onlyGapBetween(callEnd(pending), c.at);
     if (!owns) unowned.push(lineOf(c.at));
     pending = null;                // a bind CONSUMES it; the next needs its own
@@ -367,11 +419,17 @@ test("CONVENTION: each texture bind spells out its own unit selection", () => {
     `human can audit by reading, and because a bind inheriting someone else's\n` +
     `active unit is the defect that put both samplers on the path texture.\n` +
     `\n` +
-    `THE SUPPORTED FORM IS EXACTLY ONE SHAPE: gl.activeTexture(...) as the\n` +
-    `statement immediately before the bind, with nothing between them but\n` +
-    `whitespace and semicolons. Anything else fails, on purpose — this asks only\n` +
-    `what a token stream can answer exactly, because every earlier version that\n` +
-    `tried to infer SCOPE was defeated by a syntax it had not anticipated.\n` +
+    `THE SUPPORTED FORM: gl.activeTexture(...) immediately before the bind, with\n` +
+    `nothing between them but whitespace and semicolons, and itself following a\n` +
+    `semicolon, a brace, or the start of the file.\n` +
+    `\n` +
+    `That is DELIMITER adjacency, not statement position, and the difference is\n` +
+    `real: a for-header satisfies it too. That is a documented coverage gap rather\n` +
+    `than a supported form — closing it means telling a for-header apart from a\n` +
+    `statement list, which is grammar, which is the inference this guard has had\n` +
+    `defeated three times. Anything else fails on purpose: this asks only what a\n` +
+    `token stream can answer exactly, because every earlier version that tried to\n` +
+    `infer SCOPE was defeated by a syntax it had not anticipated.\n` +
     `\n` +
     `SO YOUR CODE MAY WELL BE CORRECT AND STILL FAIL HERE. Cases that are correct\n` +
     `at runtime and rejected anyway, all measured rather than supposed:\n` +
