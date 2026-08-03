@@ -20,7 +20,7 @@
           "--bundle",
           "{{root:project}}"
         ],
-        "_note": "The renderer the write verbs enqueue for. Without it, stabilize and cut-retry ACCEPT work that nothing ever performs: the verb returns ok, a real marker lands on disk, and no cut is ever rendered. That is Ruling 16's third rung — it defeats both the verbs-answer check AND the data-changed-on-disk check, because the write genuinely happens and only the EFFECT is absent. Declared so the box starts it WITH the provider instead of someone remembering to."
+        "_note": "The renderer the write verbs enqueue for. Without it, stabilize and cut-retry ACCEPT work that nothing ever performs: the verb returns ok, a real marker lands on disk, and no cut is ever rendered. That is the failure mode worth naming, because it defeats both of the obvious checks — the verbs answer AND the data really changes on disk — while the product stays inert. Declared so the box starts it WITH the provider instead of someone remembering to."
       }
     ]
   },

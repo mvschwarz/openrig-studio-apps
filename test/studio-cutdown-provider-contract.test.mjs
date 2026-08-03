@@ -26,8 +26,8 @@ test("the cut lane travels with the provider that ships it", () => {
     "a declared companion whose file is absent is refused at boot, not skipped");
   // The write verbs ENQUEUE; this process PERFORMS. Without it they accept work
   // nothing ever does — the verb returns ok, a real marker lands on disk, and only
-  // the product is inert. Ruling 16's third rung, which defeats both the
-  // verbs-answer check and the data-changed-on-disk check.
+  // the product is inert — a failure that defeats both of the obvious checks,
+  // because the verbs answer AND the data really changes on disk.
   assert.ok(lane.args.includes("{{root:footage}}") && lane.args.includes("{{root:project}}"),
     "the lane needs both roots bound or it watches nothing and renders nowhere");
 });
