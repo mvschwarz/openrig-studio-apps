@@ -250,7 +250,12 @@ export function libraryRoute({ assetPath, slot, projectRoot, roots }) {
 // because this verb genuinely has nothing to parameterise.
 export function listSeats() {
   return new Promise((resolve) => {
-    execFile("rig", ["ps", "--nodes", "--json"], { timeout: 5000 }, (err, stdout) => {
+    // FLEET-WIDE (-A) is required, not optional. Outside a managed session the CLI
+    // has no current rig to default to and exits non-zero with "no target" — and a
+    // provider is always outside a session, because it is a service. The bare form
+    // works only on a developer machine that happens to be inside one, which is why
+    // this survived until a real box showed the roster as unreadable.
+    execFile("rig", ["ps", "--nodes", "-A", "--json"], { timeout: 5000 }, (err, stdout) => {
       if (err) return resolve({ ok: false, error: `rig ps failed: ${err.message}`, seats: [] });
       let nodes;
       try {
