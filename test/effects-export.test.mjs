@@ -113,62 +113,153 @@ test("save-frame reads the live canvas rather than assuming one renderer", () =>
   assert.match(SURFACE, /function frameDataUrl\(\) \{ return liveCanvas\(\)\.toDataURL/);
 });
 
-// STRIP COMMENTS BEFORE SCANNING. Review commented out all four binds and the
-// guard still passed: four textual occurrences remained, and the check counted
-// them. A lexical guard that reads its own dead code is measuring the file, not
-// the program.
-const CODE = SURFACE
-  .replace(/\/\*[\s\S]*?\*\//g, " ")
-  .split("\n").map((l) => l.replace(/\/\/.*$/, "")).join("\n");
-
-test("every direct texture bind is preceded by an activation it consumes", () => {
-  // WHAT THIS IS, STATED HONESTLY BECAUSE REVIEW MEASURED IT: this enforces a
-  // CONVENTION — direct gl.activeTexture / gl.bindTexture calls, alternating —
-  // and it does NOT prove runtime ownership. Independent review demonstrated both
-  // directions with GL traces:
-  //
-  //   ACCEPTED BUT WRONG AT RUNTIME: `if (false) gl.activeTexture(...)` before a
-  //   bind, and one activation outside a loop whose body binds twice. The trace
-  //   showed the second iteration binding the path texture onto unit 0, exactly
-  //   the original corruption. Textual order is not execution order, and textual
-  //   cardinality is not runtime cardinality.
-  //
-  //   REJECTED BUT RIGHT AT RUNTIME: the activation moved into a hoisted helper.
-  //   Traced correct — and this guard fails it, because it cannot follow calls.
-  //
-  // The convention is still worth enforcing: it keeps the property AUDITABLE by
-  // reading, and it caught both real defects. But the runtime evidence is the GL
-  // trace, and this cannot replace it.
-  // FOLLOW ONE LEVEL OF INDIRECTION, because rejecting correct code is how a guard
-  // dies. Review demonstrated it: an activation factored into a hoisted helper is
-  // CORRECT at runtime — traced, source on unit 0 and path on unit 1 — and the
-  // direct-call form failed it. Someone will do that legitimately, hit this under
-  // deadline, and delete the check rather than restructure.
-  //
-  // So a local function whose body itself calls gl.activeTexture COUNTS as an
-  // activation. That covers the realistic factoring without pretending to resolve
-  // arbitrary indirection: a helper calling a helper is still outside this, and
-  // the message says so rather than leaving it to be discovered.
-  const activators = new Set();
-  const declRe = /(?:function\s+(\w+)\s*\(|(?:const|let|var)\s+(\w+)\s*=\s*(?:\([^)]*\)|\w+)\s*=>)/g;
-  for (const d of CODE.matchAll(declRe)) {
-    const name = d[1] || d[2];
-    if (!name) continue;
-    if (/gl\.activeTexture\s*\(/.test(CODE.slice(d.index, d.index + 400))) activators.add(name);
+// LEX, DO NOT REGEX. Review defeated the previous regex strip in BOTH directions
+// and they were the same mistake:
+//   - a commented-out bind still counted (dead text read as program);
+//   - a `//` inside a STRING LITERAL truncated the line and hid a LIVE bind
+//     (`const endpoint = "https://example.test"; gl.bindTexture(...)`).
+// A line-oriented regex cannot know which state a character is in, so every fix
+// at that level trades one direction for the other. This walks the source once
+// and blanks everything that is not executable code, preserving length and line
+// breaks so reported line numbers stay true.
+//
+// KNOWN AND DELIBERATE: the inside of a template literal is blanked whole,
+// including any `${...}` interpolation. The shader lives in one of those, so
+// treating it as code would scan GLSL as JavaScript. A bind written inside an
+// interpolation would be missed; none is, and the limits test below says so.
+function codeOnly(src) {
+  const out = src.split("");
+  const blank = (i) => { if (out[i] !== "\n") out[i] = " "; };
+  const OPENS_REGEX = "(,=:[!&|?{};+-*%~^<>";
+  const KEYWORDS = ["return", "typeof", "case", "in", "of", "new", "delete", "void", "instanceof"];
+  // Does the '/' at `at` open a regex literal, or is it division? Decided by the
+  // previous significant character — the standard disambiguation. Without this a
+  // regex containing a quote or a `//` would flip the scanner into a phantom
+  // string and silently blank real code after it.
+  const opensRegex = (at) => {
+    for (let k = at - 1; k >= 0; k--) {
+      const c = src[k];
+      if (c === " " || c === "\t" || c === "\n" || c === "\r") continue;
+      if (OPENS_REGEX.includes(c)) return true;
+      if (/[A-Za-z0-9_$]/.test(c)) {
+        const word = src.slice(0, k + 1).match(/[A-Za-z]+$/);
+        return !!word && KEYWORDS.includes(word[0]);
+      }
+      return false;
+    }
+    return true;
+  };
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i], d = src[i + 1];
+    if (c === "/" && d === "/") { while (i < n && src[i] !== "\n") blank(i++); continue; }
+    if (c === "/" && d === "*") {
+      blank(i++); blank(i++);
+      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) blank(i++);
+      if (i < n) { blank(i++); blank(i++); }
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      i++;                                        // keep the delimiter, blank the body
+      while (i < n && src[i] !== c) {
+        if (src[i] === "\\") { blank(i++); if (i < n) blank(i++); continue; }
+        blank(i++);
+      }
+      if (i < n) i++;
+      continue;
+    }
+    if (c === "/" && opensRegex(i)) {
+      i++;
+      let inClass = false;
+      while (i < n && src[i] !== "\n") {
+        if (src[i] === "\\") { blank(i++); if (i < n) blank(i++); continue; }
+        if (src[i] === "[") inClass = true;
+        else if (src[i] === "]") inClass = false;
+        else if (src[i] === "/" && !inClass) break;
+        blank(i++);
+      }
+      if (i < n && src[i] === "/") i++;
+      continue;
+    }
+    i++;
   }
-  const activatorCall = activators.size
-    ? new RegExp(`\\b(?:${[...activators].join("|")})\\s*\\(`, "g") : null;
+  return out.join("");
+}
 
+const CODE = codeOnly(SURFACE);
+
+test("the scanner reads code and only code — the control for the guard below", () => {
+  // A CONTROL HARNESS NEEDS ITS OWN CONTROL. The guard is only as good as what it
+  // is looking at, and the last two defects were both in this layer rather than
+  // in the rule. These are review's exact defeating inputs, committed so they
+  // re-run rather than being a claim I made once.
+  const stripped = codeOnly([
+    `// gl.bindTexture(gl.TEXTURE_2D, deadTex);`,
+    `const endpoint = "https://example.test"; gl.bindTexture(gl.TEXTURE_2D, liveTex);`,
+    `if (/\\/\\/'"/.test(x)) gl.bindTexture(gl.TEXTURE_2D, afterRegexTex);`,
+    `/* gl.bindTexture(gl.TEXTURE_2D, blockTex); */ gl.bindTexture(gl.TEXTURE_2D, afterBlockTex);`,
+  ].join("\n"));
+  const seen = [...stripped.matchAll(/gl\.bindTexture/g)].length;
+  assert.equal(seen, 3,
+    `expected the live binds only: commented-out gone, the ones after a string, a\n` +
+    `quote-bearing regex and a block comment kept. Saw ${seen}.`);
+  assert.equal(stripped.split("\n").length, 4, "line count must be preserved for line numbers");
+  assert.ok(!stripped.includes("deadTex") && !stripped.includes("blockTex"), "dead code survived");
+  assert.ok(stripped.includes("liveTex") && stripped.includes("afterRegexTex"), "live code was eaten");
+});
+
+test("CONVENTION: each texture bind spells out its own unit selection", () => {
+  // WHAT THIS IS, AND THE NAME NOW SAYS IT: a CONVENTION about how binds are
+  // WRITTEN. It is not a proof about what the program DOES, and after five
+  // rounds of review defeating wider versions, it no longer claims to be.
+  //
+  // THE SUPPORTED FORM IS THE ONLY FORM: a literal gl.activeTexture(...) call,
+  // then the gl.bindTexture(...) that consumes it. Nothing else is analysed.
+  //
+  // WHY HELPER-FOLLOWING WAS DELETED RATHER THAN FIXED. The previous version
+  // tried to accept an activation factored into a helper, and review measured it
+  // failing in BOTH directions at once:
+  //   - it counted gl.activeTexture INSIDE a function body as though the function
+  //     had run, so an UNCALLED helper passed while the bind landed on the wrong
+  //     unit (traced under SwiftShader: helper uncalled -> source on unit 1);
+  //   - it looked for that text within 400 characters of the declaration, so the
+  //     SAME correct helper failed once inert padding pushed its activation past
+  //     an undocumented boundary.
+  // A declaration-body token is not execution and a character count is not scope.
+  // Both are the proximity proxy that three earlier rounds already removed from
+  // this file — so the answer is to stop advertising the capability, not to
+  // measure it slightly better.
+  // AND PAIR ONLY WITHIN A BLOCK. Deleting the helper layer did NOT fix review's
+  // uncalled-helper case, and I verified that by planting it rather than assuming
+  // the smaller guard was safer: the BASE scan already counted a gl.activeTexture
+  // sitting inside a function body as though it had executed, so
+  //
+  //     function activate() { gl.activeTexture(gl.TEXTURE0 + UNIT_SRC); }
+  //     gl.bindTexture(gl.TEXTURE_2D, srcTex);          // helper never called
+  //
+  // still passed with the bind landing on whatever unit was current. The root
+  // cause was one level below the layer I removed.
+  //
+  // Brace depth settles it exactly, and it is structure rather than distance: an
+  // activation can only be consumed by a bind in the SAME block, with no block
+  // closing between them. A body-scoped activation therefore cannot pay for a
+  // bind outside that body, however near it sits. This is computable precisely
+  // from the token stream — no window, no threshold, nothing to tune.
+  const depth = new Array(CODE.length);
+  { let d = 0;
+    for (let i = 0; i < CODE.length; i++) {
+      if (CODE[i] === "}") d--;
+      depth[i] = d;
+      if (CODE[i] === "{") d++;
+    } }
+  const minDepthBetween = (a, b) => {
+    let m = Infinity;
+    for (let i = a; i <= b; i++) if (depth[i] < m) m = depth[i];
+    return m;
+  };
   const calls = [...CODE.matchAll(/gl\.(activeTexture|bindTexture)\s*\(/g)]
     .map((m) => ({ kind: m[1], at: m.index }));
-  if (activatorCall) {
-    for (const m of CODE.matchAll(activatorCall)) {
-      // the declaration itself is not a call site
-      if (/(?:function|const|let|var)\s+$/.test(CODE.slice(Math.max(0, m.index - 12), m.index))) continue;
-      calls.push({ kind: "activeTexture", at: m.index });
-    }
-    calls.sort((a, b) => a.at - b.at);
-  }
   const lineOf = (idx) => CODE.slice(0, idx).split("\n").length;
 
   assert.ok(calls.filter((c) => c.kind === "bindTexture").length >= 3,
@@ -178,51 +269,54 @@ test("every direct texture bind is preceded by an activation it consumes", () =>
   let pending = null;              // an activation not yet claimed by a bind
   for (const c of calls) {
     if (c.kind === "activeTexture") { pending = c.at; continue; }
-    if (pending === null) unowned.push(lineOf(c.at));
+    const sameBlock = pending !== null
+      && depth[pending] === depth[c.at]
+      && minDepthBetween(pending, c.at) >= depth[c.at];
+    if (!sameBlock) unowned.push(lineOf(c.at));
     pending = null;                // a bind CONSUMES it; the next needs its own
   }
   assert.deepEqual(unowned, [],
-    `these binds do not select a unit of their own (lines ${unowned}).\n` +
-    `Each writes into whichever unit the previous caller left active.\n` +
+    `CONVENTION NOT FOLLOWED at lines ${unowned}: a gl.bindTexture with no literal\n` +
+    `gl.activeTexture of its own in front of it.\n` +
     `\n` +
-    `IF THIS IS AN UNBIND (binding null): it still needs a unit. Clearing the\n` +
-    `wrong unit is the same defect as binding to it — that is why this fires on\n` +
-    `something that looks harmless. Select the unit; do not delete the check.\n` +
+    `READ THIS BEFORE DECIDING WHETHER YOUR CODE IS WRONG. This check reads SOURCE\n` +
+    `TEXT. It cannot prove which unit is current at runtime, and it does not try.\n` +
+    `It enforces one house style — select, then bind — because that is the form a\n` +
+    `human can audit by reading, and because a bind inheriting someone else's\n` +
+    `active unit is the defect that put both samplers on the path texture.\n` +
     `\n` +
-    `IF YOU MOVED THE ACTIVATION INTO A HELPER: a local function that itself\n` +
-    `calls gl.activeTexture IS recognised. A helper calling ANOTHER helper is not\n` +
-    `— this follows one level, deliberately. Inline it, flatten the helper, or\n` +
-    `change this guard and say what replaces the audit. Do not just delete it.`);
+    `SO YOUR CODE MAY WELL BE CORRECT AND STILL FAIL HERE. Cases that are correct\n` +
+    `at runtime and rejected anyway, all measured rather than supposed:\n` +
+    `  - the activation factored into a helper. Helpers are NOT analysed at all.\n` +
+    `  - an unbind (binding null) while its unit is already current. Traced: that\n` +
+    `    genuinely clears the right unit. It is rejected because this check cannot\n` +
+    `    tell it apart from the same call made while a DIFFERENT unit is current,\n` +
+    `    which clears the wrong one. The convention covers both; only one is a bug.\n` +
+    `\n` +
+    `WHAT TO DO: write the explicit activeTexture — that is the whole convention,\n` +
+    `and it costs one line. If the supported form genuinely does not fit what you\n` +
+    `are building, change this guard DELIBERATELY and say in its place what carries\n` +
+    `the evidence instead. The runtime evidence has always been the GL-level trace\n` +
+    `in review, never this file. Deleting it silently is the only wrong answer.`);
 });
 
-// WHAT THIS GUARD CANNOT SEE, written down so nobody trusts it further than it
-// reaches. Knowing where a guard stops holding is worth more than a pass.
+// WHAT THIS GUARD CANNOT SEE. Knowing where it stops holding is worth more than
+// a pass, and every item here was demonstrated against it rather than imagined.
 //
-// IT READS SOURCE TEXT, AND TEXTUAL ORDER IS NOT EXECUTION ORDER. An activeTexture
-// inside a branch that does not run, a bind inside a loop with the activation
-// outside it, or an activation in a branch the bind does not share will all
-// satisfy this and still be wrong at runtime. It also cannot follow a bind reached
-// through an alias or a helper.
+// TEXTUAL ORDER IS NOT EXECUTION ORDER. `if (false) gl.activeTexture(...)` before
+// a bind satisfies it. So does one activation outside a loop whose body binds
+// twice — traced, and the second iteration puts the path texture on unit 0, which
+// is the original corruption passing the guard that exists for it.
+// It cannot follow a helper, an alias, or a bind reached through either, and it
+// does not read inside template interpolation.
 //
-// Those are the honest boundary of any source-reading check, not defects in it.
-// The runtime evidence that the current code is correct comes from GL-level
-// traces in review, not from here — this exists to stop a NEW unguarded bind
-// being added, which is a different job.
-test("the binds this guard covers are straight-line, so its reading is sound today", () => {
-  // The limit above only bites if a bind sits under control flow. None does right
-  // now, and this fails if that changes — at which point the guard needs runtime
-  // evidence rather than a wider regex.
-  const lines = SURFACE.split("\n");
-  const risky = [];
-  lines.forEach((line, i) => {
-    if (!line.includes("bindTexture")) return;
-    const before = lines.slice(Math.max(0, i - 2), i).join(" ");
-    // an activation and a bind separated by a branch or loop opening
-    if (/\b(if|for|while)\s*\(/.test(before) && !before.includes("activeTexture")) risky.push(i + 1);
-  });
-  assert.deepEqual(risky, [],
-    `a bind sits under control flow (lines ${risky}); textual order no longer implies execution order there`);
-});
+// THERE WAS A TEST HERE ASSERTING THE COVERED BINDS ARE STRAIGHT-LINE. It is
+// deleted, not repaired. It searched two preceding lines for a control-flow
+// keyword, so review passed an exact dangerous loop through it and then failed
+// the SAME loop by inserting one harmless declaration — proximity again, in the
+// test written to document the limit of the last proximity fix. A check that
+// reports on distance while claiming to report on reachability is worse than an
+// honest paragraph, because it looks like a mechanism.
 
 test("the sampler units are named once rather than spelled out at each call", () => {
   // Two call sites agreeing on a bare 0 and 1 is how one of them ended up on the
