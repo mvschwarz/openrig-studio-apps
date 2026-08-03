@@ -86,6 +86,10 @@
       <div class="card">
         <h2>Looks</h2>
         <div class="presets" id="presets"></div>
+        <div class="presets" style="margin-top:10px">
+          <button class="ghost" id="saveframe" title="save what is on screen right now">save frame</button>
+          <button class="ghost" id="sheet" title="every look on this source, side by side">look sheet</button>
+        </div>
       </div>
 
       <div class="card">
@@ -135,6 +139,10 @@
       curveInfo: () => lastCurve,
       renderSize: () => ({ width: canvas.width, height: canvas.height, sourceWidth: srcW, sourceHeight: srcH }),
       frameHash: () => frameHash(),
+      // Export handles. An agent driving this should be able to LOOK at what it
+      // made, not only read back the numbers it set.
+      frame: () => frameDataUrl(),
+      contactSheet: (opts) => contactSheet(opts || {}),
     };
 
     async function boot() {
@@ -679,6 +687,71 @@
     // like a style choice.
     let lastWindows = null;
 
+    // EXPORT WHAT IS ON SCREEN. Deliberately client-side, and the reason is the
+    // same one that keeps the shader in one file: this renders from the exact
+    // pipeline the look was approved from, because it IS that pipeline. There is
+    // no second renderer that could disagree with the preview.
+    //
+    // WHAT THIS IS NOT: headless export. That belongs in the provider and does not
+    // exist yet — see the decision note in the mission tree. Measured: the obvious
+    // Node option is WebGL 1.0 and refuses our GLSL ES 3.00 shaders outright, so a
+    // headless renderer costs either a browser on the box or a SECOND copy of the
+    // shader. Rather than ship something that looks like export and quietly is not,
+    // this saves the frame you are looking at and says so.
+    const liveCanvas = () => (FAMILY && FAMILY.engine === 'canvas2d') ? c2d : canvas;
+
+    function download(dataUrl, name) {
+      const a = document.createElement('a');
+      a.href = dataUrl; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+
+    function frameDataUrl() { return liveCanvas().toDataURL('image/png'); }
+
+    // EVERY LOOK ON ONE SHEET, which is the PRD's "presets produce visibly distinct
+    // results, shown side by side" — and it is how an agent that has been nudging
+    // knobs can actually SEE what the named looks do rather than take the schema's
+    // word for it.
+    async function contactSheet({ cols = 3, cell = 420, label = true } = {}) {
+      const names = Object.keys(FAMILY.presets);
+      const before = { ...params }, beforeCurve = curveSpec;
+      const shots = [];
+      try {
+        for (const name of names) {
+          await applyPreset(name);
+          // The tile family draws on a rAF; give the frame a chance to land or the
+          // sheet captures the PREVIOUS look and every cell is off by one.
+          await new Promise((r) => setTimeout(r, 260));
+          shots.push({ name, url: frameDataUrl() });
+        }
+      } finally {
+        // Restore whatever was on screen. A tool that silently keeps the last
+        // preset it rendered would lose the thing the user was working on.
+        paramGen++; params = before; curveSpec = beforeCurve; syncInputs(); draw();
+      }
+
+      const imgs = await Promise.all(shots.map(({ name, url }) => new Promise((res, rej) => {
+        const im = new Image(); im.onload = () => res({ name, im }); im.onerror = rej; im.src = url;
+      })));
+      const rows = Math.ceil(imgs.length / cols);
+      const ar = imgs[0].im.height / imgs[0].im.width;
+      const cw = cell, ch = Math.round(cell * ar), pad = 10, cap = label ? 26 : 0;
+      const sheet = document.createElement('canvas');
+      sheet.width = cols * (cw + pad) + pad;
+      sheet.height = rows * (ch + cap + pad) + pad;
+      const x = sheet.getContext('2d');
+      x.fillStyle = '#0b0e13'; x.fillRect(0, 0, sheet.width, sheet.height);
+      imgs.forEach(({ name, im }, i) => {
+        const cx = pad + (i % cols) * (cw + pad), cy = pad + Math.floor(i / cols) * (ch + cap + pad);
+        x.drawImage(im, cx, cy, cw, ch);
+        if (label) {
+          x.fillStyle = '#929cad'; x.font = '13px ui-monospace, monospace'; x.textBaseline = 'middle';
+          x.fillText(name, cx + 2, cy + ch + cap / 2);
+        }
+      });
+      return sheet.toDataURL('image/png');
+    }
+
     // A cheap fingerprint of what is actually on screen. Lets a check assert that
     // a parameter CHANGED THE IMAGE, rather than only that the call returned —
     // which is the difference between a control that works and one that answers.
@@ -696,6 +769,17 @@
     $('#source').addEventListener('change', (e) => useSource(e.target.value));
     $('#reload').addEventListener('click', loadSources);
     $('#reset').addEventListener('click', applyDefaults);
+    $('#saveframe').addEventListener('click', () => {
+      download(frameDataUrl(), `effects-${familyId}-${Date.now()}.png`);
+      say('saved the frame you are looking at');
+    });
+    $('#sheet').addEventListener('click', async () => {
+      say('rendering every look…');
+      try {
+        download(await contactSheet(), `effects-${familyId}-looks.png`);
+        say(`saved a sheet of all ${Object.keys(FAMILY.presets).length} looks`);
+      } catch (e) { fail(`could not build the sheet: ${e.message}`); }
+    });
     boot();
   </script>
 </body>
