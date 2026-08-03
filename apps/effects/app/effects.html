@@ -120,7 +120,7 @@
     window.effects = {
       get params() { return { ...params }; },
       get ready() { return Boolean(PROGRAM && srcTex); },
-      set: (patch) => { Object.assign(params, patch); syncInputs(); draw(); return { ...params }; },
+      set: (patch) => { paramGen++; Object.assign(params, patch); syncInputs(); draw(); return { ...params }; },
       preset: (name) => applyPreset(name),
       families: () => ALL,
       family: (id) => { if (id) { familyId = id; $('#family').value = id; return useFamily(); } return familyId; },
@@ -208,6 +208,7 @@
         }
         input.dataset.key = key;
         input.addEventListener('input', () => {
+          paramGen++;
           params[key] = spec.type === 'bool' ? input.checked
                       : (spec.type === 'enum' || spec.type === 'color') ? input.value
                       : Number(input.value);
@@ -226,11 +227,23 @@
     }
 
     function applyDefaults() {
+      paramGen++;
       params = {};
       for (const [k, s] of Object.entries(FAMILY.params)) params[k] = s.default;
       syncInputs(); draw();
     }
+    // GENERATION COUNTER, and it is not defensive programming — it fixes a real
+    // defect studio-qa reproduced: preset() is asynchronous because the PROVIDER
+    // resolves it, so a set() issued while that request was in flight was applied,
+    // returned to the caller as applied, and then silently overwritten when the
+    // preset's response landed. The control appeared to do nothing, and a LATER
+    // control appeared to work, which is the most confusing possible symptom.
+    //
+    // This is the natural way an agent drives the app — apply a look, then adjust
+    // one knob — so the race is not an edge case, it is the main path.
+    let paramGen = 0;
     async function applyPreset(name) {
+      const gen = ++paramGen;
       // Resolved by the PROVIDER, not here — so a preset means the same thing to
       // the surface, to an agent, and to a headless render.
       const r = await (await fetch('/api/effects/resolve', {
@@ -238,6 +251,12 @@
         body: JSON.stringify({ family: familyId, preset: name }),
       })).json();
       if (!r.ok) { fail(r.error || 'preset failed'); return; }
+      if (gen !== paramGen) {
+        // Something changed the parameters while this was in flight. The newer
+        // intent wins, and we say so rather than pretending the preset landed.
+        say(`look: ${name} (superseded by a later change)`);
+        return { ...params };
+      }
       params = r.params; syncInputs(); draw(); say(`look: ${name}`);
       return r.params;
     }

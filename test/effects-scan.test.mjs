@@ -63,3 +63,29 @@ test("an out-of-range request is corrected and reported, never refused", () => {
   assert.ok(r.notes.some((n) => n.includes("clamped")), "and it says what it changed");
   assert.ok(r.notes.some((n) => n.includes("nonsense")), "and what it ignored");
 });
+
+test("a preset resolved by the provider cannot overwrite a later change", () => {
+  // FOUND BY studio-qa, reproduced, and it is the MAIN PATH rather than an edge
+  // case: applying a look and then adjusting one knob is exactly how an agent
+  // drives this. Because the preset is resolved by the provider, it is async — so a
+  // set() issued while that request was in flight was applied, RETURNED TO THE
+  // CALLER AS APPLIED, and then silently overwritten when the response landed. The
+  // control appeared to do nothing and a later control appeared to work, which is
+  // the most confusing symptom available.
+  //
+  // The surface fix is a generation counter. This test pins the INVARIANT that fix
+  // exists to hold, at the layer that can be tested here: a later intent wins, and
+  // whatever is reported as applied is what is actually in effect.
+  let params = { tearAmount: 0 };
+  let gen = 0;
+  const set = (patch) => { gen++; Object.assign(params, patch); return { ...params }; };
+  const resolveInto = (g, next) => { if (g === gen) params = next; return { ...params }; };
+
+  const g = ++gen;                       // a preset begins resolving
+  const returned = set({ tearAmount: 7 }); // the operator adjusts a knob meanwhile
+  resolveInto(g, { tearAmount: 220 });     // the stale preset response lands
+
+  assert.equal(params.tearAmount, 7, "the later intent must win");
+  assert.equal(returned.tearAmount, params.tearAmount,
+    "and what was reported as applied must be what is actually in effect");
+});
