@@ -1,0 +1,75 @@
+{
+  "package": "@openrig/studio-video",
+  "run": {
+    "entry": "export-server.mjs",
+    "args": [
+      "--port",
+      "{{port}}",
+      "--slice-root",
+      "{{root:project}}",
+      "--canvas-root",
+      "{{root:canvas}}",
+      "--media-root",
+      "{{root:media}}"
+    ],
+    "env": {
+      "CUTDOWN_API": "http://127.0.0.1:{{port:@openrig/studio-cutdown}}"
+    }
+  },
+  "serves": [
+    "/canvas-license.json"
+  ],
+  "_serves_note": "FOUND BY DOING THIS LIFT, AND IT WAS BROKEN ON EVERY STUDIO. canvas.html fetches /canvas-license.json; this provider answers it (export-server.mjs:664) and deliberately returns {} rather than 404 because the canvas probe's console gate treats a 404 as an error. But NO app ever declared it, and it is not an /api/ path — so studio.mjs:474 finds no `serves` prefix, :475 skips it (the sole-provider fallback covers /api/ ONLY), and :479 hands it to the SDK runtime, which 404s. The provider's own defensive answer was unreachable. WHY IT STAYED INVISIBLE: unkeyed tldraw only unmounts the editor on a PRODUCTION https non-loopback origin, so on 127.0.0.1 dev it looks perfect and on a deployed box CANVAS DIES AFTER 5 SECONDS. Same family as `rig ps` needing -A: a dev machine cannot see it. Declaring the route is half the fix; the box must also carry the canvas-license.json file, which is operator-side and separate.",
+  "verbs": [
+    "/api/annotation",
+    "/api/approve",
+    "/api/canvas",
+    "/api/canvas/apply",
+    "/api/canvases",
+    "/api/curation",
+    "/api/export-final",
+    "/api/export-review",
+    "/api/export-status/",
+    "/api/exports",
+    "/api/focus",
+    "/api/health",
+    "/api/history-since",
+    "/api/library",
+    "/api/library/media",
+    "/api/library/route",
+    "/api/media",
+    "/api/patch",
+    "/api/patch/apply",
+    "/api/patch/discard",
+    "/api/patch/validate",
+    "/api/probe-duration",
+    "/api/project-assets",
+    "/api/project-assets/rebuild",
+    "/api/project-info",
+    "/api/reconform",
+    "/api/selections",
+    "/api/slot-history",
+    "/api/tags",
+    "/api/templates",
+    "/api/thumb",
+    "/api/timeline/doc",
+    "/api/timeline/select",
+    "/api/timelines",
+    "/api/validate-audio",
+    "/api/validate-export"
+  ],
+  "_verbs_note": "THIS LIST IS DELIBERATELY 36 OF THE 43 VERBS THIS FILE ANSWERS, AND THE GAP IS NOT AN OVERSIGHT. Withheld: /api/note, /api/note/done, /api/note/flush, /api/note/reconciled, /api/receivers, /api/reveal-file, /api/shell-mtime. The first four reach `execFile(\"rig\", [\"queue\",\"create\", ...])` — live at export-server.mjs:459, :497 and :534 — so declaring them lets a Studio surface inject work into the rig's coordination system. /api/reveal-file runs `open -R`, which is macOS Finder and meaningless on the Linux boxes we ship to. THE CHOICE IS BEHAVIOUR-PRESERVING, WHICH IS THE POINT: on a multi-provider box (host + video + cutdown, i.e. every deployed studio) these seven ALREADY do not route today, because no app declares them and studio.mjs's sole-provider fallback needs exactly one provider. Declaring them here would ENABLE something currently unreachable — a policy change smuggled inside a format migration. A migration changes where a fact is written, never what the product does. THE SCOPE QUESTION IS GENUINELY OPEN and is NOT settled by this file: OQ-5 excluded the note verbs, but it was ruled under the threat model that Ruling 15 later RETRACTED, and that retraction says rig-injection is a FEATURE on a trusted box. So the exclusion rests on a withdrawn premise and the inclusion has never been ruled on its own merits. Routed rather than decided here.",
+  "supplies": [
+    "ffmpeg",
+    "ffprobe"
+  ],
+  "seeds": {
+    "root": "project",
+    "marker": "timeline.json",
+    "entry": "video-new.mjs",
+    "export": "scaffoldBundle"
+  },
+  "_seeds_note": "sdk-impl moved first-run seeding off a hardcoded path onto a provider declaration (SDK 254c280). Until this file existed the boot tool carried THIS provider's file name, module export and marker as literals, which made first-run seeding a video-studio feature no other kind of studio could use. `marker` is the file whose presence means already-seeded; seeding runs only into an absent or empty directory, so a directory with contents and no marker is somebody's data and the box refuses rather than seeding over it.",
+  "_seeds_upstream_defect": "THIS DECLARATION DOES NOT TAKE EFFECT YET, AND IT IS DELIBERATE THAT IT IS WRITTEN THIS WAY ANYWAY. Measured on a real boot with both controls: with `seeds` HERE (top level, the shape contract/app-manifest.md documents) the boot logs `warn: seeding the project root from a hardcoded path — LEGACY` and seeds via the hardcoded fallback; move the identical block to `run.seeds` and the same boot logs `seeded: <root> (declared by @openrig/studio-video)` with no warning. CAUSE, read at source: compose-rail.mjs:209-211 copies ONLY run, serves and verbs off a provider.json onto the spec, so a top-level `seeds` never reaches studio.mjs:190, which looks for `spec.run?.seeds ?? spec.seeds`. The composer drops the documented field one layer above the code that reads it. WHY THE CONTRACT SHAPE STAYS: nesting it under `run` would work today and would ship an UNDOCUMENTED second shape for one fact — the precise defect this whole migration exists to remove, and it would make the studio look migrated while the mechanism is still broken. Nothing is lost by waiting: the legacy fallback still seeds this provider, and the warning is TRUE. WHAT IS ACTUALLY BROKEN AND IS NOT COSMETIC: that fallback is hardcoded to studio-video, so any OTHER provider declaring seeds gets nothing at all, silently. Filed to sdk-impl; the fix is one line in the composer, not in this file.",
+  "_why_this_file_exists": "Three apps — canvas, media-manager and mini-nle — each carried a byte-identical copy of the run spec above, because an app was the only place the format let you write it. Three copies of one fact drift, and the drift is silent: the same shape already cost us live rig state when retiring the AGENTS app deleted the only declaration of {{state}} and Matti's landing page served an invented rig under a green live signal. The provider is authoritative about how to start itself; an app is a client that names it."
+}

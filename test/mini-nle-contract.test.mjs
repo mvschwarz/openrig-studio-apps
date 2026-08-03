@@ -58,8 +58,19 @@ function readContract() {
   };
 }
 
+// AUTHORSHIP NOTE, since this moved under studio-video's provider lift: the
+// PROPERTIES below are studio-qa's and are unchanged. Only where the app records a
+// route moved — `verbs` (a flat list doing double duty as both "what I need" and
+// "what my provider routes") became `calls` (what this app CALLS, with per-call
+// required-ness). Reading `verbs` here would now read `undefined` and every one of
+// these checks would either throw or pass vacuously, so the reader is re-pointed
+// rather than the assertions rewritten.
+function declaredRoutes(manifest) {
+  return Object.keys(manifest.calls ?? {});
+}
+
 function missingRoutes(manifest) {
-  const declared = new Set(manifest.verbs ?? []);
+  const declared = new Set(declaredRoutes(manifest));
   return requiredExact.filter((route) => !declared.has(route));
 }
 
@@ -85,19 +96,26 @@ test("MINI-NLE declares every legitimate exact route it uses", () => {
 test("MINI-NLE declares parameterized status polling with the SDK trailing-slash prefix contract", () => {
   const { manifest, surface } = readContract();
   assert.match(surface, /callExportApi\(`\/api\/export-status\/\$\{encodeURIComponent\(jobId\)\}`/);
-  for (const prefix of requiredPrefixes) assert.ok(manifest.verbs.includes(prefix), `${prefix} prefix is undeclared`);
+  for (const prefix of requiredPrefixes) assert.ok(declaredRoutes(manifest).includes(prefix), `${prefix} prefix is undeclared`);
 });
 
 test("the route checker demonstrably fails when a known declaration is removed", () => {
   const { manifest } = readContract();
-  const altered = { ...manifest, verbs: (manifest.verbs ?? []).filter((route) => route !== "/api/patch") };
+  // Re-pointed at `calls`, and this one MATTERED: filtering the retired `verbs`
+  // field left `calls` untouched, so the control went on "passing" while proving
+  // nothing — every required route read as missing because the field was gone, not
+  // because the removal was detected. A control that cannot fail is not protection.
+  assert.deepEqual(missingRoutes(manifest), [], "baseline: the unaltered manifest is complete");
+  const calls = { ...manifest.calls };
+  delete calls["/api/patch"];
+  const altered = { ...manifest, calls };
   assert.ok(missingRoutes(altered).includes("/api/patch"));
 });
 
 test("ruled-out rig injection and Finder reveal have no live surface callers", () => {
   const { manifest, surface } = readContract();
   for (const route of forbidden) {
-    assert.ok(!(manifest.verbs ?? []).includes(route), `${route} must not be declared`);
+    assert.ok(!declaredRoutes(manifest).includes(route), `${route} must not be declared`);
     const escaped = route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     assert.doesNotMatch(
       surface,
@@ -116,9 +134,9 @@ test("disabled review handoff points to the agent sidebar at the interaction poi
 test("dynamic export mode resolves to concrete declared review and final routes", () => {
   const { manifest, surface } = readContract();
   assert.match(surface, /callExportApi\(`\/api\/export-\$\{mode\}`/);
-  assert.ok(manifest.verbs.includes("/api/export-review"));
-  assert.ok(manifest.verbs.includes("/api/export-final"));
-  assert.ok(!manifest.verbs.includes("/api/export-"), "dynamic source fragment is not a route declaration");
+  assert.ok(declaredRoutes(manifest).includes("/api/export-review"));
+  assert.ok(declaredRoutes(manifest).includes("/api/export-final"));
+  assert.ok(!declaredRoutes(manifest).includes("/api/export-"), "dynamic source fragment is not a route declaration");
 });
 
 test("timeline media resolves through the declared provider route, not relative to /surfaces/", () => {
