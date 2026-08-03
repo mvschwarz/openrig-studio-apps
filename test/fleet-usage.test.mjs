@@ -202,3 +202,33 @@ test("sampling is one reading per host, not one per seat", () => {
   assert.equal(v.boxes[0].used7d, 14, "and the newest good reading is the reading");
   assert.equal(v.cost.callsLastPoll, 1, "one host, one real API call — the cost the poll reports");
 });
+
+test("an idle machine reads as idle, not as a broken credential", () => {
+  // A 401 has two very different causes. If the credential on disk says it has
+  // already expired, nobody has used the machine since it lapsed — the next real
+  // use refreshes it. That is the ordinary resting state of a machine you are not
+  // working on, and calling it an auth failure sends someone to fix nothing.
+  const r = parseProbe(JSON.stringify({
+    ok: true, status: "401", src: "file:claude-credentials",
+    meta: { expired: true, staleSeconds: 10800, expiresAt: 1785742933499,
+            plan: "max", tier: "default_claude_max_20x", refreshable: true },
+  }));
+  assert.equal(r.sampled, false, "no usage number was read, and none may be invented");
+  assert.equal(r.idle, true);
+  assert.match(r.reason, /idle/);
+  assert.doesNotMatch(r.reason, /auth-not-usable/, "an idle machine is not an auth failure");
+  assert.equal(r.plan, "max", "the plan is on disk and costs no API call to report");
+  assert.equal(r.tier, "default_claude_max_20x");
+});
+
+test("a 401 with a VALID credential is still a real auth failure", () => {
+  // The positive control for the test above. Reporting every 401 as "idle" would
+  // hide a genuinely rejected credential, which is the failure worth waking up for.
+  const r = parseProbe(JSON.stringify({
+    ok: true, status: "401", src: "file:claude-credentials",
+    meta: { expired: false, staleSeconds: 0, plan: "max" },
+  }));
+  assert.equal(r.idle, undefined, "a live credential rejected by the server is not idleness");
+  assert.equal(r.authFailed, true);
+  assert.match(r.reason, /auth-not-usable/);
+});

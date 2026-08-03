@@ -49,19 +49,30 @@ if [ -z "$TOK" ] && [ -f "$HOME/.claude/.credentials.json" ]; then
   if command -v python3 >/dev/null 2>&1; then
     TOK=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("claudeAiOauth",{}).get("accessToken",""))' "$HOME/.claude/.credentials.json" 2>/dev/null)
     [ -n "$TOK" ] && SRC="file:claude-credentials"
+    # The credential describes ITSELF on disk: when it expires, the plan, the tier.
+    # Free to read, no API call, and it is the ONLY thing available on an idle box
+    # whose access token has already lapsed — which is most boxes, most of the time.
+    META=$(python3 -c 'import json,sys,time
+d=json.load(open(sys.argv[1])).get("claudeAiOauth",{})
+ea=d.get("expiresAt") or 0
+print(json.dumps({"expiresAt":ea,"expired":bool(ea and ea/1000<time.time()),
+ "staleSeconds":int(time.time()-ea/1000) if ea and ea/1000<time.time() else 0,
+ "plan":d.get("subscriptionType"),"tier":d.get("rateLimitTier"),
+ "refreshable":bool(d.get("refreshToken"))}))' "$HOME/.claude/.credentials.json" 2>/dev/null)
   else
     echo '{"ok":false,"reason":"credentials-file-present-but-no-python3-to-read-it"}'; exit 0
   fi
 fi
-[ -z "$TOK" ] && { echo '{"ok":false,"reason":"no-token-source (tried env, studio-box secrets, claude credentials)"}'; exit 0; }
+[ -z "$TOK" ] && { echo '{"ok":false,"reason":"no-token-source (tried env, secrets file, credentials file)"}'; exit 0; }
 H=$(curl -s -D - -o /dev/null --max-time 25 https://api.anthropic.com/v1/messages \
   -H "authorization: Bearer $TOK" -H "anthropic-beta: oauth-2025-04-20" \
   -H "anthropic-version: 2023-06-01" -H "content-type: application/json" \
   -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null)
 g(){ printf '%s' "$H" | grep -i "^$1:" | tr -d '\r' | awk '{print $2}' | head -1; }
 STATUS=$(printf '%s' "$H" | head -1 | awk '{print $2}')
-printf '{"ok":true,"status":"%s","src":"%s","org":"%s","u5":"%s","u7":"%s","r5":"%s","r7":"%s"}\n' \
-  "$STATUS" "$SRC" "$(g anthropic-organization-id)" \
+[ -z "$META" ] && META='{}'
+printf '{"ok":true,"status":"%s","src":"%s","meta":%s,"org":"%s","u5":"%s","u7":"%s","r5":"%s","r7":"%s"}\n' \
+  "$STATUS" "$SRC" "$META" "$(g anthropic-organization-id)" \
   "$(g anthropic-ratelimit-unified-5h-utilization)" "$(g anthropic-ratelimit-unified-7d-utilization)" \
   "$(g anthropic-ratelimit-unified-5h-reset)" "$(g anthropic-ratelimit-unified-7d-reset)"
 `;
@@ -112,6 +123,20 @@ export function parseProbe(raw) {
     // credential state, and this thing reads. The box's own agent refreshes on
     // next use, so the honest report is "stale here, not spent there".
     const auth = d.status === "401" || d.status === "403";
+  // A 401 has TWO very different causes and the dashboard must not merge them.
+  // If the credential on disk says it expired, this box is simply IDLE — nobody
+  // has used it since the token lapsed, and the next real use refreshes it. That
+  // is not a broken box and not a spent account; it is the ordinary resting state
+  // of a machine you are not currently working on. Saying "auth failed" there
+  // sends someone to fix something that is not wrong.
+  const m = d.meta || {};
+  const hours = (n) => n >= 3600 ? `${Math.round(n / 3600)}h` : `${Math.max(1, Math.round(n / 60))}m`;
+  if (auth && m.expired) {
+    return { sampled: false, reason: `idle — credential lapsed ${hours(m.staleSeconds)} ago; a real use refreshes it`,
+      idle: true, credentialExpiredAt: m.expiresAt ? new Date(m.expiresAt).toISOString() : null,
+      plan: m.plan || null, tier: m.tier || null, tokenSource: d.src || null,
+      org: d.org || null, httpStatus: d.status || null };
+  }
     return {
       sampled: false,
       reason: d.status === "429" ? "at-or-over-limit"
@@ -130,7 +155,7 @@ export function parseProbe(raw) {
     httpStatus: d.status || null,
     // WHERE the token came from. Boxes differ, and a reading you cannot
     // attribute to a source cannot be compared against one from another box.
-    tokenSource: d.src || null,
+    tokenSource: d.src || null, plan: (d.meta||{}).plan || null, tier: (d.meta||{}).tier || null,
     used5h: u5 === null ? null : Math.round(u5 * 100),
     used7d: u7 === null ? null : Math.round(u7 * 100),
     resets5h: ts(d.r5),
