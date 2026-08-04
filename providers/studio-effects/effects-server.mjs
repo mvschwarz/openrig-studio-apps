@@ -20,7 +20,7 @@ import { TILE_FAMILIES, PALETTES } from "./engine/tile.mjs";
 import { ANALOG_FRAGMENT, ANALOG_VERTEX } from "./engine/analog.mjs";
 import { evalCurves, pulses, ramp, EASING_NAMES } from "./engine/curves.mjs";
 import { pcm, envelope, onsets, envelopeTrack, onsetTrack } from "./engine/listen.mjs";
-import { cuts, lockLossTrack } from "./engine/watch.mjs";
+import { cuts, lockLossTrack, frames, smooth } from "./engine/watch.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const arg = (flag, fallback) => {
@@ -160,26 +160,43 @@ http.createServer(async (req, res) => {
       const fam = FAMILIES[b.family || "analog"];
       if (!fam) return json(res, 400, { ok: false, error: `no family ${b.family}` });
 
-      const found = cuts(file, { threshold: b.threshold === undefined ? 0.3 : Number(b.threshold) });
+      const mode = ["motion", "brightness"].includes(b.mode) ? b.mode : "cuts";
       const wanted = Array.isArray(b.tracks) ? b.tracks : [];
       const tracks = {};
       const notes = [];
+      let found = { cuts: [], threshold: null };
+
+      // MOTION AND BRIGHTNESS ARE CONTINUOUS; CUTS ARE EVENTS. Different shapes,
+      // so different track builders — but the SAME percentile normalisation the
+      // audio envelope uses, because "map a measured series into a parameter's
+      // range without one outlier defining the top" is one problem, not three.
+      let series = null;
+      if (mode !== "cuts") {
+        const f = frames(file, { fps: Number(b.fps) || 15 });
+        if (!f.ok) return json(res, 200, { ok: false, error: f.error });
+        series = smooth(f.frames, mode, Number(b.smooth) || (mode === "motion" ? 5 : 3));
+      } else {
+        found = cuts(file, { threshold: b.threshold === undefined ? 0.3 : Number(b.threshold) });
+      }
+
       for (const t of wanted) {
         const spec = fam.params?.[t.param];
         if (!spec) { notes.push(`no parameter ${t.param} on family ${b.family || "analog"}`); continue; }
-        tracks[t.param] = lockLossTrack(found.cuts, {
-          rest: t.rest === undefined ? (spec.default ?? spec.min ?? 0) : Number(t.rest),
-          peak: t.peak === undefined ? (spec.max ?? 1) : Number(t.peak),
-          recover: t.recover === undefined ? 0.45 : Number(t.recover),
-        });
+        const min = t.rest === undefined ? (spec.default ?? spec.min ?? 0) : Number(t.rest);
+        const max = t.peak === undefined ? (spec.max ?? 1) : Number(t.peak);
+        tracks[t.param] = mode === "cuts"
+          ? lockLossTrack(found.cuts, { rest: min, peak: max, recover: t.recover === undefined ? 0.45 : Number(t.recover) })
+          : envelopeTrack(series, { min, max, gamma: t.gamma === undefined ? 1 : Number(t.gamma) });
       }
       // A continuous shot is a legitimate thing to point this at, so no cuts is an
       // answer rather than an error — but it is SAID, because a silent empty curve
       // is indistinguishable from a broken one.
       return json(res, 200, {
-        ok: true, cuts: found.cuts.length, at: found.cuts.map((t) => +t.toFixed(2)),
-        threshold: found.threshold, notes,
-        note: found.cuts.length ? null : "no cuts found at this threshold — a continuous shot, or lower the threshold",
+        ok: true, mode,
+        cuts: found.cuts.length, at: found.cuts.map((t) => +t.toFixed(2)), threshold: found.threshold,
+        samples: series ? series.length : null, notes,
+        note: mode === "cuts" && !found.cuts.length
+          ? "no cuts found at this threshold — a continuous shot, or lower the threshold" : null,
         spec: { unit: "seconds", tracks },
       });
     }

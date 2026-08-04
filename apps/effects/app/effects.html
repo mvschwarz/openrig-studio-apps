@@ -160,6 +160,17 @@
       families: () => ALL,
       family: (id) => { if (id) { familyId = id; $('#family').value = id; return useFamily(); } return familyId; },
       stats: () => lastStats,
+      // THE VALUES ACTUALLY BEING RENDERED, for both stages. `params` is what was
+      // AUTHORED — it does not move when a curve drives it, which is correct for a
+      // slider and useless as evidence. Three times now a check of mine has read
+      // the authored value, seen it sit still, and drawn the wrong conclusion in
+      // one direction or the other; and curveInfo() reports what the curve INTENDED
+      // rather than what reached the renderer, which is the handle that already lied
+      // about delivery once. This is the one an agent or a test should assert on.
+      effective: () => ({
+        stage1: effective(),
+        stage2: stackFamily ? effectiveStack() : null,
+      }),
       windows: () => lastWindows,
       // Set, clear (null) or read the curve. A curve is DATA: an agent can author
       // one, a timeline can store one, a beat track can generate one.
