@@ -305,11 +305,8 @@ http.createServer(async (req, res) => {
       // on the path as ever -- sanitise to one segment AND check the resolved path.
       const text = buf.toString("latin1");
       const nameMatch = text.match(/name="name"\r\n\r\n([^\r]*)\r\n/);
-      const fpsMatch = text.match(/name="fps"\r\n\r\n([^\r]*)\r\n/);
-      // The rate the surface MEASURED itself capturing at. Assembling at a fixed
-      // rate instead makes the clip play fast or slow by whatever ratio the
-      // renderer happened to hit.
-      const fps = Math.max(4, Math.min(60, Number(fpsMatch ? fpsMatch[1] : 30) || 30));
+      const secMatch = text.match(/name="seconds"\r\n\r\n([^\r]*)\r\n/);
+      const wallSeconds = Math.max(0.5, Number(secMatch ? secMatch[1] : 0) || 0);
       const raw = (nameMatch ? nameMatch[1] : "scan").replace(/[^A-Za-z0-9._ -]/g, "").slice(0, 80);
       if (!raw) return json(res, 400, { ok: false, error: "not a usable clip name" });
       const file = `${raw.replace(/\.webm$/, "")}.webm`;
@@ -347,6 +344,23 @@ http.createServer(async (req, res) => {
         }
         if (ff && fs.existsSync(ff)) {
           const mp4 = full.replace(/\.webm$/, ".mp4");
+          // COUNT THE FRAMES IN THE FILE. captureStream drops frames under load,
+          // so the surface's own count is an overestimate -- only the recording
+          // knows what it actually contains. frames/wallSeconds is then the true
+          // capture rate, and assembling at it plays back in real time.
+          let fps = 30;
+          try {
+            const probe = ["studio-video", "studio-cutdown"]
+              .map((sib) => path.join(HERE, "..", sib, "node_modules", "ffprobe-static", "bin",
+                                      process.platform, process.arch, "ffprobe"))
+              .find((g) => fs.existsSync(g));
+            if (probe && wallSeconds > 0.5) {
+              const n = Number(String(execFileSync(probe, ["-v", "error", "-count_frames",
+                "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames",
+                "-of", "default=nw=1:nk=1", full], { timeout: 120000 })).trim());
+              if (Number.isFinite(n) && n > 4) fps = Math.max(4, Math.min(60, n / wallSeconds));
+            }
+          } catch (e) { /* 30 is a survivable guess; the note says which happened */ }
           // ASSEMBLE THE REAL FRAMES AT A FIXED RATE, and ignore MediaRecorder's
           // timing entirely. It writes no frame rate and no duration, so letting
           // ffmpeg guess makes it assume 60fps and DUPLICATE frames to fill the
@@ -361,7 +375,7 @@ http.createServer(async (req, res) => {
                             "-vsync", "cfr", "-r", String(fps),
                             "-movflags", "+faststart", mp4], { stdio: "ignore", timeout: 180000 });
           if (fs.existsSync(mp4) && fs.statSync(mp4).size > 0) {
-            fs.unlinkSync(full); out = mp4; note = `assembled to mp4 at ${fps.toFixed(1)}fps — the rate it was captured at`;
+            fs.unlinkSync(full); out = mp4; note = `assembled at ${fps.toFixed(1)}fps from a ${wallSeconds.toFixed(1)}s recording`;
           }
         }
       } catch (e) { note = `kept as webm (${e.message.slice(0, 60)})`; }

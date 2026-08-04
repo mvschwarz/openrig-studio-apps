@@ -541,7 +541,7 @@ function setRecording(on, why) {
 // records EXACTLY what is on screen, so the artifact and the preview cannot
 // disagree.
 let rec = null, recChunks = [], recUrl = null, recBlob = null;
-let recFrames = 0, recStart = 0, recFps = 30;
+let recFrames = 0, recStart = 0, recSeconds = 0;
 function startRecorder() {
   const last = stages[stages.length-1];
   if (!last || !last.canvas || typeof last.canvas.captureStream !== 'function') return;
@@ -568,8 +568,8 @@ function startRecorder() {
         // MediaRecorder omits the duration header, so this is routinely
         // Infinity. Printing it would be a number that is not one.
         $('#clipcap').textContent =
-          `Clip — ${recFrames} frames at ${recFps.toFixed(1)}fps (~${(recFrames/recFps).toFixed(1)}s) · ` +
-          `${(recBlob.size/1e6).toFixed(1)}MB · use the controls, or save for a seekable mp4`;
+          `Clip — ${recSeconds.toFixed(1)}s recorded · ${(recBlob.size/1e6).toFixed(1)}MB · ` +
+          `use the controls, or save for a seekable mp4`;
       };
       say(`clip ready — ${(recBlob.size/1e6).toFixed(1)}MB. Play it below, or save it into the media root.`);
       v.play().catch(()=>{ say('clip ready — press play (the browser blocked autoplay)'); });
@@ -583,8 +583,12 @@ function stopRecorder() {
   // at whatever ratio the renderer happened to hit -- a 10s run rendered at 15.7
   // steps/s came out 5.2s long and twice as fast. The rate the frames were
   // actually produced at is the only rate that plays them back in real time.
-  const secs = recStart ? (performance.now() - recStart) / 1000 : 0;
-  if (secs > 0.5 && recFrames > 4) recFps = Math.max(4, Math.min(60, recFrames / secs));
+  // WALL TIME ONLY. Counting render steps overstates it: captureStream samples
+  // at its own rate and DROPS FRAMES under load, so the surface's step count is
+  // not the frame count -- measured 386 steps against 157 frames actually
+  // captured. Only the file knows how many frames there are, so the server
+  // probes it and divides by this.
+  recSeconds = recStart ? (performance.now() - recStart) / 1000 : 0;
   try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (e) {} rec = null; recStart = 0;
 }
 
@@ -843,7 +847,7 @@ async function boot() {
       const name = prompt('save this clip into the media root as:', `scan-${Date.now()}`);
       if (!name) return;
       const fd = new FormData(); fd.append('name', name);
-      fd.append('fps', String(Math.round(recFps * 100) / 100));
+      fd.append('seconds', String(Math.round(recSeconds * 100) / 100));
       fd.append('clip', recBlob, 'clip.webm');
       const r = await (await fetch('/api/scanner/clip', { method:'POST', body: fd })).json();
       if (!r.ok) return fail(r.error || 'could not save the clip');
