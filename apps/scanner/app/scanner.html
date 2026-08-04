@@ -114,6 +114,7 @@ let vid = document.createElement('video');
 vid.muted = true; vid.loop = true; vid.playsInline = true; vid.crossOrigin = 'anonymous';
 let srcEl = null, isVideo = false;
 let recording = false, scanTime = 0, lastWall = 0, writeAt = 0, rafId = null;
+let stepCount = 0, wallStart = 0;
 let srcTex = null, prevTex = null, prevFbo = null, tapeTex = null, tapeFbo = null;
 let writeProg = null, srcW = 0, srcH = 0;
 const OUT_W = 1280, OUT_H = 540;
@@ -382,10 +383,21 @@ function tick(now) {
     writeStrip(P);
     blit();
     if (duration && scanTime >= duration) setRecording(false, 'reached the spec duration');
+    // RENDER RATE, SHOWN. dt is capped at 0.1 so one very slow frame cannot jump
+    // the whole scan, but that cap also means a stalled loop looks like time
+    // merely passing slowly instead of like nothing happening. Measured against
+    // the WALL clock, so a stall is legible rather than silent -- the first
+    // record after a state change can take many seconds to get going, and
+    // without this it reads as the app being broken.
+    stepCount++;
+    if (!wallStart) wallStart = now;
+    const wallSec = (now - wallStart) / 1000;
+    const fps = wallSec > 0.5 ? stepCount / wallSec : null;
     metaEl.textContent =
       `scanTime ${scanTime.toFixed(2)}s / ${duration}s · write ${(writeAt * 100).toFixed(1)}% · ` +
-      `head ${(P.headPosition ?? 0).toFixed(3)} · bedX ${(P.bedX || 0).toFixed(0)} · read ${P.read}`;
-  } else { lastWall = 0; }
+      `head ${(P.headPosition ?? 0).toFixed(3)} · bedX ${(P.bedX || 0).toFixed(0)} · read ${P.read}` +
+      (fps ? ` · ${fps.toFixed(1)} steps/s` : ' · warming up');
+  } else { lastWall = 0; stepCount = 0; wallStart = 0; }
 }
 function setRecording(on, why) {
   recording = on;
