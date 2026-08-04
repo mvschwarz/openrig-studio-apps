@@ -375,7 +375,15 @@
     // definition of the sampling geometry. See analog.mjs for why.
     function upload(img, w, h) {
       srcW = w; srcH = h;
-      const scale = (familyId === 'analog' && ANALOG)
+      // ANALOG CAPS THE RENDER WIDTH WHEREVER IT SITS IN THE CHAIN, not just when
+      // it is the family you picked. Its decode windows are measured in carrier
+      // PERIODS while the shader walks a fixed number of PIXELS, so at 1920 the
+      // chroma window wants far more taps than the reach — it truncates at a
+      // non-integer number of periods and demodulates luma into colour. That is
+      // the yellow-green defect this cap was introduced to fix, and stacking
+      // quietly reintroduced it by handing analog a full-resolution texture.
+      const analogInChain = (familyId === 'analog' || stackFamily === 'analog');
+      const scale = (analogInChain && ANALOG)
         ? Math.min(1, ANALOG.ANALOG_INTERNAL_WIDTH / w) : 1;
       canvas.width = Math.max(2, Math.round(w * scale));
       canvas.height = Math.max(2, Math.round(h * scale));
@@ -681,6 +689,9 @@
       })).json();
       if (!r.ok) { fail(r.error || 'could not resolve the second effect'); return; }
       stackParams = r.params;
+      // Adding or removing analog changes the render size, so the source has to be
+      // re-uploaded at the new scale rather than inheriting the previous one.
+      if (srcEl && FAMILY && FAMILY.engine === 'webgl2') upload(srcEl, srcW, srcH);
       paramGen++; draw();
       say(`${FAMILY.name.toLowerCase()} → ${ALL[stackFamily].name.toLowerCase()}: ${want}`);
     }
@@ -802,7 +813,12 @@
           // cable — becomes available for free.
           const twoStage = !!(stackFamily && stackParams && programs[stackFamily]);
           if (twoStage) {
-            canvas.width = c2d.width; canvas.height = c2d.height;
+            // Same cap on the tile path: the halftone renders at full size, but if
+            // analog is reading it, the GL canvas has to be inside analog's reach.
+            const cap = (stackFamily === 'analog' && ANALOG)
+              ? Math.min(1, ANALOG.ANALOG_INTERNAL_WIDTH / c2d.width) : 1;
+            canvas.width = Math.max(2, Math.round(c2d.width * cap));
+            canvas.height = Math.max(2, Math.round(c2d.height * cap));
             if (!tileOutTex) tileOutTex = gl.createTexture();
             gl.activeTexture(gl.TEXTURE0 + UNIT_STAGE);
             gl.bindTexture(gl.TEXTURE_2D, tileOutTex);
