@@ -286,6 +286,36 @@ http.createServer(async (req, res) => {
     // SPEC FILES ON DISK. A spec is the artifact of this tool, so it belongs in
     // the media root beside the footage rather than in a text box somebody has to
     // keep. Pick one, run it, get the same thing back every time.
+    // A RECORDED CLIP, INTO THE MEDIA ROOT. That is what closes the loop: the
+    // thing the scanner produced becomes a thing the scanner can read, so a
+    // second pass gets the full bed and head machinery over completed material
+    // instead of a tape that is still being written.
+    if (url.pathname === "/api/scanner/clip" && req.method === "POST") {
+      if (!MEDIA) return json(res, 400, { ok: false, error: "no media root is bound" });
+      const chunks = [];
+      await new Promise((r) => { req.on("data", (c) => chunks.push(c)); req.on("end", r); });
+      const buf = Buffer.concat(chunks);
+      // multipart, parsed narrowly: the name field and the file part. Both halves
+      // on the path as ever -- sanitise to one segment AND check the resolved path.
+      const text = buf.toString("latin1");
+      const nameMatch = text.match(/name="name"\r\n\r\n([^\r]*)\r\n/);
+      const raw = (nameMatch ? nameMatch[1] : "scan").replace(/[^A-Za-z0-9._ -]/g, "").slice(0, 80);
+      if (!raw) return json(res, 400, { ok: false, error: "not a usable clip name" });
+      const file = `${raw.replace(/\.webm$/, "")}.webm`;
+      let root;
+      try { root = fs.realpathSync(MEDIA); } catch { return json(res, 500, { ok: false, error: "media root is unreadable" }); }
+      const full = path.resolve(root, file);
+      if (!full.startsWith(root + path.sep)) return json(res, 400, { ok: false, error: "that name resolves outside the media root" });
+
+      const start = text.indexOf("\r\n\r\n", text.indexOf('name="clip"'));
+      if (start < 0) return json(res, 400, { ok: false, error: "no clip part in the upload" });
+      const bodyStart = start + 4;
+      const boundary = text.slice(0, text.indexOf("\r\n"));
+      const end = text.indexOf(boundary, bodyStart) - 2;
+      fs.writeFileSync(full, buf.subarray(bodyStart, end > bodyStart ? end : buf.length));
+      return json(res, 200, { ok: true, name: path.basename(full), bytes: fs.statSync(full).size });
+    }
+
     if (url.pathname === "/api/scanner/specs") {
       // EXAMPLES SHIP WITH THE PROVIDER. A fresh install should not open on a
       // blank canvas -- point it at your own footage, pick an example, run. They

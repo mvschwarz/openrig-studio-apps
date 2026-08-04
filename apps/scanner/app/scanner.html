@@ -80,8 +80,10 @@
     <div class="status" id="status">ready</div>
     <div class="err" id="error"></div>
     <div class="chain" id="chain"></div>
+    <video id="playback" hidden playsinline style="width:100%;border:1px solid var(--accent);border-radius:4px;display:block"></video>
     <div class="transport" id="playbar" hidden>
       <button id="play" class="run">❚❚ pause</button>
+      <button id="saveclip" hidden>save clip to media</button>
       <span class="meta" id="meta"></span>
     </div>
     <div class="meta" id="metaidle"></div>
@@ -363,8 +365,8 @@ function writeStage(st, P, adv) {
       gl.uniform1f(u('uStripW'), wpx);
       // Widened by the feather so the fade overlaps its neighbour rather than
       // fading into black.
-      if (vertical) gl.scissor(c0-fpx, 0, wpx+2*fpx, OUT_H);
-      else          gl.scissor(0, c0-fpx, OUT_W, wpx+2*fpx);
+      if (vertical) gl.scissor(c0-fpx, 0, wpx+fpx, OUT_H);
+      else          gl.scissor(0, c0-fpx, OUT_W, wpx+fpx);
       gl.drawArrays(gl.TRIANGLES,0,3);
     }
     if (fpx) gl.disable(gl.BLEND);
@@ -502,6 +504,8 @@ function tick(now) {
   if (duration && scanTime >= duration) setRecording(false, 'reached the spec duration');
 }
 function setRecording(on, why) {
+  if (on && !recording) { $('#playback').hidden = true; $('#playback').pause(); startRecorder(); }
+  if (!on && recording) stopRecorder();
   recording = on;
   $('#rec').textContent = on ? '❚❚ pause' : '▶ run';
   $('#rec').classList.toggle('on', on);
@@ -513,6 +517,45 @@ function setRecording(on, why) {
   }
   say(why || (on ? 'recording' : 'paused'));
 }
+
+// ---- THE RECORDER --------------------------------------------------------
+//
+// `run` should PRODUCE something and `play` should play it. Until now run only
+// painted a live canvas and play cycled a stack, so a single-tape spec left the
+// play button with nothing to play -- which reads as broken rather than as
+// empty.
+//
+// captureStream on the canvas that is already animating, straight into
+// MediaRecorder. No headless browser, no second copy of any shader, and it
+// records EXACTLY what is on screen, so the artifact and the preview cannot
+// disagree.
+let rec = null, recChunks = [], recUrl = null, recBlob = null;
+function startRecorder() {
+  const last = stages[stages.length-1];
+  if (!last || !last.canvas || typeof last.canvas.captureStream !== 'function') return;
+  try {
+    const stream = last.canvas.captureStream(30);
+    const mime = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']
+      .find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
+    if (!mime) { say('this browser cannot record the canvas; the run still works'); return; }
+    recChunks = [];
+    rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+    rec.onstop = () => {
+      recBlob = new Blob(recChunks, { type: 'video/webm' });
+      if (recUrl) URL.revokeObjectURL(recUrl);
+      recUrl = URL.createObjectURL(recBlob);
+      const v = $('#playback');
+      v.src = recUrl; v.loop = true; v.hidden = false;
+      $('#playbar').hidden = false;
+      $('#saveclip').hidden = false;
+      say(`recorded ${(recBlob.size/1e6).toFixed(1)}MB — press play`);
+      v.play().catch(()=>{});
+    };
+    rec.start(1000);
+  } catch (e) { say(`could not start the recorder: ${e.message}`); }
+}
+function stopRecorder() { try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (e) {} rec = null; }
 
 // ---- the chain panels ----------------------------------------------------
 function buildChain() {
@@ -748,9 +791,24 @@ async function boot() {
     $('#showall').onclick = () => { showAll = !showAll; buildControls();
       $('#showall').textContent = showAll ? 'show only what matters' : 'show every control'; };
     $('#rec').onclick = () => { if (!recording) clearAll(); setRecording(!recording); };
-    $('#play').onclick = () => { playing = !playing;
+    $('#play').onclick = () => {
+      const v = $('#playback');
+      if (!v.hidden) { if (v.paused) { v.play(); $('#play').textContent='❚❚ pause'; }
+                       else { v.pause(); $('#play').textContent='▶ play'; } return; }
+      playing = !playing;
       $('#play').textContent = playing ? '❚❚ pause' : '▶ play';
       $('#play').classList.toggle('on', playing); };
+    $('#saveclip').onclick = async () => {
+      if (!recBlob) return;
+      const name = prompt('save this clip into the media root as:', `scan-${Date.now()}`);
+      if (!name) return;
+      const fd = new FormData(); fd.append('name', name); fd.append('clip', recBlob, 'clip.webm');
+      const r = await (await fetch('/api/scanner/clip', { method:'POST', body: fd })).json();
+      if (!r.ok) return fail(r.error || 'could not save the clip');
+      say(`saved ${r.name} — it is now in the source picker`);
+      const sel = $('#source'); const o=document.createElement('option');
+      o.value=o.textContent=r.name; sel.appendChild(o);
+    };
     $('#clear').onclick = () => { clearAll(); say('tapes cleared'); };
     $('#save').onclick = () => { const last = stages[stages.length-1];
       if (!last) return; const a=document.createElement('a');

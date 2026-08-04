@@ -176,9 +176,15 @@ void main() {
   // was already on the tape, not a smear applied afterwards.
   float a = 1.0;
   if (uSoftness > 0.001) {
+    // ONE-SIDED, and that is the whole correction. Strips are laid down in
+    // increasing column order, so a strip's TRAILING edge abuts material that is
+    // already on the tape while its LEADING edge abuts nothing yet. Feathering
+    // both edges fades the leading one toward BLACK rather than toward a
+    // neighbour, and every strip leaves a dark seam that accumulates into
+    // corduroy over repeated wraps.
     float pos = (uAxis < 0.5 ? gl_FragCoord.x : gl_FragCoord.y) - uStripAt;
     float f = max(1.0, uSoftness * uStripW);
-    a = clamp(min(pos, uStripW - pos) / f, 0.0, 1.0);
+    a = clamp(pos / f, 0.0, 1.0);
     a = a * a * (3.0 - 2.0 * a);
   }
   fragColor = vec4(outc * on, a);
