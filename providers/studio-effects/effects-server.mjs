@@ -220,6 +220,16 @@ http.createServer(async (req, res) => {
       if (!MEDIA) return json(res, 200, { ok: false, error: "no media root bound, so there is nowhere to keep looks" });
       const dir = path.join(MEDIA, "looks");
       const nameOf = (n) => String(n || "").trim().replace(/[^A-Za-z0-9 _-]/g, "").slice(0, 60);
+      // BOTH HALVES, applied to my own code an hour after writing the essay about
+      // it. nameOf strips dots and separators, so traversal already fails — but
+      // that is the sanitiser doing the work alone, which is exactly the shape
+      // that put a write outside the project in the sibling route. The boundary
+      // check is the half that holds regardless of how the name was built.
+      const lookFile = (name) => {
+        const f = path.resolve(dir, `${name}.json`);
+        const root = path.resolve(dir);
+        return f.startsWith(root + path.sep) ? f : null;
+      };
 
       if (req.method === "POST") {
         const b = JSON.parse((await readBody(req)) || "{}");
@@ -228,7 +238,8 @@ http.createServer(async (req, res) => {
         // "untitled" the author will never find again.
         if (!name) return json(res, 400, { ok: false, error: "a look needs a name of letters, numbers, spaces, dashes or underscores" });
         fs.mkdirSync(dir, { recursive: true });
-        const file = path.join(dir, `${name}.json`);
+        const file = lookFile(name);
+        if (!file) return json(res, 400, { ok: false, error: "that name resolves outside the looks directory" });
         const doc = {
           name,
           note: typeof b.note === "string" ? b.note : "",
@@ -255,8 +266,8 @@ http.createServer(async (req, res) => {
       }
 
       const name = nameOf(which.replace(/\.json$/, ""));
-      const file = path.join(dir, `${name}.json`);
-      if (!name || !fs.existsSync(file)) return json(res, 404, { ok: false, error: `no look called ${which}` });
+      const file = name ? lookFile(name) : null;
+      if (!file || !fs.existsSync(file)) return json(res, 404, { ok: false, error: `no look called ${which}` });
       try { return json(res, 200, { ok: true, ...JSON.parse(fs.readFileSync(file, "utf8")) }); }
       catch (e) { return json(res, 200, { ok: false, error: `${name} is not readable JSON: ${e.message}` }); }
     }

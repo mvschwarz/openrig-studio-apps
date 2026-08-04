@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { routeDestination } from "./library-route.mjs";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -793,9 +794,13 @@ async function handleNleApi(req, res, url) {
     }
     const kind = mediaKindOf(resolved);
     const destDir = kind === "image" ? "media/images" : kind === "audio" ? "media/audio" : "media/captures";
-    const baseName = path.basename(resolved).replace(/[^A-Za-z0-9._-]+/g, "-");
-    const destName = slot ? `${String(slot)}-lib-${baseName}` : `lib-${baseName}`;
-    const dest = path.join(args.sliceRoot, destDir, destName);
+    const baseName = path.basename(resolved);
+    // The destination is decided in ONE place, which is validated and tested.
+    // Computing it inline here is how a caller-supplied slot walked out of the
+    // project while the source check one line above was doing its job perfectly.
+    const routed = routeDestination({ sliceRoot: args.sliceRoot, destDir, baseName, slot });
+    if (!routed.ok) return sendJson(res, 400, { ok: false, error: routed.error });
+    const dest = routed.dest;
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(resolved, dest);
     if (fs.existsSync(`${resolved}.meta.json`)) fs.copyFileSync(`${resolved}.meta.json`, `${dest}.meta.json`);
