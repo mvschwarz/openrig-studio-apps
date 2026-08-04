@@ -479,10 +479,26 @@ test("CONVENTION: each texture bind spells out its own unit selection", () => {
 test("the sampler units are named once rather than spelled out at each call", () => {
   // Two call sites agreeing on a bare 0 and 1 is how one of them ended up on the
   // wrong unit with nothing looking odd.
-  // UNIT_STAGE joined them when a second effect became stackable — it holds stage
-  // one's output while stage two reads it. Pinned by NAME rather than by the exact
-  // line, so adding a fourth unit does not fail a test about naming discipline.
-  assert.match(SURFACE, /const UNIT_SRC = 0, UNIT_PATH = 1, UNIT_STAGE = 2;/);
+  // UNIT_STAGE joined them when a second effect became stackable; UNIT_PREV and
+  // UNIT_FIELD joined for motion estimation.
+  //
+  // THIS ASSERTION USED TO PIN THE EXACT LINE while its own comment claimed it
+  // pinned the names "so adding a fourth unit does not fail a test about naming
+  // discipline". Adding a fourth unit failed it immediately. The comment was
+  // describing the test somebody meant to write, so here is that test: every unit
+  // is a named constant, declared once, and no two share a value — which is the
+  // property that actually prevents two call sites landing on the same unit.
+  const decl = SURFACE.match(/const (UNIT_[A-Z]+ = \d+(?:, UNIT_[A-Z]+ = \d+)*);/);
+  assert.ok(decl, "the sampler units are not declared together in one statement");
+  const units = new Map(decl[1].split(", ").map((p) => {
+    const [n, v] = p.split(" = ");
+    return [n, Number(v)];
+  }));
+  for (const required of ["UNIT_SRC", "UNIT_PATH", "UNIT_STAGE"]) {
+    assert.ok(units.has(required), `${required} is no longer declared`);
+  }
+  assert.equal(new Set(units.values()).size, units.size,
+    "two sampler units share a value, which is the collision the names exist to prevent");
   // The source sampler is now told which unit to read, because a stacked second
   // effect reads stage one's output on UNIT_STAGE rather than the source on
   // UNIT_SRC. So the property is not "it says UNIT_SRC" — it is that NO sampler

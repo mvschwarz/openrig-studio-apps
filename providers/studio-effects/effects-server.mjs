@@ -19,6 +19,8 @@ import { SCAN_FRAGMENT, SCAN_VERTEX, buildPath } from "./engine/scan.mjs";
 import { TILE_FAMILIES, PALETTES } from "./engine/tile.mjs";
 import { ANALOG_FRAGMENT, ANALOG_VERTEX } from "./engine/analog.mjs";
 import { CODEC_FRAGMENT, CODEC_VERTEX } from "./engine/codec.mjs";
+import { MOTION_VERTEX, MOTION_ESTIMATE_FRAGMENT, MOSH_FRAGMENT, MOSH_ACCUMULATE_FRAGMENT } from "./engine/motion.mjs";
+
 import { evalCurves, pulses, ramp, EASING_NAMES } from "./engine/curves.mjs";
 import { pcm, envelope, onsets, envelopeTrack, onsetTrack } from "./engine/listen.mjs";
 import { cuts, lockLossTrack, frames, smooth } from "./engine/watch.mjs";
@@ -280,6 +282,11 @@ http.createServer(async (req, res) => {
         scan:   { vertex: SCAN_VERTEX,   fragment: SCAN_FRAGMENT },
         analog: { vertex: ANALOG_VERTEX, fragment: ANALOG_FRAGMENT },
         codec:  { vertex: CODEC_VERTEX,  fragment: CODEC_FRAGMENT },
+        // Mosh is two passes, so it serves two programs under one family name.
+        // The estimator is not a family — nothing can select it as an effect.
+        mosh:              { vertex: MOTION_VERTEX, fragment: MOSH_FRAGMENT },
+        "mosh-estimate":   { vertex: MOTION_VERTEX, fragment: MOTION_ESTIMATE_FRAGMENT },
+        "mosh-accumulate": { vertex: MOTION_VERTEX, fragment: MOSH_ACCUMULATE_FRAGMENT },
       };
       if (!SHADERS[family]) return json(res, 404, { ok: false, error: `no shader for family: ${family}` });
       return json(res, 200, { ok: true, family, ...SHADERS[family] });

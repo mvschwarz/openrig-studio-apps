@@ -84,7 +84,10 @@ uniform float uBlock;        // block size in pixels (8 is the real one)
 uniform vec2  uGridOffset;    // shift the block grid off alignment
 uniform float uKeep;         // how many zigzag coefficients survive, 1..64
 uniform float uJitter;       // per-block quantiser variation
-uniform float uDcBias;       // push DC around, per block
+uniform float uDcBias;       // push DC around, per block, independently
+uniform float uDcDrift;      // ...and this one PROPAGATES along the row
+uniform float uDriftRate;    // how often a block corrupts its DC delta
+uniform float uRestart;      // blocks between DC prediction resets
 uniform float uSubsample;    // 0 = 4:4:4, 1 = 4:2:2, 2 = 4:2:0
 uniform float uSeed;
 
@@ -203,6 +206,44 @@ void main() {
       floor(coef[i].z / qC + 0.5) * qC);
   }
   coef[0].x += uDcBias * (hash(blockOrigin + 7.3) - 0.5);
+
+  // DIFFERENTIAL DC — the mechanism behind the horizontal colour streak, and the
+  // reason bitstream damage looks nothing like a filter.
+  //
+  // A codec does not store each block's average level outright. It stores the
+  // DIFFERENCE from the previous block in scan order, because neighbouring
+  // blocks are usually similar and the difference is cheap. So a single
+  // corrupted delta is not a corrupted block — every block after it inherits the
+  // error, and the picture shifts brightness and hue in a band that runs
+  // sideways until the decoder is resynchronised.
+  //
+  // That resynchronisation is a RESTART MARKER, and it is why real corruption
+  // streaks in bounded runs rather than smearing to the frame edge. Bounding the
+  // loop by the restart interval is therefore not an optimisation for the
+  // shader's benefit — it is the actual mechanism, and it keeps the cost fixed.
+  //
+  // NOTE THE DIFFERENCE FROM uDcBias, which sits one line above: that one
+  // perturbs each block INDEPENDENTLY and gives a blotchy patchwork. This one
+  // ACCUMULATES and gives streaks. Same quantity, different failure, and only
+  // the propagating version reads as a broken file.
+  if (uDcDrift > 0.0) {
+    float colIdx = floor(pix.x / B);
+    float rowIdx = floor(pix.y / B);
+    float ri     = uRestart >= 1.0 ? floor(uRestart) : 64.0;
+    float start  = floor(colIdx / ri) * ri;
+    vec3  acc    = vec3(0.0);
+    for (int i = 0; i < 64; i++) {
+      float c = start + float(i);
+      if (c > colIdx) break;
+      vec2 key = vec2(c, rowIdx);
+      if (hash(key + 3.7) < uDriftRate) {
+        acc += (vec3(hash(key + 11.0), hash(key + 23.0), hash(key + 31.0)) - 0.5) * uDcDrift;
+      }
+    }
+    // Chroma drifts with luma, which is what makes the band change COLOUR rather
+    // than only brightness.
+    coef[0] += acc;
+  }
 
   // Inverse DCT for THIS pixel only. Every pixel in the block recomputes the same
   // coefficients, which is wasteful and exactly what a fragment shader is for.

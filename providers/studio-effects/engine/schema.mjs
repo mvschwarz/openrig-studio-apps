@@ -13,6 +13,71 @@
 // the effect.
 
 export const FAMILIES = {
+  mosh: {
+    id: "mosh",
+    name: "Mosh",
+    summary: "Motion compensation, run deliberately against the wrong picture. The vectors are measured by block matching — the same operation an encoder performs to make them — so the artifact comes from the same mechanism datamosh does, not from a filter imitating it. Needs video: a still frame has no motion to find.",
+    engine: "webgl2",
+    needsVideo: true,
+    params: {
+      show:         { type: "enum", values: ["mosh", "field", "magnitude", "confidence", "compensated"], default: "mosh",
+                      says: "what to put on screen — the mosh itself, or one of the diagnostics behind it: the vector field, its speed, how much the estimator trusts it, or the previous frame moved by it" },
+      refresh:      { type: "float", min: 0, max: 1, default: 0.02,
+                      says: "how much of the live picture is let back in every frame; 1 is ordinary video, 0 never recovers and melts to abstraction" },
+      residual:     { type: "float", min: 0, max: 1, default: 0.45, pairsWith: ["refresh"],
+                      says: "let the live picture back in ONLY where the prediction failed — what a real codec spends its bits on, and what keeps a mosh reading as a picture instead of a smear" },
+      iframeEvery:  { type: "int", min: 0, max: 240, default: 0,
+                      says: "force a clean keyframe every N frames; 0 never does, which is the classic removed-I-frame bloom" },
+      holdField:    { type: "int", min: 1, max: 30, default: 1,
+                      says: "reapply the SAME vectors for N frames instead of measuring new ones — P-frame duplication, the move that produces long directional smear" },
+      blockSize:    { type: "int", min: 4, max: 64, default: 16,
+                      says: "macroblock size; 16 is what real encoders use, and the coarseness is what makes it read as compression rather than as melting" },
+      searchRadius: { type: "float", min: 2, max: 48, default: 16, pairsWith: ["blockSize"],
+                      says: "how far a block is allowed to have moved — too small and fast motion is missed, too large and flat areas find false matches" },
+      taps:         { type: "int", min: 2, max: 8, default: 4,
+                      says: "samples per axis when comparing two blocks; higher is more accurate and much slower" },
+      quantise:     { type: "float", min: 0, max: 8, default: 0, pairsWith: ["blockSize"],
+                      says: "snap every vector to this many pixels, so neighbouring blocks slide in lockstep instead of each drifting its own way" },
+      strength:     { type: "float", min: 0, max: 4, default: 1,
+                      says: "how hard the vectors push when compensating; 1 reconstructs the frame, above 1 overshoots into smear" },
+      grid:         { type: "bool", default: true,
+                      says: "draw the macroblock grid, so the block structure the effect depends on is visible" },
+    },
+    // The field is the thing to look at first, so it is the default view and the
+    // highlighted knob set is about GETTING A GOOD FIELD rather than about the
+    // look. A mosh built on a bad field is unfixable downstream.
+    highlights: {
+      "how much it melts": ["refresh", "residual"],
+      "read the field":    ["show", "grid"],
+      "find the motion":   ["searchRadius", "blockSize"],
+      "codec chunkiness":  ["blockSize", "quantise"],
+      "smear it":          ["holdField", "strength"],
+    },
+    // refresh and residual are the two that change everything; the estimator
+    // knobs only decide whether the vectors are any good.
+    dramatic: ["refresh", "residual", "holdField", "strength", "blockSize"],
+    guidance: [
+      "'more moshed' or 'melt it' — drop refresh toward 0 and residual toward 0. Those two are the only knobs that decide how much the picture recovers.",
+      "'it still looks like video' — refresh is too high. At 1.0 this is ordinary playback by construction.",
+      "'it fell apart into mush' — raise residual, not refresh. Residual puts detail back only where the prediction failed, which keeps a subject readable while the background slides.",
+      "'show me the motion' — show:field. Hue is direction, brightness is speed; a still camera on a moving subject should light up only the subject.",
+      "'the field looks like noise' — usually a flat source, not a broken estimator. Check show:confidence; dark means every candidate matched equally and the vector is a guess.",
+      "'it missed the fast pan' — raise searchRadius first; a block that moved further than the radius cannot be found at all.",
+      "'long smears' — raise holdField, which reapplies the same vectors for N frames. That is P-frame duplication and it is where the classic directional streaking comes from.",
+      "'make it blockier' — raise blockSize and quantise together. Either alone reads as low resolution rather than as compression.",
+    ],
+    presets: {
+      "bloom":            { show: "mosh", refresh: 0, residual: 0.15, blockSize: 16, searchRadius: 20, strength: 1 },
+      "melt":             { show: "mosh", refresh: 0, residual: 0, blockSize: 16, searchRadius: 24, strength: 1.2, quantise: 2 },
+      "readable mosh":    { show: "mosh", refresh: 0.02, residual: 0.55, blockSize: 16, searchRadius: 16 },
+      "smear":            { show: "mosh", refresh: 0, residual: 0.2, holdField: 8, strength: 1.4, searchRadius: 24 },
+      "chunky codec":     { show: "mosh", refresh: 0.03, residual: 0.4, blockSize: 32, quantise: 8, searchRadius: 24 },
+      "breathing":        { show: "mosh", refresh: 0, residual: 0.3, iframeEvery: 48, searchRadius: 20 },
+      "read the field":   { show: "field", blockSize: 16, searchRadius: 16, grid: true },
+      "trust map":        { show: "confidence", blockSize: 16, searchRadius: 16 },
+      "prove the vectors":{ show: "compensated", blockSize: 16, searchRadius: 16, strength: 1, grid: false },
+    },
+  },
   codec: {
     id: "codec",
     name: "Codec",
@@ -31,6 +96,12 @@ export const FAMILIES = {
                           says: "per-block variation in how hard it rounds — does almost nothing at high quality, because there is little rounding to vary" },
       dcBias:           { type: "float", min: 0, max: 0.4, default: 0,
                           says: "shifts each block's average brightness independently — the blotchy patchwork of a broken decode" },
+      dcDrift:          { type: "float", min: 0, max: 0.6, default: 0, pairsWith: ["driftRate", "restartInterval"],
+                          says: "corrupts the DC DELTA, which every later block inherits — the horizontal colour streak of a damaged bitstream. Unlike dcBias this ACCUMULATES sideways" },
+      driftRate:        { type: "float", min: 0, max: 1, default: 0.15, pairsWith: ["dcDrift"],
+                          says: "how often a block corrupts its delta; low values give a few long clean streaks, high values give constant churn" },
+      restartInterval:  { type: "int", min: 0, max: 64, default: 16, pairsWith: ["dcDrift"],
+                          says: "blocks between DC prediction resets — a real restart marker. Short intervals bound each streak, 0 lets one error run 64 blocks" },
       gridOffsetX:      { type: "float", min: 0, max: 16, default: 0,
                           says: "slide the block grid sideways so the blocking does not line up with the picture" },
       gridOffsetY:      { type: "float", min: 0, max: 16, default: 0, pairsWith: ["gridOffsetX", "blockSize"],
@@ -70,13 +141,14 @@ export const FAMILIES = {
       "big blocks":           ["blockSize", "quality"],
       "misaligned encoder":   ["gridOffsetX", "gridOffsetY"],
       "broken decode":        ["dcBias", "quantJitter"],
+      "corrupt bitstream":    ["dcDrift", "driftRate", "restartInterval"],
       "melted":               ["keepCoefficients", "quality"],
     },
     // THE HONEST NOTE ABOUT THIS FAMILY: it is faithful, and faithful compression
     // is SUBTLE. Real JPEG at quality 60 is meant to be hard to see. The knobs
     // that produce something dramatic rather than something accurate are named
     // here, because a person who cannot find them concludes the tool is broken.
-    dramatic: ["blockSize", "keepCoefficients", "dcBias", "quality"],
+    dramatic: ["blockSize", "keepCoefficients", "dcDrift", "dcBias", "quality"],
     presets: {
       "web jpeg":            { quality: 62, chromaQuality: 48, subsample: "4:2:0" },
       "saved too many times":{ quality: 11, chromaQuality: 7, subsample: "4:2:0", quantJitter: 0.15 },
@@ -84,6 +156,8 @@ export const FAMILIES = {
       "big blocks":          { quality: 22, chromaQuality: 16, blockSize: 24 },
       "misaligned encoder":  { quality: 26, chromaQuality: 18, gridOffsetX: 3, gridOffsetY: 5 },
       "broken decode":       { quality: 20, chromaQuality: 12, dcBias: 0.22, quantJitter: 0.7 },
+      "corrupt bitstream":   { quality: 34, chromaQuality: 20, dcDrift: 0.3, driftRate: 0.12, restartInterval: 24 },
+      "torn file":           { quality: 18, chromaQuality: 10, dcDrift: 0.5, driftRate: 0.3, restartInterval: 0, blockSize: 16 },
       "melted":              { quality: 30, chromaQuality: 20, keepCoefficients: 5 },
     },
   },

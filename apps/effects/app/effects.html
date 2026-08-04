@@ -158,7 +158,7 @@
     // so a helper that binds without choosing its unit writes into a variable it
     // does not own. Two call sites agreeing on a bare 0 and 1 is how one of them
     // ended up on the wrong unit with nothing looking odd.
-    const UNIT_SRC = 0, UNIT_PATH = 1, UNIT_STAGE = 2;
+    const UNIT_SRC = 0, UNIT_PATH = 1, UNIT_STAGE = 2, UNIT_PREV = 3, UNIT_FIELD = 4, UNIT_ACC = 5;
     // A parameter as a function of time. Null until something sets one, so the
     // app is a still-image tool by default and a motion-graphics one on request.
     let curveSpec = null, lastCurve = null;
@@ -174,6 +174,9 @@
       set: (patch) => { paramGen++; Object.assign(params, patch); syncInputs(); draw(); return { ...params }; },
       preset: (name) => applyPreset(name),
       families: () => ALL,
+      // What the estimator actually produced, so "is there a field?" is a
+      // question with an answer rather than something to judge by eye.
+      field: () => lastField,
       family: (id) => { if (id) { familyId = id; $('#family').value = id; return useFamily(); } return familyId; },
       stats: () => lastStats,
       // Measure what each knob does at the CURRENT settings. For an agent this is
@@ -527,6 +530,22 @@
         ? Math.min(1, ANALOG.ANALOG_INTERNAL_WIDTH / w) : 1;
       canvas.width = Math.max(2, Math.round(w * scale));
       canvas.height = Math.max(2, Math.round(h * scale));
+      // KEEP THE FRAME WE ARE ABOUT TO OVERWRITE. Motion is measured against the
+      // previous frame, and by the time we want it the video element has already
+      // advanced — so it is copied off the live texture rather than re-fetched.
+      //
+      // ONLY WHEN THE PICTURE ACTUALLY CHANGED. The render loop runs on rAF at
+      // ~60Hz while video decodes at 24-30, so consecutive uploads routinely
+      // carry THE SAME DECODED FRAME. Rolling "previous" on every upload made
+      // previous and current identical, and block matching on two identical
+      // pictures returns a perfect zero for every block — a completely empty
+      // field that is nonetheless the correct answer to the question asked.
+      // Measured: two grabs one rAF apart differed by 0, two 120ms apart by 4.27.
+      // Same lesson the analog family already carries — the video clock is the
+      // clock, never the render loop.
+      const stamp = isVideo ? vid.currentTime : NaN;
+      if (!isVideo || stamp !== lastFrameStamp) keepPrevious(srcTexW, srcTexH);
+      lastFrameStamp = stamp;
       if (!srcTex) srcTex = gl.createTexture();
       // The SECOND instance of the same shape, found by asking where else it is
       // produced rather than only whether the reported symptom was gone. This one
@@ -540,7 +559,213 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      srcTexW = w; srcTexH = h;
       draw();
+    }
+
+    // ---- PREVIOUS FRAME ---------------------------------------------------
+    // A one-frame history, which is all motion estimation needs. prevValid is
+    // tracked separately from prevTex existing, because a texture that has been
+    // allocated but never written holds black — and black is a perfectly
+    // matchable picture, so the estimator would return a confident field of
+    // nonsense rather than nothing.
+    let prevTex = null, prevFbo = null, prevW = 0, prevH = 0, prevValid = false;
+    let srcTexW = 0, srcTexH = 0, lastFrameStamp = NaN;
+    function keepPrevious(w, h) {
+      if (!srcTex || !w || !h) { prevValid = false; return; }
+      if (!prevTex) prevTex = gl.createTexture();
+      if (!prevFbo) prevFbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, prevFbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, srcTex, 0);
+      gl.activeTexture(gl.TEXTURE0 + UNIT_PREV);
+      gl.bindTexture(gl.TEXTURE_2D, prevTex);
+      if (prevW !== w || prevH !== h) {
+        prevW = w; prevH = h; prevValid = false;
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      }
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
+        gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+        prevValid = true;
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.activeTexture(gl.TEXTURE0 + UNIT_SRC);
+    }
+
+    // ---- THE MOTION FIELD -------------------------------------------------
+    // One texel per macroblock. This is not a downscale for speed — one vector
+    // per block IS the representation a codec carries, and rendering it at this
+    // size is what keeps the search cost proportional to blocks rather than
+    // pixels.
+    let fieldTex = null, fieldFbo = null, fieldW = 0, fieldH = 0;
+    function ensureField(bw, bh) {
+      if (!fieldFbo) fieldFbo = gl.createFramebuffer();
+      if (!fieldTex) fieldTex = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE0 + UNIT_FIELD);
+      gl.bindTexture(gl.TEXTURE_2D, fieldTex);
+      if (fieldW !== bw || fieldH !== bh) {
+        fieldW = bw; fieldH = bh;
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, bw, bh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        // NEAREST, deliberately. Interpolating between two blocks invents motion
+        // that no block reported, and that smoothness is exactly what makes a
+        // mosh read as melting rather than as compression.
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fieldFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fieldTex, 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      }
+      gl.activeTexture(gl.TEXTURE0 + UNIT_SRC);
+    }
+
+    // ---- THE ACCUMULATOR --------------------------------------------------
+    // Two full-size buffers, ping-ponged: a shader cannot read and write the same
+    // texture, and the whole effect is reading what you wrote last frame.
+    // accPrimed is tracked separately from the textures existing, because an
+    // allocated-but-never-written buffer holds black, and moshing black gives
+    // black — a dead screen that looks exactly like a broken shader.
+    let accTex = [null, null], accFbo = [null, null], accIdx = 0;
+    let accW = 0, accH = 0, accPrimed = false, moshFrame = 0;
+    function ensureAcc(w, h) {
+      if (accW !== w || accH !== h) { accW = w; accH = h; accPrimed = false; }
+      for (let i = 0; i < 2; i++) {
+        if (!accTex[i]) accTex[i] = gl.createTexture();
+        if (!accFbo[i]) accFbo[i] = gl.createFramebuffer();
+        gl.activeTexture(gl.TEXTURE0 + UNIT_ACC);
+        gl.bindTexture(gl.TEXTURE_2D, accTex[i]);
+        if (!accPrimed) {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, accFbo[i]);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accTex[i], 0);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        }
+      }
+      gl.activeTexture(gl.TEXTURE0 + UNIT_SRC);
+    }
+    // A source change must drop the buffer, or the new clip inherits the previous
+    // one's melt and the first seconds are somebody else's picture.
+    function resetMosh() { accPrimed = false; moshFrame = 0; prevValid = false; lastFrameStamp = NaN; }
+
+    let moshEstProg = null, moshAccProg = null, lastField = null;
+    async function drawMosh(P, tex, unit, fbo) {
+      if (!moshEstProg) {
+        const sh = await (await fetch('/api/effects/shader?family=mosh-estimate')).json();
+        if (!sh.ok) throw new Error(sh.error || 'no estimator shader');
+        moshEstProg = build(sh.vertex, sh.fragment);
+      }
+      if (!moshAccProg) {
+        const sh = await (await fetch('/api/effects/shader?family=mosh-accumulate')).json();
+        if (!sh.ok) throw new Error(sh.error || 'no accumulator shader');
+        moshAccProg = build(sh.vertex, sh.fragment);
+      }
+      const B  = Math.max(4, Math.floor(P.blockSize));
+      const bw = Math.max(1, Math.ceil(canvas.width / B));
+      const bh = Math.max(1, Math.ceil(canvas.height / B));
+      ensureField(bw, bh);
+
+      // PASS ONE — block matching, one fragment per macroblock.
+      //
+      // SKIPPED WHEN holdField SAYS SO. Reapplying vectors measured several
+      // frames ago is P-frame duplication, and it is where long directional
+      // smear comes from: the buffer keeps being pushed by motion that stopped
+      // happening. Skipping leaves the previous field in place, which is exactly
+      // the intent — not an optimisation.
+      const hold = Math.max(1, Math.floor(P.holdField || 1));
+      const measure = (moshFrame % hold) === 0 || !accPrimed;
+      if (measure) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fieldFbo);
+      gl.viewport(0, 0, bw, bh);
+      gl.useProgram(moshEstProg);
+      const ue = (n) => gl.getUniformLocation(moshEstProg, n);
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.uniform1i(ue('uCur'), unit);
+      gl.activeTexture(gl.TEXTURE0 + UNIT_PREV);
+      // NO PREVIOUS FRAME MEANS MATCH AGAINST YOURSELF, which returns a field of
+      // exact zeros. That is the honest answer for a still image — there is no
+      // motion — rather than a field of confident noise.
+      gl.bindTexture(gl.TEXTURE_2D, prevValid ? prevTex : tex);
+      gl.uniform1i(ue('uPrev'), UNIT_PREV);
+      gl.uniform2f(ue('uRes'), canvas.width, canvas.height);
+      gl.uniform1f(ue('uBlock'), B);
+      gl.uniform1f(ue('uSearch'), P.searchRadius);
+      gl.uniform1f(ue('uTaps'), P.taps);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      lastField = { blocks: bw * bh, bw, bh, block: B, hadPrevious: prevValid,
+                    measuredThisFrame: measure, hold };
+
+      // PASS TWO — THE ACCUMULATOR. Read the buffer, displace it by the vectors,
+      // let a little of the live picture back in, write the other buffer.
+      ensureAcc(canvas.width, canvas.height);
+      const src = accIdx, dst = 1 - accIdx;
+      // An I-frame: the first frame of a source, a forced refresh, or a resize.
+      // Without one the buffer starts black and moshing black stays black.
+      const iframe = !accPrimed ||
+        (P.iframeEvery > 0 && moshFrame % Math.max(1, Math.floor(P.iframeEvery)) === 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, accFbo[dst]);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(moshAccProg);
+      const ua = (n) => gl.getUniformLocation(moshAccProg, n);
+      gl.activeTexture(gl.TEXTURE0 + UNIT_ACC);
+      gl.bindTexture(gl.TEXTURE_2D, accTex[src]);
+      gl.uniform1i(ua('uAcc'), UNIT_ACC);
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.uniform1i(ua('uSrc'), unit);
+      gl.activeTexture(gl.TEXTURE0 + UNIT_FIELD);
+      gl.bindTexture(gl.TEXTURE_2D, fieldTex);
+      gl.uniform1i(ua('uField'), UNIT_FIELD);
+      gl.uniform2f(ua('uRes'), canvas.width, canvas.height);
+      gl.uniform1f(ua('uSearch'), P.searchRadius);
+      gl.uniform1f(ua('uStrength'), P.strength);
+      gl.uniform1f(ua('uQuantise'), P.quantise);
+      gl.uniform1f(ua('uRefresh'), P.refresh);
+      gl.uniform1f(ua('uResidual'), P.residual);
+      gl.uniform1f(ua('uReset'), iframe ? 1 : 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      accIdx = dst; accPrimed = true; moshFrame++;
+
+      // PASS THREE — put it on screen at full size.
+      const prog = programs['mosh'];
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo || null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(prog);
+      const u = (n) => gl.getUniformLocation(prog, n);
+      gl.activeTexture(gl.TEXTURE0 + UNIT_FIELD);
+      gl.bindTexture(gl.TEXTURE_2D, fieldTex);
+      gl.uniform1i(u('uField'), UNIT_FIELD);
+      gl.activeTexture(gl.TEXTURE0 + UNIT_PREV);
+      gl.bindTexture(gl.TEXTURE_2D, prevValid ? prevTex : tex);
+      gl.uniform1i(u('uPrev'), UNIT_PREV);
+      gl.activeTexture(gl.TEXTURE0 + UNIT_ACC);
+      gl.bindTexture(gl.TEXTURE_2D, accTex[accIdx]);
+      gl.uniform1i(u('uAcc'), UNIT_ACC);
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.uniform1i(u('uSrc'), unit);
+      gl.uniform2f(u('uRes'), canvas.width, canvas.height);
+      gl.uniform1f(u('uBlock'), B);
+      gl.uniform1f(u('uSearch'), P.searchRadius);
+      // The view number IS the schema's enum order — one definition, so the
+      // shader and the control cannot disagree about what "confidence" means.
+      const views = (ALL && ALL.mosh && ALL.mosh.params.show.values) || [];
+      gl.uniform1f(u('uShow'), Math.max(0, views.indexOf(P.show)));
+      gl.uniform1f(u('uGrid'), P.grid ? 1 : 0);
+      gl.uniform1f(u('uStrength'), P.strength);
+      gl.uniform1f(u('uQuantise'), P.quantise);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.activeTexture(gl.TEXTURE0 + UNIT_SRC);
     }
 
     async function loadSources() {
@@ -556,6 +781,7 @@
     async function useSource(rel) {
       stopVideo();
       levelsEma = null;
+      resetMosh();
       if (!rel) {
         const c = testFrame(); srcEl = c; isVideo = false;
         $('#vidctl').hidden = true; upload(c, c.width, c.height); return;
@@ -920,6 +1146,7 @@
       gl.activeTexture(gl.TEXTURE0 + unit);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.uniform1i(u('uSrc'), unit);
+      if (fid === 'mosh') { await drawMosh(P, tex, unit, fbo); return; }
       if (fid === 'codec') {
         gl.uniform2f(u('uRes'), canvas.width, canvas.height);
         gl.uniform1f(u('uQuality'), P.quality);
@@ -929,6 +1156,9 @@
         gl.uniform1f(u('uKeep'), P.keepCoefficients);
         gl.uniform1f(u('uJitter'), P.quantJitter);
         gl.uniform1f(u('uDcBias'), P.dcBias);
+        gl.uniform1f(u('uDcDrift'), P.dcDrift);
+        gl.uniform1f(u('uDriftRate'), P.driftRate);
+        gl.uniform1f(u('uRestart'), P.restartInterval);
         // The enum crosses as a number because GLSL has no strings; named here so
         // the schema stays the readable surface and the shader stays fast.
         gl.uniform1f(u('uSubsample'), P.subsample === '4:4:4' ? 0 : P.subsample === '4:2:2' ? 1 : 2);
