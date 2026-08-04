@@ -80,6 +80,7 @@
         </div>
         <p class="note" id="srcnote"></p>
         <div id="vidctl" hidden style="margin-top:8px"><button id="play">play</button>
+          <button class="ghost" id="sound" title="the clip is muted by default so an agent can start playback without a click">sound off</button>
           <span class="note" id="vidnote"></span></div>
       </div>
 
@@ -92,6 +93,17 @@
         <p class="note" id="stacknote">A second effect run on the output of the first. Order matters:
           a halftone that is then broadcast through a bad cable is not the same picture as a
           broadcast that is then halftoned.</p>
+      </div>
+
+      <div class="card">
+        <h2>Curve depth</h2>
+        <div class="row">
+          <input type="range" id="depth" min="0" max="1" step="0.01" value="1">
+          <input type="number" id="depthNum" min="0" max="1" step="0.01" value="1">
+        </div>
+        <p class="note">How far the curves push, on both stages. 1 is the curve as written;
+          0 freezes the look with the curves still attached. Turn it down to check whether the
+          hits land on the beat — a big effect on the wrong beat still looks convincing.</p>
       </div>
 
       <div class="card">
@@ -157,6 +169,9 @@
       // family to go back to one effect. An agent gets the same surface a person
       // does rather than a second, weaker one.
       stack: (fid, preset) => setStack(fid, preset),
+      // How hard the curves push, 0..1. Separate from the curve itself so timing
+      // can be checked at a depth nobody would ship.
+      depth: (v) => (v === undefined ? depth : setDepth(v)),
       stacked: () => (stackFamily ? { family: stackFamily, params: { ...stackParams } } : null),
       renderSize: () => ({ width: canvas.width, height: canvas.height, sourceWidth: srcW, sourceHeight: srcH }),
       frameHash: () => frameHash(),
@@ -356,6 +371,35 @@
       errEl.textContent = `${which} stage curve — ${notes.join('; ')}`;
     }
 
+    // HOW FAR A CURVE PUSHES, separately from what it says. A curve written to
+    // swing a knob across its whole range is the right SHAPE and often far too
+    // much of it, and the two are different questions: the shape says WHEN, the
+    // depth says HOW MUCH. Keeping them apart means you can dial an effect down to
+    // check its timing without rewriting the curve — and a big effect landing on
+    // the wrong beat still looks convincing, so that check needs to be cheap.
+    //
+    // Blends from the BASE value toward the curved one, so depth 0 is exactly the
+    // uncurved look rather than zero, and the curve stays attached and legible.
+    let depth = 1;
+    function blend(base, patch, family) {
+      if (depth >= 1) return patch;
+      const out = {};
+      for (const [k, v] of Object.entries(patch)) {
+        const b = base[k];
+        // Only numbers have a halfway. An enum or a boolean applies once the depth
+        // is past halfway rather than pretending to be partly one thing.
+        if (typeof v === 'number' && typeof b === 'number') {
+          const mixed = b + (v - b) * depth;
+          // AND AN INT PARAMETER STAYS AN INT. Blending is the one path that can
+          // hand the renderer a value the schema forbids — the curve engine coerces
+          // its own output and a hand-set control cannot produce a fraction, so
+          // this is the only place a 5527.2-cell grid can come from.
+          out[k] = family?.params?.[k]?.type === 'int' ? Math.round(mixed) : mixed;
+        } else if (depth > 0.5) out[k] = v;
+      }
+      return out;
+    }
+
     function effective() {
       if (!CURVES || !curveSpec || !FAMILY) return params;
       const dur = isVideo && Number.isFinite(vid.duration) ? vid.duration : 0;
@@ -369,7 +413,7 @@
       // family, whose parameter is `gridSize`, and the whole first stage was frozen
       // while I reported it as animating.
       curveNotes(r.notes, 'first');
-      return { ...params, ...r.patch };
+      return { ...params, ...blend(params, r.patch, FAMILY) };
     }
 
     // THE SECOND STAGE GETS ITS OWN CURVE, under `stack` in the same spec, and it
@@ -396,7 +440,7 @@
       // only stage one is — the two stages fail independently and must read that way.
       lastCurve = { ...(lastCurve || {}), stack: { t: r.t, driving: Object.keys(r.patch), notes: r.notes } };
       curveNotes(r.notes, 'second');
-      return { ...stackParams, ...r.patch };
+      return { ...stackParams, ...blend(stackParams, r.patch, ALL[stackFamily]) };
     }
 
     // A procedural frame so the app WORKS before any media is bound. It is built
@@ -504,6 +548,42 @@
       else { draw(); }
       videoLoop = requestAnimationFrame(videoTick);
     }
+    // SOUND, OFF BY DEFAULT AND ON REQUEST. The video started life as a texture
+    // source, so it was muted and hidden and nothing needed otherwise. Now that a
+    // curve can be derived from the track, hearing it is how you judge whether the
+    // hits actually land on the beat — a picture that pulses convincingly on the
+    // wrong beat looks fine and is wrong.
+    //
+    // It stays muted by DEFAULT deliberately: browsers refuse to autoplay audio
+    // without a user gesture, and an agent starting playback is not one. Muted
+    // playback always works, so the agent-driven path keeps working and sound is
+    // one click away rather than a broken autoplay nobody can diagnose.
+    function setSound(on) {
+      vid.muted = !on;
+      $('#sound').textContent = on ? 'sound on' : 'sound off';
+      return !vid.muted;
+    }
+    function setDepth(v) {
+      depth = Math.min(1, Math.max(0, Number(v)));
+      $('#depth').value = depth; $('#depthNum').value = depth.toFixed(2);
+      paramGen++; draw();
+      return depth;
+    }
+    $('#depth').addEventListener('input', (e) => setDepth(e.target.value));
+    $('#depthNum').addEventListener('change', (e) => setDepth(e.target.value));
+
+    $('#sound').addEventListener('click', async () => {
+      const want = vid.muted;
+      setSound(want);
+      // Unmuting a clip the agent started may be refused, because the gesture that
+      // began playback was not the user's. Say so rather than leaving a button
+      // that looks like it worked.
+      if (want && vid.paused) {
+        try { await vid.play(); $('#play').textContent = 'pause'; videoTick(); }
+        catch { setSound(false); say('the browser refused sound without a click on play — press play'); }
+      }
+    });
+
     $('#play').addEventListener('click', () => {
       if (!isVideo) return;
       if (vid.paused) { vid.play(); $('#play').textContent = 'pause'; videoTick(); }
@@ -676,6 +756,10 @@
         else await setStack(op.stack.family, op.stack.preset || '');
       }
       if (op.curves !== undefined) { curveSpec = op.curves || null; lastCurve = null; draw(); }
+      // An agent can ASK for sound, but only a click can grant it — so this sets
+      // the intent and the button reflects reality rather than the request.
+      if (op.depth !== undefined) setDepth(op.depth);
+      if (op.sound !== undefined && isVideo) setSound(!!op.sound);
       if (op.play !== undefined && isVideo) {
         if (op.play && vid.paused) $('#play').click();
         else if (!op.play && !vid.paused) $('#play').click();
