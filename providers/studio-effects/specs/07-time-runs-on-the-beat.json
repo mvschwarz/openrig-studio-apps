@@ -1,7 +1,7 @@
 {
   "_": "The CLOCK's rate comes from the clip's own envelope, so time itself accelerates with the music rather than a transport merely moving faster. Needs a clip with audio.",
   "scan": {
-    "duration": "20s"
+    "duration": "10s"
   },
   "clocks": {
     "pulse": {

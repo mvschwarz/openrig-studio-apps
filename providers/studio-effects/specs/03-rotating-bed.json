@@ -1,7 +1,7 @@
 {
   "_": "Turning the picture while the head crosses it makes straight edges CURVE, because each strip was taken at a different angle. The signature artifact of this instrument.",
   "scan": {
-    "duration": "24s"
+    "duration": "10s"
   },
   "clocks": {
     "turn": {

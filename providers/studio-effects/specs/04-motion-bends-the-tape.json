@@ -1,7 +1,7 @@
 {
   "_": "read:motion with write:displace - movement pushes where the strip was sampled from, so the recording is physically dragged out of shape wherever the picture moved.",
   "scan": {
-    "duration": "20s"
+    "duration": "10s"
   },
   "stages": [
     {

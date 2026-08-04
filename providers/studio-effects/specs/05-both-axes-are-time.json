@@ -1,7 +1,7 @@
 {
   "_": "Two stages on PERPENDICULAR axes. Stage a makes x time; stage b makes y time. The final picture has no spatial axis left. startAt lets a get ahead so b is not reading a tape that does not exist yet.",
   "scan": {
-    "duration": "28s"
+    "duration": "10s"
   },
   "stages": [
     {

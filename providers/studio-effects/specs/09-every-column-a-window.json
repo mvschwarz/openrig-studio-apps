@@ -1,7 +1,7 @@
 {
   "_": "EVERY COLUMN IS A WINDOW. Each vertical band holds a second of the source from the moment the head passed, and they all play at once - so one continuous movement becomes a row of bands each animating a different fragment of it. Needs a moving clip. Runs, then plays.",
   "scan": {
-    "duration": "20s"
+    "duration": "10s"
   },
   "stages": [
     {

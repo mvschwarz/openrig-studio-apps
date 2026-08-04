@@ -1,7 +1,7 @@
 {
   "_": "Dubbing. Two stages on the SAME axis, so each pass compounds the previous one's warp - tape to tape, generation loss.",
   "scan": {
-    "duration": "26s"
+    "duration": "10s"
   },
   "clocks": {
     "drift": {

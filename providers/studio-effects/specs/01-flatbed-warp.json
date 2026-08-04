@@ -1,7 +1,7 @@
 {
   "_": "The original scanner. A hand drags the picture while a mechanical head sweeps, so straight edges shatter into offset ribbons. Pick any clip or still.",
   "scan": {
-    "duration": "20s"
+    "duration": "10s"
   },
   "stages": [
     {

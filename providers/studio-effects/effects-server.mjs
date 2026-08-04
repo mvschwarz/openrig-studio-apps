@@ -342,11 +342,21 @@ http.createServer(async (req, res) => {
         }
         if (ff && fs.existsSync(ff)) {
           const mp4 = full.replace(/\.webm$/, ".mp4");
-          execFileSync(ff, ["-y", "-fflags", "+genpts", "-i", full,
+          // ASSEMBLE THE REAL FRAMES AT A FIXED RATE, and ignore MediaRecorder's
+          // timing entirely. It writes no frame rate and no duration, so letting
+          // ffmpeg guess makes it assume 60fps and DUPLICATE frames to fill the
+          // wall-clock gaps -- measured once at 34,380 output frames from 2,699
+          // real ones, a nine-minute video of mostly repeats.
+          //
+          // Declaring the input rate instead means the clip's length is the
+          // number of frames actually rendered divided by this, so it reflects
+          // THE SCAN rather than how slowly the machine painted it.
+          execFileSync(ff, ["-y", "-r", "30", "-i", full,
                             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
-                            "-movflags", "+faststart", mp4], { stdio: "ignore", timeout: 120000 });
+                            "-vsync", "cfr", "-r", "30",
+                            "-movflags", "+faststart", mp4], { stdio: "ignore", timeout: 180000 });
           if (fs.existsSync(mp4) && fs.statSync(mp4).size > 0) {
-            fs.unlinkSync(full); out = mp4; note = "transcoded to mp4 — seekable, with a real duration";
+            fs.unlinkSync(full); out = mp4; note = "assembled to mp4 at 30fps — seekable, real duration";
           }
         }
       } catch (e) { note = `kept as webm (${e.message.slice(0, 60)})`; }
