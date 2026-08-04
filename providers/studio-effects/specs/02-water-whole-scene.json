@@ -1,0 +1,34 @@
+{
+  "_": "WATER ACROSS THE WHOLE SCENE, with no parade of slices. THE SLICES AND THE RIPPLE ARE THE SAME MECHANISM AT DIFFERENT GRANULARITY — that is the whole finding, and it means you tune between them with ONE knob. With advance 0 the sweep is fitted to the run, so the total source-time laid across the tape is fixed by the duration no matter what else you change; headWidth only decides how coarsely that time is CHOPPED. Wide head (24-32) = a few wide bands, each a visibly different moment, which reads as a parade of slices. Narrow head (4-8) = the same total warp spread smoothly across every column, which reads as the entire picture undulating. headWidth is a QUANTISATION knob, not a strength knob. Swept 4/8/16/32 on one clip: 4 and 8 are whole-scene water, 16 shows a seam, 32 is bands. softness 0.5 dissolves the residual striation now that the feather ramps across the overlap instead of across the strip's own core. STILL NEEDS a continuous shot and a nearly-still subject: a cut inside the window becomes a hard band no head width can fix, and a moving camera becomes smear rather than ripple. frames 24 is what makes it a video — the run writes the tape, then the stack plays back and the recorder captures one cycle.",
+  "scan": {
+    "duration": "4s"
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 6,
+        "softness": 0.5
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 0,
+        "frames": 24,
+        "fps": 12
+      }
+    }
+  ]
+}
