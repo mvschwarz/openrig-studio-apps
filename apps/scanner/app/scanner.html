@@ -80,7 +80,11 @@
     <div class="status" id="status">ready</div>
     <div class="err" id="error"></div>
     <div class="chain" id="chain"></div>
-    <div class="meta" id="meta"></div>
+    <div class="transport" id="playbar" hidden>
+      <button id="play" class="run">❚❚ pause</button>
+      <span class="meta" id="meta"></span>
+    </div>
+    <div class="meta" id="metaidle"></div>
   </main>
 
   <aside>
@@ -124,7 +128,7 @@ vid.muted = true; vid.loop = true; vid.playsInline = true; vid.crossOrigin = 'an
 let srcEl = null, isVideo = false, srcTex = null, srcW = 0, srcH = 0, lastStamp = NaN;
 let writeProg = null, blitProg = null, fadeProg = null;
 let recording = false, scanTime = 0, lastWall = 0, rafId = null, duration = 12;
-let stepCount = 0, wallStart = 0, showAll = false, playAccum = 0;
+let stepCount = 0, wallStart = 0, showAll = false, playAccum = 0, playing = true;
 
 // clocks: name -> {rate} | {rateTrack}. clockT accumulates each clock's OWN
 // time, which is the integral of its rate — so a rate that is itself a lane
@@ -156,15 +160,16 @@ function clockRate(name) {
   return c.rate ?? 1;
 }
 // A transport's parameters are evaluated against ITS clock, not the master.
-function effectiveFor(st) {
+function effectiveFor(st, back = 0) {
   const P = { ...st.params };
   for (const [k, kfs] of Object.entries(st.tracks || {})) {
     const which = k.startsWith('bed') ? st.clocks.bed
                 : k.startsWith('head') ? st.clocks.head
                 : st.clocks.write;
     // Measured from when THIS stage started, so a delayed stage still gets its
-    // whole ramp rather than arriving mid-sweep.
-    const base = (clockT[which] ?? scanTime) - (st.startAt || 0);
+    // whole ramp rather than arriving mid-sweep. `back` rewinds the READING
+    // GEOMETRY without rewinding the content — see writeStage.
+    const base = (clockT[which] ?? scanTime) - (st.startAt || 0) - back;
     const v = evalTrack(kfs, Math.max(0, base));
     if (v !== null) P[k] = v;
   }
@@ -276,7 +281,7 @@ function keepPrev(st, src) {
   return ok;
 }
 
-function writeStage(st, P) {
+function writeStage(st, P, adv) {
   const src = sourceFor(st);
   if (!src.tex || !writeProg) return;
   const vertical = (P.axis||'vertical') === 'vertical';
@@ -315,12 +320,31 @@ function writeStage(st, P) {
   gl.uniform1f(u('uPalette'), Math.max(0,(PARAMS.palette?.values||[]).indexOf(P.palette ?? 'ember')));
   gl.uniform1f(u('uDisplace'), P.displace ?? 40);
 
-  // One draw per tape. Each is a strip, so N tapes cost N strips and not N
-  // frames -- which is why a 24-instant window is affordable at all.
+  // One draw per tape, each a strip -- N tapes cost N strips, not N frames.
+  //
+  // THE READING GEOMETRY IS FROZEN PER COLUMN; ONLY THE CONTENT ADVANCES.
+  // Tape k writes the column the head reached k column-times ago, and it must
+  // read THE SAME PLACE ON THE BED that the head was reading then -- otherwise
+  // each tape samples a neighbouring slice and the stack plays back as a pan
+  // across a still rather than as video inside each band.
+  //
+  // So: bed and head come from (now - k*delta); the SOURCE FRAME is the live
+  // one. That is what makes a column hold a moving picture instead of a
+  // sequence of different places.
+  const colsPerSec = Math.max(1e-6, adv * 60);
+  const delta = wpx / colsPerSec;          // seconds between column arrivals
   for (let k = 0; k < n; k++) {
-    const back = Math.round(((( (at - k*wpx) % span) + span) % span));
+    const col = Math.round(((( (at - k*wpx) % span) + span) % span));
+    if (k > 0) {
+      const Q = effectiveFor(st, k * delta);
+      gl.uniform1f(u('uHeadAt'), Q.headPosition ?? 0);
+      gl.uniform1f(u('uHeadAngle'), Q.headAngle||0);
+      gl.uniform2f(u('uBedPos'), Q.bedX||0, Q.bedY||0);
+      gl.uniform1f(u('uBedRot'), (Q.bedRotate||0)*Math.PI/180);
+      gl.uniform1f(u('uBedScale'), Q.bedScale ?? 1);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, st.fbos[k]);
-    if (vertical) gl.scissor(back,0,wpx,OUT_H); else gl.scissor(0,back,OUT_W,wpx);
+    if (vertical) gl.scissor(col,0,wpx,OUT_H); else gl.scissor(0,col,OUT_W,wpx);
     gl.drawArrays(gl.TRIANGLES,0,3);
   }
   gl.disable(gl.SCISSOR_TEST);
@@ -395,15 +419,16 @@ function tick(now) {
       if (st.tapes.length < 2) continue;
       const fps = Math.max(1, Math.floor(st.params.fps || 12));
       const step = 1/fps;
-      while (playAccum >= step) { playAccum -= step; advanced = true; }
+      if (playing) { while (playAccum >= step) { playAccum -= step; advanced = true; } }
       if (advanced) st.playHead = (st.playHead + 1) % st.tapes.length;
       blitTo(st, st.playHead);
     }
     if (!advanced) playAccum = Math.min(playAccum, 1);
     lastWall = 0; stepCount = 0; wallStart = 0;
     const withStack = stages.filter((s)=>s.tapes.length>1);
+    $('#playbar').hidden = !withStack.length;
     if (withStack.length) metaEl.textContent =
-      `playing · ` + withStack.map((s)=>`${s.id} frame ${s.playHead+1}/${s.tapes.length} @ ${s.params.fps||12}fps`).join(' · ');
+      withStack.map((s)=>`${s.id} frame ${s.playHead+1}/${s.tapes.length} @ ${s.params.fps||12}fps`).join(' · ');
     return;
   }
 
@@ -433,7 +458,7 @@ function tick(now) {
     st.writeAt += adv * (dt*60) / span;
     if (st.writeAt >= 1) st.writeAt -= 1;
     if (st.writeAt < 0) st.writeAt += 1;
-    writeStage(st, P);
+    writeStage(st, P, adv);
     blitTo(st, 0);
   }
   if (isVideo) lastStamp = vid.currentTime;
@@ -443,7 +468,8 @@ function tick(now) {
   const wallSec = (now-wallStart)/1000;
   const fps = wallSec>0.5 ? stepCount/wallSec : null;
   const last = stages[stages.length-1];
-  metaEl.textContent =
+  $('#playbar').hidden = true;
+  $('#metaidle').textContent =
     `scanTime ${scanTime.toFixed(2)}s / ${duration}s · ${stages.length} stage${stages.length===1?'':'s'} · ` +
     `final write ${((last?.writeAt||0)*100).toFixed(1)}% · ` +
     (last && last.tapes.length>1 ? `window ${last.tapes.length} · ` : '') +
@@ -700,6 +726,9 @@ async function boot() {
     $('#showall').onclick = () => { showAll = !showAll; buildControls();
       $('#showall').textContent = showAll ? 'show only what matters' : 'show every control'; };
     $('#rec').onclick = () => { if (!recording) clearAll(); setRecording(!recording); };
+    $('#play').onclick = () => { playing = !playing;
+      $('#play').textContent = playing ? '❚❚ pause' : '▶ play';
+      $('#play').classList.toggle('on', playing); };
     $('#clear').onclick = () => { clearAll(); say('tapes cleared'); };
     $('#save').onclick = () => { const last = stages[stages.length-1];
       if (!last) return; const a=document.createElement('a');
