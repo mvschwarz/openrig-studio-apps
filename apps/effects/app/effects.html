@@ -422,6 +422,20 @@
       if (vid.paused) { vid.play(); $('#play').textContent = 'pause'; videoTick(); }
       else { vid.pause(); $('#play').textContent = 'play'; stopVideo(); }
     });
+    // A PAUSED VIDEO MUST STILL SHOW THE FRAME IT IS PARKED ON. Without this the
+    // texture only refreshes inside videoTick, which returns immediately while
+    // paused — so selecting a clip and scrubbing without pressing play left the
+    // PREVIOUS source on screen. Found by driving the surface rather than by a
+    // test: the canvas was still showing the built-in test frame after a clip had
+    // demonstrably loaded (readyState 4, real dimensions), which reads as "the
+    // source did not load" and is the most misleading way for this to be wrong.
+    for (const ev of ['seeked', 'loadeddata']) {
+      vid.addEventListener(ev, () => {
+        if (!isVideo || !vid.paused || !vid.videoWidth) return;
+        if (FAMILY && FAMILY.engine === 'webgl2') upload(vid, vid.videoWidth, vid.videoHeight);
+        else draw();
+      });
+    }
 
     // The path is built in the PROVIDER so the preview and any headless render
     // agree exactly. Rebuilt only when a parameter changes — never per frame.
