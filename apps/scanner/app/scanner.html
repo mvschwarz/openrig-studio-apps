@@ -498,7 +498,7 @@ function tick(now) {
   }
   if (isVideo) lastStamp = vid.currentTime;
 
-  stepCount++;
+  stepCount++; if (rec) recFrames++;
   if (!wallStart) wallStart = now;
   const wallSec = (now-wallStart)/1000;
   const fps = wallSec>0.5 ? stepCount/wallSec : null;
@@ -541,6 +541,7 @@ function setRecording(on, why) {
 // records EXACTLY what is on screen, so the artifact and the preview cannot
 // disagree.
 let rec = null, recChunks = [], recUrl = null, recBlob = null;
+let recFrames = 0, recStart = 0, recFps = 30;
 function startRecorder() {
   const last = stages[stages.length-1];
   if (!last || !last.canvas || typeof last.canvas.captureStream !== 'function') return;
@@ -566,17 +567,26 @@ function startRecorder() {
       v.onloadedmetadata = () => {
         // MediaRecorder omits the duration header, so this is routinely
         // Infinity. Printing it would be a number that is not one.
-        const dur = Number.isFinite(v.duration) ? `${v.duration.toFixed(1)}s · ` : '';
         $('#clipcap').textContent =
-          `Clip — ${dur}${(recBlob.size/1e6).toFixed(1)}MB · use the controls, or save it to get a seekable mp4`;
+          `Clip — ${recFrames} frames at ${recFps.toFixed(1)}fps (~${(recFrames/recFps).toFixed(1)}s) · ` +
+          `${(recBlob.size/1e6).toFixed(1)}MB · use the controls, or save for a seekable mp4`;
       };
       say(`clip ready — ${(recBlob.size/1e6).toFixed(1)}MB. Play it below, or save it into the media root.`);
       v.play().catch(()=>{ say('clip ready — press play (the browser blocked autoplay)'); });
     };
+    recFrames = 0; recStart = performance.now();
     rec.start(1000);
   } catch (e) { say(`could not start the recorder: ${e.message}`); }
 }
-function stopRecorder() { try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (e) {} rec = null; }
+function stopRecorder() {
+  // THE CAPTURE RATE, MEASURED. Assembling at a fixed 30fps makes the clip play
+  // at whatever ratio the renderer happened to hit -- a 10s run rendered at 15.7
+  // steps/s came out 5.2s long and twice as fast. The rate the frames were
+  // actually produced at is the only rate that plays them back in real time.
+  const secs = recStart ? (performance.now() - recStart) / 1000 : 0;
+  if (secs > 0.5 && recFrames > 4) recFps = Math.max(4, Math.min(60, recFrames / secs));
+  try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (e) {} rec = null; recStart = 0;
+}
 
 // ---- the chain panels ----------------------------------------------------
 function buildChain() {
@@ -832,7 +842,9 @@ async function boot() {
       if (!recBlob) return;
       const name = prompt('save this clip into the media root as:', `scan-${Date.now()}`);
       if (!name) return;
-      const fd = new FormData(); fd.append('name', name); fd.append('clip', recBlob, 'clip.webm');
+      const fd = new FormData(); fd.append('name', name);
+      fd.append('fps', String(Math.round(recFps * 100) / 100));
+      fd.append('clip', recBlob, 'clip.webm');
       const r = await (await fetch('/api/scanner/clip', { method:'POST', body: fd })).json();
       if (!r.ok) return fail(r.error || 'could not save the clip');
       say(`saved — it is now in the source picker`);

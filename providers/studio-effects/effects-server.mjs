@@ -305,6 +305,11 @@ http.createServer(async (req, res) => {
       // on the path as ever -- sanitise to one segment AND check the resolved path.
       const text = buf.toString("latin1");
       const nameMatch = text.match(/name="name"\r\n\r\n([^\r]*)\r\n/);
+      const fpsMatch = text.match(/name="fps"\r\n\r\n([^\r]*)\r\n/);
+      // The rate the surface MEASURED itself capturing at. Assembling at a fixed
+      // rate instead makes the clip play fast or slow by whatever ratio the
+      // renderer happened to hit.
+      const fps = Math.max(4, Math.min(60, Number(fpsMatch ? fpsMatch[1] : 30) || 30));
       const raw = (nameMatch ? nameMatch[1] : "scan").replace(/[^A-Za-z0-9._ -]/g, "").slice(0, 80);
       if (!raw) return json(res, 400, { ok: false, error: "not a usable clip name" });
       const file = `${raw.replace(/\.webm$/, "")}.webm`;
@@ -351,12 +356,12 @@ http.createServer(async (req, res) => {
           // Declaring the input rate instead means the clip's length is the
           // number of frames actually rendered divided by this, so it reflects
           // THE SCAN rather than how slowly the machine painted it.
-          execFileSync(ff, ["-y", "-r", "30", "-i", full,
+          execFileSync(ff, ["-y", "-r", String(fps), "-i", full,
                             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
-                            "-vsync", "cfr", "-r", "30",
+                            "-vsync", "cfr", "-r", String(fps),
                             "-movflags", "+faststart", mp4], { stdio: "ignore", timeout: 180000 });
           if (fs.existsSync(mp4) && fs.statSync(mp4).size > 0) {
-            fs.unlinkSync(full); out = mp4; note = "assembled to mp4 at 30fps — seekable, real duration";
+            fs.unlinkSync(full); out = mp4; note = `assembled to mp4 at ${fps.toFixed(1)}fps — the rate it was captured at`;
           }
         }
       } catch (e) { note = `kept as webm (${e.message.slice(0, 60)})`; }
