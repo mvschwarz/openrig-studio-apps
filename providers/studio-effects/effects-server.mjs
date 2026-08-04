@@ -34,6 +34,21 @@ const json = (res, code, body) => {
 };
 const readBody = (req) => new Promise((r) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => r(b)); });
 
+// THE REVERSE CHANNEL. Every other route here answers a question the surface
+// asked. This is the only state where the initiative runs the other way: an agent
+// posts what it wants to see, and an ALREADY-OPEN page follows.
+//
+// That is the difference between an agent that can describe a look and one you can
+// watch make it. It was the last missing piece of "agent-drivable" and the only
+// genuinely new part of this tier rather than a port.
+//
+// A GENERATION COUNTER, deliberately, rather than a queue of instructions: the
+// surface asks "is there anything newer than what I have?" and applies the latest
+// intent. A queue lets a slow page fall behind and then replay stale instructions
+// — the same stale-state-with-a-current-label failure the render fence exists to
+// prevent, one layer up.
+let driveGen = 0, driveOp = null;
+
 // Only ever inside the declared media root, resolved AFTER the input is
 // incorporated rather than validated as a string beforehand. A validated input is
 // not a validated path.
@@ -56,6 +71,19 @@ http.createServer(async (req, res) => {
     // plain words, the named looks, and the disambiguation notes for vague asks.
     if (url.pathname === "/api/effects/families") {
       return json(res, 200, { ok: true, families: FAMILIES });
+    }
+
+    // See the note on driveGen above. POST to drive an open surface; GET is what
+    // the surface polls. Kept tiny on purpose — it carries INTENT, and the surface
+    // decides how to realise it, so this never becomes a second renderer.
+    if (url.pathname === "/api/effects/drive") {
+      if (req.method === "POST") {
+        const b = JSON.parse((await readBody(req)) || "{}");
+        driveGen += 1;
+        driveOp = { gen: driveGen, at: Date.now(), ...b };
+        return json(res, 200, { ok: true, gen: driveGen });
+      }
+      return json(res, 200, { ok: true, gen: driveGen, op: driveOp });
     }
 
     // The shader, served rather than duplicated into the surface. One definition,

@@ -195,6 +195,7 @@
         await useFamily();
         await loadSources();
         await useSource('');
+        pollDrive();
         say('ready');
       } catch (e) { fail(`could not start: ${e.message}`); }
     }
@@ -558,6 +559,49 @@
     //
     // A request arriving mid-render is REMEMBERED rather than dropped, so the
     // newest intent always gets drawn eventually.
+    // THE REVERSE CHANNEL — an agent driving THIS page while someone watches it.
+    //
+    // Every other exchange here is the surface asking the provider a question. This
+    // is the one place the initiative runs the other way, and it is what turns
+    // "agent-drivable" from a claim about the schema into something you can sit and
+    // watch happen. An agent posts intent; this applies it to the live page.
+    //
+    // It follows a GENERATION rather than replaying a queue: if several changes
+    // arrive while a render is in flight, the newest wins and the intermediate ones
+    // are skipped. Applying them all in order would animate through states nobody
+    // asked to see, and would let a slow page fall behind and act on stale intent.
+    let driveSeen = 0, driveStop = false;
+    async function applyDrive(op) {
+      // Ordered so each step lands on the state the next one expects: a source
+      // before a family (the family re-uploads it), a family before a preset (the
+      // preset is family-scoped), a preset before params (params refine a look).
+      if (op.source !== undefined) { $('#source').value = op.source || ''; await useSource(op.source || ''); }
+      if (op.family && op.family !== familyId) { familyId = op.family; $('#family').value = op.family; await useFamily(); }
+      if (op.preset) await applyPreset(op.preset);
+      if (op.params) { paramGen++; Object.assign(params, op.params); syncInputs(); draw(); }
+      if (op.stack !== undefined) {
+        if (!op.stack) await setStack('', '');
+        else await setStack(op.stack.family, op.stack.preset || '');
+      }
+      if (op.curves !== undefined) { curveSpec = op.curves || null; lastCurve = null; draw(); }
+      if (op.play !== undefined && isVideo) {
+        if (op.play && vid.paused) $('#play').click();
+        else if (!op.play && !vid.paused) $('#play').click();
+      }
+      // The agent gets to say WHY, in the same place the surface talks to the user,
+      // so a watcher sees a narrated change rather than controls twitching.
+      if (op.say) say(op.say);
+    }
+    async function pollDrive() {
+      while (!driveStop) {
+        try {
+          const r = await (await fetch('/api/effects/drive')).json();
+          if (r.ok && r.gen > driveSeen && r.op) { driveSeen = r.gen; await applyDrive(r.op); }
+        } catch { /* the provider going away must not kill the page */ }
+        await new Promise((r) => setTimeout(r, 350));
+      }
+    }
+
     // STAGE TWO. Its parameters come from the PROVIDER's preset resolution, exactly
     // like stage one's — so "vhs then dragged" means the same thing to an agent, to
     // this surface, and to anything that renders it later. Held as resolved values
