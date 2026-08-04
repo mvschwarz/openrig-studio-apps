@@ -52,14 +52,60 @@ uniform vec2  uBedPos;
 uniform float uBedRot;
 uniform float uBedScale;
 
-uniform float uRead;         // 0 passthrough, 1 luma, 2 motion
-uniform float uWriteMode;    // 0 direct, 1 intensity
+// Numbering IS the order of the enums below, and the surface derives the index
+// from that list rather than carrying its own copy.
+uniform float uRead;         // 0 passthrough 1 luma 2 motion 3 chroma 4 edge 5 difference
+uniform float uWriteMode;    // 0 direct 1 intensity 2 palette 3 matte 4 displace
 uniform float uGain;
 uniform float uBias;
 uniform float uThreshold;
 uniform float uInvert;
+uniform vec3  uTarget;       // the colour chroma looks for
+uniform float uPalette;      // 0 ember 1 cold 2 mono 3 paper
+uniform float uDisplace;     // how far the response bends the strip, in px
 
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+
+// Four ramps, generated rather than sampled from a table -- a palette is a
+// function of one number here, so there is nothing to keep in step.
+vec3 ramp(float v) {
+  v = clamp(v, 0.0, 1.0);
+  if (uPalette < 0.5)      return vec3(pow(v,0.7), pow(v,1.9)*0.75, pow(v,3.4)*0.45);          // ember
+  else if (uPalette < 1.5) return vec3(pow(v,3.0)*0.5, pow(v,1.6)*0.8, pow(v,0.75));           // cold
+  else if (uPalette < 2.5) return vec3(v);                                                      // mono
+  return mix(vec3(0.93,0.91,0.85), vec3(0.12,0.11,0.10), 1.0 - v);                              // paper
+}
+
+// The response, as one number, for whatever the head is set to read.
+float respond(vec2 uv, vec2 texel, vec3 cur, out vec3 rgb) {
+  rgb = cur;
+  if (uRead < 0.5) return luma(cur);
+  if (uRead < 1.5) { rgb = vec3(luma(cur)); return luma(cur); }
+  if (uRead < 2.5) {
+    // Temporal magnitude -- how much this point CHANGED, sign discarded.
+    float d = abs(luma(cur) - luma(texture(uPrev, uv).rgb)) * 4.0;
+    rgb = vec3(d); return d;
+  }
+  if (uRead < 3.5) {
+    // Nearness to a colour, so the head can scan FOR something. Distance is
+    // inverted because a response should be large where the thing IS.
+    float d = 1.0 - clamp(length(cur - uTarget) / 1.732, 0.0, 1.0);
+    rgb = vec3(d); return d;
+  }
+  if (uRead < 4.5) {
+    // Gradient magnitude: structure kept, tone discarded.
+    float l  = luma(cur);
+    float lx = luma(texture(uSrc, uv + vec2(texel.x, 0.0)).rgb);
+    float ly = luma(texture(uSrc, uv + vec2(0.0, texel.y)).rgb);
+    float e  = length(vec2(l - lx, l - ly)) * 6.0;
+    rgb = vec3(e); return e;
+  }
+  // SIGNED difference, centred on a half. Distinct from motion on purpose:
+  // motion says how much changed, this says which WAY -- brighter above the
+  // middle, darker below -- and the two look nothing alike on real footage.
+  float s = (luma(cur) - luma(texture(uPrev, uv).rgb)) * 3.0 + 0.5;
+  rgb = vec3(s); return s;
+}
 
 // Bed space -> source space. Inverted, because we are asking "what is under this
 // point of the glass", not "where did this pixel go".
@@ -89,33 +135,33 @@ void main() {
   float on = (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) ? 1.0 : 0.0;
   uv = clamp(uv, 0.0, 1.0);
 
+  vec2 texel = 1.0 / uSrcSize;
   vec3 cur = texture(uSrc, uv).rgb;
-  float value;
-  vec3  rgb;
-
-  if (uRead < 0.5) {
-    rgb = cur; value = luma(cur);
-  } else if (uRead < 1.5) {
-    value = luma(cur); rgb = vec3(value);
-  } else {
-    // MOTION, measured the cheap honest way for a single strip: the difference
-    // against the source one step earlier. The block-matching field is a better
-    // answer where a whole frame is needed, but a strip only asks "did this
-    // change", and asking the smaller question keeps the write pass O(strip).
-    vec3 was = texture(uPrev, uv).rgb;
-    value = abs(luma(cur) - luma(was)) * 4.0;
-    rgb = vec3(value);
-  }
+  vec3 rgb;
+  float value = respond(uv, texel, cur, rgb);
 
   value = clamp((value + uBias) * uGain, 0.0, 1.0);
   if (value < uThreshold) value = 0.0;
   if (uInvert > 0.5) value = 1.0 - value;
 
-  vec3 outc = (uWriteMode < 0.5) ? rgb * (uRead < 0.5 ? 1.0 : value) : vec3(value);
-  if (uRead < 0.5 && uWriteMode < 0.5) outc = rgb;
+  // DISPLACE — the response BENDS the strip rather than colouring it. The read
+  // position is pushed along the head by the response, so a bright or fast
+  // region physically drags the recording out of shape. This is the one write
+  // mode that changes WHERE we sampled, so it re-reads rather than re-tinting.
+  if (uWriteMode > 3.5) {
+    vec2 push = (uAxis < 0.5) ? vec2(0.0, (value - 0.5) * uDisplace * texel.y * uSrcSize.y)
+                              : vec2((value - 0.5) * uDisplace * texel.x * uSrcSize.x, 0.0);
+    vec2 uv2 = clamp(uv + push * texel, 0.0, 1.0);
+    fragColor = vec4(texture(uSrc, uv2).rgb * on, 1.0);
+    return;
+  }
 
-  // Softness feathers the strip's leading and trailing edge so a wide head does
-  // not lay down a hard-edged band on every step.
+  vec3 outc;
+  if (uWriteMode < 0.5)      outc = rgb;                    // direct
+  else if (uWriteMode < 1.5) outc = vec3(value);            // intensity
+  else if (uWriteMode < 2.5) outc = ramp(value);            // palette
+  else                       outc = cur * step(uThreshold + 0.001, value); // matte
+
   fragColor = vec4(outc * on, 1.0);
 }`;
 
@@ -132,8 +178,9 @@ void main() {
   fragColor = vec4(c * uPersistence, 1.0);
 }`;
 
-export const READS  = ["passthrough", "luma", "motion"];
-export const WRITES = ["direct", "intensity"];
+export const READS  = ["passthrough", "luma", "motion", "chroma", "edge", "difference"];
+export const WRITES = ["direct", "intensity", "palette", "matte", "displace"];
+export const PALETTES = ["ember", "cold", "mono", "paper"];
 
 // The knob surface, published so an agent drives from this rather than from our
 // source. Grouped by transport, because the grouping IS the concept: bed, head,
@@ -174,9 +221,15 @@ export const SCANNER_PARAMS = {
                  says: "responses below this are written as nothing" },
   invert:      { type: "bool", default: false, group: "response",
                  says: "flip the response" },
+  targetColor: { type: "color", default: "#c84a2a", group: "response",
+                 says: "the colour `chroma` looks for; the response is large where the picture is near it" },
 
   writeMode:   { type: "enum", values: WRITES, default: "direct", group: "output",
-                 says: "what lands on the tape — the strip as read, or the response as greyscale" },
+                 says: "what lands on the tape — the strip as read, the response as greyscale or through a colour ramp, the source only where the response clears the threshold, or the response BENDING the strip" },
+  palette:     { type: "enum", values: PALETTES, default: "ember", group: "output",
+                 says: "the ramp `palette` writes through" },
+  displace:    { type: "float", min: 0, max: 200, default: 40, group: "output",
+                 says: "how far the response bends the strip when writeMode is displace, in pixels" },
   advance:     { type: "float", min: -4, max: 4, default: 0, group: "output",
                  says: "output columns per head step. 0 FITS the recording to the scan duration, which is what you want unless you are deliberately mismatching; 1 is one column per step, and every other value is a deliberate disagreement with the sweep" },
   persistence: { type: "float", min: 0.9, max: 1, default: 1, group: "output",
