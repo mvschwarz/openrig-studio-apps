@@ -732,6 +732,12 @@
       gl.uniform1f(ua('uRefresh'), P.refresh);
       gl.uniform1f(ua('uResidual'), P.residual);
       gl.uniform1f(ua('uReset'), iframe ? 1 : 0);
+      gl.uniform1f(ua('uBlock'), B);
+      gl.uniform1f(ua('uSliceLoss'), P.sliceLoss);
+      gl.uniform1f(ua('uSliceHeight'), P.sliceHeight);
+      gl.uniform1f(ua('uSliceShift'), P.sliceShift);
+      gl.uniform1f(ua('uSliceHold'), P.sliceHold);
+      gl.uniform1f(ua('uFrame'), moshFrame);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       accIdx = dst; accPrimed = true; moshFrame++;
 

@@ -148,6 +148,16 @@ uniform float uQuantise;
 uniform float uRefresh;     // flat share of the live picture per frame
 uniform float uResidual;    // share let in where the prediction was poor
 uniform float uReset;       // 1 on an I-frame — take the live picture whole
+uniform float uBlock;
+uniform float uSliceLoss;   // share of slices that arrive broken or not at all
+uniform float uSliceHeight; // slice height in macroblocks
+uniform float uSliceShift;  // sideways desync of a broken slice, in pixels
+uniform float uSliceHold;   // frames a loss persists before it is re-rolled
+uniform float uFrame;
+
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
 
 void main() {
   vec2 uv    = gl_FragCoord.xy / uRes;
@@ -164,6 +174,37 @@ void main() {
   // picture, this moves whatever the buffer has accumulated, so error compounds
   // frame over frame instead of resetting.
   vec3 moved = texture(uAcc, uv - mv * uStrength * texel).rgb;
+
+  // SLICE LOSS — the other half of how a broken stream looks, and the reason
+  // torn video has horizontal BANDS rather than scattered damage.
+  //
+  // A picture is transmitted as slices: horizontal runs of macroblocks that can
+  // be decoded independently, precisely so that losing one does not destroy the
+  // frame. When a slice does not arrive, the decoder has nothing to draw with
+  // and conceals the gap by holding whatever that region held before. The result
+  // is a band that FREEZES while everything around it keeps moving — and because
+  // slices are horizontal, the damage is horizontal too.
+  //
+  // A lost slice here receives NO correction: not the flat refresh, not the
+  // residual. That is the whole mechanism, and it composes with the accumulator
+  // for free — the band simply keeps sliding along old vectors while the rest of
+  // the picture is being corrected back toward the live frame.
+  //
+  // uSliceShift adds the second failure: a slice that arrives but desynchronised
+  // is decoded at the wrong horizontal offset, which is where torn, sideways-
+  // displaced bands come from.
+  float sliceH   = max(1.0, floor(uSliceHeight)) * max(2.0, uBlock);
+  float sliceIdx = floor(gl_FragCoord.y / sliceH);
+  // Held for a few frames, because a loss that re-rolls every frame reads as
+  // noise rather than as a stream in trouble.
+  float era  = floor(uFrame / max(1.0, floor(uSliceHold)));
+  float roll = hash(vec2(sliceIdx, era));
+  if (uSliceLoss > 0.0 && roll < uSliceLoss) {
+    float shift = (hash(vec2(sliceIdx, era + 17.0)) - 0.5) * 2.0 * uSliceShift;
+    vec3 held = texture(uAcc, uv - (mv * uStrength + vec2(shift, 0.0)) * texel).rgb;
+    fragColor = vec4(held, 1.0);
+    return;
+  }
 
   // Where confidence is low the prediction failed, so that is where a real
   // encoder would have spent bits on a correction.
