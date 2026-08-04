@@ -1,0 +1,30 @@
+{
+  "manifest_version": 1,
+  "id": "scanner",
+  "name": "SCANNER",
+  "summary": "A tape head for images and video. The head sweeps, the bed moves underneath it, and the recording is built from strips taken at different moments — so the distortion is time rather than a filter. Composed as a spec, which is what an agent writes.",
+  "category": "create",
+  "maker": { "name": "OpenRig", "url": "https://github.com/openrig" },
+  "surface": {
+    "entry": "app/scanner.html",
+    "path": "/surfaces/scanner.html",
+    "glyph": "▤",
+    "hint": "record a picture one strip at a time — slit-scan, flatbed warp, or a tape of pure motion"
+  },
+  "roots": {
+    "media": { "required": false }
+  },
+  "_roots_note": "Optional, matching EFFECTS. With nothing bound the app is honest about having no source rather than showing an empty stage that looks like a working recorder.",
+  "calls": {
+    "/api/scanner/params": { "required": true },
+    "/api/scanner/shader": { "required": true },
+    "/api/scanner/compile": { "required": true },
+    "/api/effects/sources": { "required": false }
+  },
+  "_calls_note": "/api/effects/sources is CROSS-APP on purpose: listing what is in the media root is a capability studio-effects already serves, and declaring a call rather than reimplementing it is the whole reason the manifest grew a calls field.",
+  "provider": {
+    "package": "@openrig/studio-effects",
+    "required": true,
+    "_note": "Same provider as EFFECTS. The scanner is a different surface over the same capability, not a second engine — the motion response reads the field the effects tier already computes."
+  }
+}

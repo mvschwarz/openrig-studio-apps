@@ -20,6 +20,10 @@ import { TILE_FAMILIES, PALETTES } from "./engine/tile.mjs";
 import { ANALOG_FRAGMENT, ANALOG_VERTEX } from "./engine/analog.mjs";
 import { CODEC_FRAGMENT, CODEC_VERTEX } from "./engine/codec.mjs";
 import { MOTION_VERTEX, MOTION_ESTIMATE_FRAGMENT, MOSH_FRAGMENT, MOSH_ACCUMULATE_FRAGMENT } from "./engine/motion.mjs";
+import {
+  SCANNER_VERTEX, SCANNER_WRITE_FRAGMENT, SCANNER_FADE_FRAGMENT,
+  SCANNER_PARAMS, SCANNER_PRESETS, compileSpec,
+} from "./engine/scanner.mjs";
 
 import { evalCurves, pulses, ramp, EASING_NAMES } from "./engine/curves.mjs";
 import { pcm, envelope, onsets, envelopeTrack, onsetTrack } from "./engine/listen.mjs";
@@ -272,6 +276,48 @@ http.createServer(async (req, res) => {
       if (!file || !fs.existsSync(file)) return json(res, 404, { ok: false, error: `no look called ${which}` });
       try { return json(res, 200, { ok: true, ...JSON.parse(fs.readFileSync(file, "utf8")) }); }
       catch (e) { return json(res, 200, { ok: false, error: `${name} is not readable JSON: ${e.message}` }); }
+    }
+
+    // ---- SCANNER -------------------------------------------------------
+    // The knob surface, so an agent drives from this rather than from source.
+    if (url.pathname === "/api/scanner/params") {
+      return json(res, 200, { ok: true, params: SCANNER_PARAMS, presets: SCANNER_PRESETS });
+    }
+    if (url.pathname === "/api/scanner/shader") {
+      const pass = url.searchParams.get("pass") || "write";
+      const P = {
+        write: { vertex: SCANNER_VERTEX, fragment: SCANNER_WRITE_FRAGMENT },
+        fade:  { vertex: SCANNER_VERTEX, fragment: SCANNER_FADE_FRAGMENT },
+      };
+      if (!P[pass]) return json(res, 404, { ok: false, error: `no scanner pass: ${pass}` });
+      return json(res, 200, { ok: true, pass, ...P[pass] });
+    }
+    // A SPEC IS COMPILED, NEVER INTERPRETED. It lands as keyframes on the same
+    // engine every other curve uses, so there is one evaluation path and the
+    // compiled lanes can be read back before anything is run.
+    if (url.pathname === "/api/scanner/compile" && req.method === "POST") {
+      let spec;
+      try { spec = JSON.parse((await readBody(req)) || "{}"); }
+      catch (e) { return json(res, 400, { ok: false, error: `spec is not valid JSON: ${e.message}` }); }
+      const out = compileSpec(spec);
+      // from-audio / from-video lanes need the clip, so they are resolved here
+      // rather than in the compiler, which has no filesystem.
+      for (const d of out.derived) {
+        const want = d.spec["from-audio"];
+        if (!want) { out.problems.push(`${d.param}: from-video lanes are not wired yet`); continue; }
+        const file = insideMedia(spec?.source?.clip || "");
+        if (!file) { out.problems.push(`${d.param}: no such clip in the media root`); continue; }
+        const a = pcm(file);
+        if (!a.ok) { out.problems.push(`${d.param}: ${a.error}`); continue; }
+        const env = envelope(a.samples, a.rate, 30);
+        const [min, max] = want.range || [0, 1];
+        out.tracks[d.param] = want.mode === "envelope"
+          ? envelopeTrack(env, { min, max, gamma: want.gamma || 1 })
+          : onsetTrack(onsets(env, { sensitivity: want.sensitivity || 1.6 }),
+                       { min, max, decay: want.decay || 0.22 });
+      }
+      delete out.derived;
+      return json(res, 200, { ok: true, ...out });
     }
 
     // The shader, served rather than duplicated into the surface. One definition,

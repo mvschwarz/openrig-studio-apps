@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scanner</title>
+  <style>
+    /* Same tokens as FLOOR, EFFECTS and PROVIDERS. A fourth visual language for
+       a fourth surface would make all four harder to read. */
+    :root {
+      --bg:#0b0f14; --panel:#121a22; --panel2:#0f161d; --line:#1f2a35;
+      --ink:#dbe4ec; --dim:#94a5b6; --faint:#6b7c8d; --accent:#4ade9b; --flag:#d99a2b;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin:0; background:var(--bg); color:var(--ink);
+      font:14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      display:grid; grid-template-columns: 1fr 340px; height:100vh; overflow:hidden;
+    }
+    @media (max-width: 900px) { body { grid-template-columns: 1fr; overflow:auto; height:auto; } }
+    main { padding:18px; display:flex; flex-direction:column; gap:14px; min-width:0; overflow:auto; }
+    aside {
+      border-left:1px solid var(--line); background:var(--panel2);
+      padding:18px; display:flex; flex-direction:column; gap:14px; overflow:auto;
+    }
+    h1 { font-family:var(--mono); font-size:19px; margin:0; letter-spacing:-0.02em; font-weight:600; }
+    .eyebrow { font-family:var(--mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); }
+    .panes { display:grid; grid-template-columns:1fr 1fr; gap:12px; min-height:0; }
+    @media (max-width: 700px) { .panes { grid-template-columns:1fr; } }
+    .pane { display:flex; flex-direction:column; gap:6px; min-width:0; }
+    .cap { font-family:var(--mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); }
+    .frame { position:relative; border:1px solid var(--line); border-radius:4px; background:#000; overflow:hidden; }
+    canvas { display:block; width:100%; height:auto; }
+    .transport { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    button, select, input[type=text] {
+      font-family:var(--mono); font-size:12px; padding:6px 11px; border-radius:3px;
+      border:1px solid var(--line); background:var(--panel); color:var(--dim); cursor:pointer;
+    }
+    button:hover { border-color:var(--accent); color:var(--ink); }
+    button.on { color:var(--accent); border-color:var(--accent); }
+    button:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:13px 14px; display:flex; flex-direction:column; gap:9px; }
+    .card h2 { font-family:var(--mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); margin:0; }
+    .row { display:grid; grid-template-columns:1fr 62px; gap:8px; align-items:center; }
+    .row label { font-size:12px; color:var(--dim); }
+    .row input[type=range] { width:100%; accent-color:var(--accent); }
+    .row .val { font-family:var(--mono); font-size:11.5px; color:var(--ink); text-align:right; font-variant-numeric:tabular-nums; }
+    select { width:100%; }
+    .status { font-family:var(--mono); font-size:11.5px; color:var(--faint); min-height:1.3em; }
+    .err { font-family:var(--mono); font-size:11.5px; color:var(--flag); }
+    textarea {
+      width:100%; min-height:150px; font-family:var(--mono); font-size:11.5px; line-height:1.5;
+      background:var(--panel2); color:var(--ink); border:1px solid var(--line); border-radius:3px; padding:9px;
+      resize:vertical;
+    }
+    .meta { font-family:var(--mono); font-size:11px; color:var(--faint); font-variant-numeric:tabular-nums; }
+  </style>
+</head>
+<body>
+  <main>
+    <div>
+      <div class="eyebrow">Studio</div>
+      <h1>Scanner</h1>
+    </div>
+    <div class="panes">
+      <div class="pane">
+        <span class="cap">Bed — source + head</span>
+        <div class="frame"><canvas id="bed"></canvas></div>
+      </div>
+      <div class="pane">
+        <span class="cap">Output — the recording</span>
+        <div class="frame"><canvas id="tape"></canvas></div>
+      </div>
+    </div>
+    <div class="transport">
+      <button id="rec">record</button>
+      <button id="clear">clear</button>
+      <button id="save">save recording</button>
+      <select id="source"><option value="">— source —</option></select>
+      <select id="preset"><option value="">— preset —</option></select>
+    </div>
+    <div class="status" id="status">ready</div>
+    <div class="err" id="error"></div>
+    <div class="meta" id="meta"></div>
+  </main>
+
+  <aside>
+    <div class="card">
+      <h2>Spec</h2>
+      <textarea id="spec" spellcheck="false"></textarea>
+      <div class="transport">
+        <button id="compile">compile + load</button>
+      </div>
+      <div class="status" id="specnote">a spec compiles to keyframes — one evaluation path</div>
+    </div>
+    <div id="groups"></div>
+  </aside>
+
+<script type="module">
+const $ = (s) => document.querySelector(s);
+const bedC = $('#bed'), tapeC = $('#tape');
+const statusEl = $('#status'), errEl = $('#error'), metaEl = $('#meta');
+const say  = (m) => { statusEl.textContent = m; };
+const fail = (m) => { errEl.textContent = m; };
+
+const gl = tapeC.getContext('webgl2', { preserveDrawingBuffer: true });
+if (!gl) fail('this browser has no WebGL2 — the recording cannot be drawn');
+const bed2d = bedC.getContext('2d');
+
+// ---- state --------------------------------------------------------------
+let PARAMS = {}, PRESETS = {}, params = {}, tracks = {}, duration = 8;
+let vid = document.createElement('video');
+vid.muted = true; vid.loop = true; vid.playsInline = true; vid.crossOrigin = 'anonymous';
+let srcEl = null, isVideo = false;
+let recording = false, scanTime = 0, lastWall = 0, writeAt = 0, rafId = null;
+let srcTex = null, prevTex = null, prevFbo = null, tapeTex = null, tapeFbo = null;
+let writeProg = null, srcW = 0, srcH = 0;
+const OUT_W = 1280, OUT_H = 540;
+
+const UNIT_SRC = 0, UNIT_PREV = 1, UNIT_TAPE = 2;
+
+// ---- lanes: ONE evaluator, the same one the effects tier uses -----------
+function evalTrack(kfs, t) {
+  if (!kfs || !kfs.length) return null;
+  if (t <= kfs[0].t) return kfs[0].v;
+  if (t >= kfs[kfs.length - 1].t) return kfs[kfs.length - 1].v;
+  for (let i = 0; i < kfs.length - 1; i++) {
+    const a = kfs[i], b = kfs[i + 1];
+    if (t >= a.t && t <= b.t) {
+      if (typeof a.v !== 'number') return a.v;
+      const span = b.t - a.t;
+      let u = span <= 0 ? 1 : (t - a.t) / span;
+      const ease = b.ease || a.ease || 'smooth';
+      if (ease === 'snap') u = u < 1 ? 0 : 1;
+      else if (ease === 'smooth') u = u * u * (3 - 2 * u);
+      return a.v + (b.v - a.v) * u;
+    }
+  }
+  return kfs[kfs.length - 1].v;
+}
+// Each transport reads the master clock through ITS OWN rate. All rates at 1 is
+// the locked case; a difference is the drift, and it is declared rather than
+// inherited from whatever clock happened to be nearby.
+function effective() {
+  const P = { ...params };
+  const bedT  = scanTime * (P.bedRate ?? 1);
+  const headT = scanTime * (P.headRate ?? 1);
+  for (const [k, kfs] of Object.entries(tracks)) {
+    const t = k.startsWith('bed') ? bedT : k.startsWith('head') ? headT : scanTime;
+    const v = evalTrack(kfs, t);
+    if (v !== null) P[k] = v;
+  }
+  return P;
+}
+
+// ---- gl ------------------------------------------------------------------
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    throw new Error(`shader did not compile: ${gl.getShaderInfoLog(s)}`);
+  return s;
+}
+function build(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+    throw new Error(`program did not link: ${gl.getProgramInfoLog(p)}`);
+  return p;
+}
+function tex(unit, w, h) {
+  const t = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE0 + unit);
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  return t;
+}
+function ensureTape() {
+  if (tapeTex) return;
+  tapeC.width = OUT_W; tapeC.height = OUT_H;
+  tapeTex = tex(UNIT_TAPE, OUT_W, OUT_H);
+  tapeFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, tapeFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tapeTex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+function clearTape() {
+  ensureTape();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, tapeFbo);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.viewport(0, 0, OUT_W, OUT_H);
+  gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  writeAt = 0; scanTime = 0;
+  blit();
+}
+// The tape lives in a texture; this is the only place it reaches the screen.
+let blitProg = null;
+function blit() {
+  if (!blitProg) blitProg = build(
+    `#version 300 es
+     void main(){ vec2 p=vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position=vec4(p*2.0-1.0,0.,1.); }`,
+    `#version 300 es
+     precision highp float; out vec4 o; uniform sampler2D t; uniform vec2 r;
+     void main(){ o = vec4(texture(t, gl_FragCoord.xy/r).rgb, 1.0); }`);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.viewport(0, 0, OUT_W, OUT_H);
+  gl.useProgram(blitProg);
+  gl.activeTexture(gl.TEXTURE0 + UNIT_TAPE);
+  gl.bindTexture(gl.TEXTURE_2D, tapeTex);
+  gl.uniform1i(gl.getUniformLocation(blitProg, 't'), UNIT_TAPE);
+  gl.uniform2f(gl.getUniformLocation(blitProg, 'r'), OUT_W, OUT_H);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+// ---- source --------------------------------------------------------------
+function uploadSource() {
+  if (!srcEl) return;
+  const w = isVideo ? vid.videoWidth : srcEl.naturalWidth || srcEl.width;
+  const h = isVideo ? vid.videoHeight : srcEl.naturalHeight || srcEl.height;
+  if (!w || !h) return;
+  if (!srcTex || srcW !== w || srcH !== h) {
+    srcW = w; srcH = h;
+    srcTex = tex(UNIT_SRC, w, h);
+    prevTex = tex(UNIT_PREV, w, h);
+    prevFbo = gl.createFramebuffer();
+  }
+  // Keep the frame we are about to overwrite, for the motion response. Only
+  // when the SOURCE clock advanced — the render loop's rate is not the video's,
+  // and rolling on it makes previous and current the same picture.
+  if (isVideo && vid.currentTime !== uploadSource._t && srcTex) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, prevFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, srcTex, 0);
+    gl.activeTexture(gl.TEXTURE0 + UNIT_PREV);
+    gl.bindTexture(gl.TEXTURE_2D, prevTex);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE)
+      gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  uploadSource._t = isVideo ? vid.currentTime : 0;
+  gl.activeTexture(gl.TEXTURE0 + UNIT_SRC);
+  gl.bindTexture(gl.TEXTURE_2D, srcTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, isVideo ? vid : srcEl);
+}
+
+// ---- the write pass ------------------------------------------------------
+function writeStrip(P) {
+  if (!writeProg || !srcTex) return;
+  ensureTape();
+  const vertical = (P.axis || 'vertical') === 'vertical';
+  const wpx = Math.max(1, Math.round(P.headWidth || 6));
+  const at  = Math.round((vertical ? OUT_W : OUT_H) * (writeAt % 1 + 1) % (vertical ? OUT_W : OUT_H));
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, tapeFbo);
+  gl.viewport(0, 0, OUT_W, OUT_H);
+  // SCISSORED TO THE STRIP. The cost is O(strip), not O(frame) — which is what
+  // makes an accumulation buffer affordable at all.
+  gl.enable(gl.SCISSOR_TEST);
+  if (vertical) gl.scissor(at, 0, wpx, OUT_H);
+  else          gl.scissor(0, at, OUT_W, wpx);
+
+  gl.useProgram(writeProg);
+  const u = (n) => gl.getUniformLocation(writeProg, n);
+  gl.activeTexture(gl.TEXTURE0 + UNIT_SRC);  gl.bindTexture(gl.TEXTURE_2D, srcTex);
+  gl.uniform1i(u('uSrc'), UNIT_SRC);
+  gl.activeTexture(gl.TEXTURE0 + UNIT_PREV); gl.bindTexture(gl.TEXTURE_2D, prevTex || srcTex);
+  gl.uniform1i(u('uPrev'), UNIT_PREV);
+  gl.uniform2f(u('uOut'), OUT_W, OUT_H);
+  gl.uniform2f(u('uSrcSize'), srcW || 1, srcH || 1);
+  gl.uniform1f(u('uAxis'), vertical ? 0 : 1);
+  gl.uniform1f(u('uWriteAt'), writeAt);
+  gl.uniform1f(u('uHeadAt'), P.headPosition ?? 0);
+  gl.uniform1f(u('uHeadWidth'), wpx);
+  gl.uniform1f(u('uHeadAngle'), P.headAngle || 0);
+  gl.uniform1f(u('uSoftness'), P.headSoftness || 0);
+  gl.uniform2f(u('uBedPos'), P.bedX || 0, P.bedY || 0);
+  gl.uniform1f(u('uBedRot'), (P.bedRotate || 0) * Math.PI / 180);
+  gl.uniform1f(u('uBedScale'), P.bedScale ?? 1);
+  gl.uniform1f(u('uRead'), Math.max(0, (PARAMS.read?.values || []).indexOf(P.read ?? 'passthrough')));
+  gl.uniform1f(u('uWriteMode'), Math.max(0, (PARAMS.writeMode?.values || []).indexOf(P.writeMode ?? 'direct')));
+  gl.uniform1f(u('uGain'), P.gain ?? 1);
+  gl.uniform1f(u('uBias'), P.bias || 0);
+  gl.uniform1f(u('uThreshold'), P.threshold || 0);
+  gl.uniform1f(u('uInvert'), P.invert ? 1 : 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+// ---- the bed panel: you always see where it is reading -------------------
+function drawBed(P) {
+  const w = bedC.width, h = bedC.height;
+  bed2d.fillStyle = '#000'; bed2d.fillRect(0, 0, w, h);
+  if (srcEl && (isVideo ? vid.videoWidth : 1)) {
+    bed2d.save();
+    bed2d.translate(w / 2 + (P.bedX || 0) * (w / (srcW || w)), h / 2 + (P.bedY || 0) * (h / (srcH || h)));
+    bed2d.rotate((P.bedRotate || 0) * Math.PI / 180);
+    bed2d.scale(P.bedScale ?? 1, P.bedScale ?? 1);
+    try { bed2d.drawImage(isVideo ? vid : srcEl, -w / 2, -h / 2, w, h); } catch (e) {}
+    bed2d.restore();
+  }
+  const vertical = (P.axis || 'vertical') === 'vertical';
+  const at = (P.headPosition ?? 0);
+  bed2d.strokeStyle = '#4ade9b'; bed2d.lineWidth = 2;
+  bed2d.shadowColor = '#4ade9b'; bed2d.shadowBlur = 10;
+  bed2d.beginPath();
+  if (vertical) { bed2d.moveTo(at * w, 0); bed2d.lineTo(at * w, h); }
+  else          { bed2d.moveTo(0, at * h); bed2d.lineTo(w, at * h); }
+  bed2d.stroke(); bed2d.shadowBlur = 0;
+}
+
+// ---- the loop ------------------------------------------------------------
+function tick(now) {
+  rafId = requestAnimationFrame(tick);
+  const P = effective();
+  uploadSource();
+  drawBed(P);
+  if (recording) {
+    const dt = lastWall ? Math.min(0.1, (now - lastWall) / 1000) : 0;
+    lastWall = now;
+    scanTime += dt;
+    // The output transport advances on its OWN rate. Equal to the sweep gives
+    // the picture back; every interesting result is a mismatch.
+    const span = ((P.axis || 'vertical') === 'vertical') ? OUT_W : OUT_H;
+    writeAt += (P.advance ?? 1) * (dt * 60) / span;
+    if (writeAt >= 1) writeAt -= 1;      // wrap — a tape that loops is honest
+    if (writeAt < 0)  writeAt += 1;
+    writeStrip(P);
+    blit();
+    if (duration && scanTime >= duration) setRecording(false, 'reached the spec duration');
+    metaEl.textContent =
+      `scanTime ${scanTime.toFixed(2)}s / ${duration}s · write ${(writeAt * 100).toFixed(1)}% · ` +
+      `head ${(P.headPosition ?? 0).toFixed(3)} · bedX ${(P.bedX || 0).toFixed(0)} · read ${P.read}`;
+  } else { lastWall = 0; }
+}
+function setRecording(on, why) {
+  recording = on;
+  $('#rec').textContent = on ? 'pause' : 'record';
+  $('#rec').classList.toggle('on', on);
+  const P = effective();
+  if (isVideo) {
+    const r = P.sourceRate ?? 1;
+    if (on && r !== 0) { vid.playbackRate = Math.max(0.0625, Math.min(16, Math.abs(r))); vid.play().catch(() => {}); }
+    else vid.pause();
+  }
+  say(why || (on ? 'recording' : 'paused'));
+}
+
+// ---- controls ------------------------------------------------------------
+function buildControls() {
+  const host = $('#groups'); host.innerHTML = '';
+  const groups = {};
+  for (const [k, s] of Object.entries(PARAMS)) (groups[s.group || 'other'] ||= []).push([k, s]);
+  for (const [g, entries] of Object.entries(groups)) {
+    const card = document.createElement('div'); card.className = 'card';
+    const h = document.createElement('h2'); h.textContent = g; card.appendChild(h);
+    for (const [k, s] of entries) {
+      const row = document.createElement('div'); row.className = 'row';
+      const lab = document.createElement('label'); lab.textContent = k; lab.title = s.says || '';
+      row.appendChild(lab);
+      if (s.type === 'enum') {
+        const sel = document.createElement('select');
+        for (const v of s.values) { const o = document.createElement('option'); o.value = o.textContent = v; sel.appendChild(o); }
+        sel.value = params[k]; sel.onchange = () => { params[k] = sel.value; };
+        row.style.gridTemplateColumns = '1fr'; row.appendChild(sel); lab.style.gridColumn = '1';
+      } else if (s.type === 'bool') {
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!params[k];
+        cb.onchange = () => { params[k] = cb.checked; };
+        row.appendChild(cb);
+      } else {
+        const inp = document.createElement('input'); inp.type = 'range';
+        inp.min = s.min; inp.max = s.max; inp.step = (s.max - s.min) / 200;
+        inp.value = params[k];
+        const val = document.createElement('span'); val.className = 'val'; val.textContent = (+params[k]).toFixed(2);
+        inp.oninput = () => { params[k] = +inp.value; val.textContent = (+inp.value).toFixed(2); };
+        const wrap = document.createElement('div'); wrap.appendChild(inp);
+        row.innerHTML = ''; row.appendChild(lab); row.appendChild(val);
+        card.appendChild(row); card.appendChild(wrap);
+        continue;
+      }
+      card.appendChild(row);
+    }
+    host.appendChild(card);
+  }
+}
+
+async function useSource(rel) {
+  errEl.textContent = '';
+  if (!rel) return;
+  isVideo = /\.(mp4|mov|webm|m4v)$/i.test(rel);
+  if (isVideo) {
+    vid.src = `/media/${encodeURIComponent(rel)}`;
+    await new Promise((r) => { vid.onloadeddata = r; vid.onerror = () => { fail(`could not load ${rel}`); r(); }; });
+    srcEl = vid;
+  } else {
+    const im = new Image(); im.src = `/media/${encodeURIComponent(rel)}`;
+    await new Promise((r) => { im.onload = r; im.onerror = () => { fail(`could not load ${rel}`); r(); }; });
+    srcEl = im; isVideo = false;
+  }
+  bedC.width = 640; bedC.height = 360;
+  clearTape();
+  say(`loaded ${rel}`);
+}
+
+const DEFAULT_SPEC = `{
+  "scan":   { "duration": "20s" },
+  "source": { "clip": "", "rate": 1 },
+  "bed":    { "x": { "ramp": [0, -300], "ease": "smooth" }, "rate": 1 },
+  "head":   { "position": { "ramp": [0, 1] }, "width": 6, "rate": 1 },
+  "response": { "read": "passthrough", "gain": 1 },
+  "write":  { "mode": "direct", "advance": 1 }
+}`;
+
+async function boot() {
+  try {
+    const r = await (await fetch('/api/scanner/params')).json();
+    PARAMS = r.params; PRESETS = r.presets;
+    for (const [k, s] of Object.entries(PARAMS)) params[k] = s.default;
+    buildControls();
+
+    const w = await (await fetch('/api/scanner/shader?pass=write')).json();
+    if (!w.ok) throw new Error(w.error || 'no write shader');
+    writeProg = build(w.vertex, w.fragment);
+
+    const s = await (await fetch('/api/effects/sources')).json();
+    const sel = $('#source');
+    for (const f of s.sources || []) { const o = document.createElement('option'); o.value = o.textContent = f; sel.appendChild(o); }
+    sel.onchange = () => useSource(sel.value);
+
+    const ps = $('#preset');
+    for (const n of Object.keys(PRESETS)) { const o = document.createElement('option'); o.value = o.textContent = n; ps.appendChild(o); }
+    ps.onchange = () => { Object.assign(params, PRESETS[ps.value] || {}); buildControls(); say(`preset ${ps.value}`); };
+
+    $('#spec').value = DEFAULT_SPEC;
+    $('#rec').onclick = () => setRecording(!recording);
+    $('#clear').onclick = () => { clearTape(); say('tape cleared'); };
+    $('#save').onclick = () => {
+      blit();
+      const a = document.createElement('a');
+      a.download = `scan-${Date.now()}.png`; a.href = tapeC.toDataURL('image/png'); a.click();
+      say('recording saved');
+    };
+    $('#compile').onclick = async () => {
+      errEl.textContent = '';
+      let spec;
+      try { spec = JSON.parse($('#spec').value); }
+      catch (e) { return fail(`spec is not valid JSON: ${e.message}`); }
+      const res = await (await fetch('/api/scanner/compile', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(spec),
+      })).json();
+      if (!res.ok) return fail(res.error || 'compile failed');
+      duration = res.duration; tracks = res.tracks || {};
+      Object.assign(params, res.constants || {});
+      buildControls();
+      const lanes = Object.keys(tracks);
+      $('#specnote').textContent =
+        `compiled — ${lanes.length} lane${lanes.length === 1 ? '' : 's'}` +
+        (lanes.length ? ` (${lanes.join(', ')})` : '') + `, ${duration}s`;
+      if (res.problems?.length) fail(res.problems.join(' · '));
+      if (spec.source?.clip) { $('#source').value = spec.source.clip; await useSource(spec.source.clip); }
+      if (spec.source?.rate !== undefined) params.sourceRate = spec.source.rate;
+      clearTape();
+    };
+    ensureTape(); clearTape();
+    rafId = requestAnimationFrame(tick);
+    say('ready — pick a source, then record');
+  } catch (e) { fail(`could not start: ${e.message}`); }
+}
+
+// The same handles the effects app exposes, so an agent drives this the same way.
+window.scanner = {
+  params, effective, tracks: () => tracks,
+  recording: () => recording,
+  set: (p) => { Object.assign(params, p); buildControls(); },
+  record: (on) => setRecording(on),
+  clear: () => clearTape(),
+  writeAt: () => writeAt,
+  scanTime: () => scanTime,
+};
+boot();
+</script>
+</body>
+</html>
