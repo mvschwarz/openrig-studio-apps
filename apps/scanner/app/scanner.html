@@ -61,6 +61,12 @@
       background:var(--panel2); color:var(--ink); border:1px solid var(--line); border-radius:3px; padding:8px; resize:vertical; }
     .meta { font-family:var(--mono); font-size:10.5px; color:var(--faint); font-variant-numeric:tabular-nums; }
     .hint { font-size:11.5px; color:var(--faint); line-height:1.45; }
+    /* Where files actually go. Always visible, selectable, wrapping — a path you
+       cannot copy is a path you have to retype. */
+    .paths { font-family:var(--mono); font-size:10.5px; color:var(--faint);
+             user-select:all; word-break:break-all; line-height:1.5; }
+    .paths b { color:var(--dim); font-weight:500; }
+    .clipwrap { display:flex; flex-direction:column; gap:4px; }
   </style>
 </head>
 <body>
@@ -79,8 +85,13 @@
     </div>
     <div class="status" id="status">ready</div>
     <div class="err" id="error"></div>
+    <div class="paths" id="paths"></div>
     <div class="chain" id="chain"></div>
-    <video id="playback" hidden playsinline style="width:100%;border:1px solid var(--accent);border-radius:4px;display:block"></video>
+    <div class="clipwrap" id="clipwrap" hidden>
+      <span class="cap" id="clipcap">Clip — produced by this run</span>
+      <video id="playback" playsinline controls loop
+             style="width:100%;border:1px solid var(--accent);border-radius:4px;display:block;background:#000"></video>
+    </div>
     <div class="transport" id="playbar" hidden>
       <button id="play" class="run">❚❚ pause</button>
       <button id="saveclip" hidden>save clip to media</button>
@@ -124,7 +135,7 @@ if (!gl) fail('this browser has no WebGL2 — the recording cannot be drawn');
 
 const UNIT_SRC = 0, UNIT_PREV = 1, UNIT_TAPE = 2;
 
-let PARAMS = {}, PRESETS = {};
+let PARAMS = {}, PRESETS = {}, mediaRoot = null, specsDir = null;
 let vid = document.createElement('video');
 vid.muted = true; vid.loop = true; vid.playsInline = true; vid.crossOrigin = 'anonymous';
 let srcEl = null, isVideo = false, srcTex = null, srcW = 0, srcH = 0, lastStamp = NaN;
@@ -504,7 +515,7 @@ function tick(now) {
   if (duration && scanTime >= duration) setRecording(false, 'reached the spec duration');
 }
 function setRecording(on, why) {
-  if (on && !recording) { $('#playback').hidden = true; $('#playback').pause(); startRecorder(); }
+  if (on && !recording) { $('#clipwrap').hidden = true; $('#playback').pause(); startRecorder(); }
   if (!on && recording) stopRecorder();
   recording = on;
   $('#rec').textContent = on ? '❚❚ pause' : '▶ run';
@@ -546,11 +557,18 @@ function startRecorder() {
       if (recUrl) URL.revokeObjectURL(recUrl);
       recUrl = URL.createObjectURL(recBlob);
       const v = $('#playback');
-      v.src = recUrl; v.loop = true; v.hidden = false;
+      v.src = recUrl; v.loop = true;
+      $('#clipwrap').hidden = false;
       $('#playbar').hidden = false;
       $('#saveclip').hidden = false;
-      say(`recorded ${(recBlob.size/1e6).toFixed(1)}MB — press play`);
-      v.play().catch(()=>{});
+      // Native controls, and its own duration reported — so "did this work" is
+      // answerable by looking rather than by trusting that a button appeared.
+      v.onloadedmetadata = () => {
+        $('#clipcap').textContent =
+          `Clip — ${v.duration.toFixed(1)}s · ${(recBlob.size/1e6).toFixed(1)}MB · press play below or use the controls`;
+      };
+      say(`clip ready — ${(recBlob.size/1e6).toFixed(1)}MB. Play it below, or save it into the media root.`);
+      v.play().catch(()=>{ say('clip ready — press play (the browser blocked autoplay)'); });
     };
     rec.start(1000);
   } catch (e) { say(`could not start the recorder: ${e.message}`); }
@@ -710,6 +728,13 @@ async function loadSpec(text) {
   if (clip) { $('#source').value = clip; await useSource(clip); }
 }
 
+// Where everything lives, in one place, selectable.
+function pathLines() {
+  if (!mediaRoot) return '<b>no media root is bound</b> — sources, specs and clips have nowhere to live';
+  return `<b>media root</b> ${mediaRoot}<br><b>your specs</b> ${specsDir}<br>` +
+         `<b>saved clips</b> ${mediaRoot} <span style="opacity:.7">(they appear in the source picker)</span>`;
+}
+
 async function refreshSpecList() {
   try {
     const r = await (await fetch('/api/scanner/specs')).json();
@@ -766,6 +791,8 @@ async function boot() {
   try {
     const r = await (await fetch('/api/scanner/params')).json();
     PARAMS = r.params; PRESETS = r.presets;
+    mediaRoot = r.mediaRoot; specsDir = r.specsDir;
+    $('#paths').innerHTML = pathLines();
     const w = await (await fetch('/api/scanner/shader?pass=write')).json();
     if (!w.ok) throw new Error(w.error||'no write shader');
     writeProg = build(w.vertex, w.fragment);
@@ -805,7 +832,9 @@ async function boot() {
       const fd = new FormData(); fd.append('name', name); fd.append('clip', recBlob, 'clip.webm');
       const r = await (await fetch('/api/scanner/clip', { method:'POST', body: fd })).json();
       if (!r.ok) return fail(r.error || 'could not save the clip');
-      say(`saved ${r.name} — it is now in the source picker`);
+      say(`saved — it is now in the source picker`);
+      $('#paths').innerHTML =
+        `<b>clip saved to</b> ${r.path || (mediaRoot + '/' + r.name)}<br>` + pathLines();
       const sel = $('#source'); const o=document.createElement('option');
       o.value=o.textContent=r.name; sel.appendChild(o);
     };

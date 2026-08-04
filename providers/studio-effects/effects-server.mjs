@@ -281,7 +281,13 @@ http.createServer(async (req, res) => {
     // ---- SCANNER -------------------------------------------------------
     // The knob surface, so an agent drives from this rather than from source.
     if (url.pathname === "/api/scanner/params") {
-      return json(res, 200, { ok: true, params: SCANNER_PARAMS, presets: SCANNER_PRESETS });
+      // THE MEDIA ROOT, SHOWN. Every file this app reads or writes lives under
+      // it, and it is a path nobody could guess. An agent finds a file in one
+      // command; a person hunts. Printing it costs nothing and is the difference
+      // between "saved" and "saved WHERE".
+      return json(res, 200, { ok: true, params: SCANNER_PARAMS, presets: SCANNER_PRESETS,
+                              mediaRoot: MEDIA || null,
+                              specsDir: MEDIA ? path.join(MEDIA, "specs") : null });
     }
     // SPEC FILES ON DISK. A spec is the artifact of this tool, so it belongs in
     // the media root beside the footage rather than in a text box somebody has to
@@ -313,7 +319,8 @@ http.createServer(async (req, res) => {
       const boundary = text.slice(0, text.indexOf("\r\n"));
       const end = text.indexOf(boundary, bodyStart) - 2;
       fs.writeFileSync(full, buf.subarray(bodyStart, end > bodyStart ? end : buf.length));
-      return json(res, 200, { ok: true, name: path.basename(full), bytes: fs.statSync(full).size });
+      return json(res, 200, { ok: true, name: path.basename(full), path: full,
+                              bytes: fs.statSync(full).size });
     }
 
     if (url.pathname === "/api/scanner/specs") {
