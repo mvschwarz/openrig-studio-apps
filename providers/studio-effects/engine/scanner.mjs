@@ -177,8 +177,8 @@ export const SCANNER_PARAMS = {
 
   writeMode:   { type: "enum", values: WRITES, default: "direct", group: "output",
                  says: "what lands on the tape — the strip as read, or the response as greyscale" },
-  advance:     { type: "float", min: -4, max: 4, default: 1, group: "output",
-                 says: "output columns per head step. Equal to the sweep and you get the picture back; everything interesting is a mismatch" },
+  advance:     { type: "float", min: -4, max: 4, default: 0, group: "output",
+                 says: "output columns per head step. 0 FITS the recording to the scan duration, which is what you want unless you are deliberately mismatching; 1 is one column per step, and every other value is a deliberate disagreement with the sweep" },
   persistence: { type: "float", min: 0.9, max: 1, default: 1, group: "output",
                  says: "1 means the tape retains, which is what a tape does; below 1 the recording fades as it is laid down" },
   sourceRate:  { type: "float", min: -4, max: 4, default: 1, group: "output",
@@ -186,10 +186,10 @@ export const SCANNER_PARAMS = {
 };
 
 export const SCANNER_PRESETS = {
-  "flatbed":      { axis: "vertical", headPosition: 0, advance: 1, sourceRate: 0, read: "passthrough", headWidth: 6 },
-  "slit-scan":    { axis: "vertical", headPosition: 0.5, advance: 1, sourceRate: 1, read: "passthrough", headWidth: 4 },
-  "motion tape":  { axis: "vertical", headPosition: 0.5, advance: 1, sourceRate: 1, read: "motion", writeMode: "intensity", gain: 2.2, headWidth: 4 },
-  "drift":        { axis: "vertical", headPosition: 0.5, advance: 1, sourceRate: 1, bedRate: 1.07, headRate: 1, read: "passthrough" },
+  "flatbed":      { axis: "vertical", headPosition: 0, advance: 0, sourceRate: 0, read: "passthrough", headWidth: 6 },
+  "slit-scan":    { axis: "vertical", headPosition: 0.5, advance: 0, sourceRate: 1, read: "passthrough", headWidth: 4 },
+  "motion tape":  { axis: "vertical", headPosition: 0.5, advance: 0, sourceRate: 1, read: "motion", writeMode: "intensity", gain: 2.2, headWidth: 4 },
+  "drift":        { axis: "vertical", headPosition: 0.5, advance: 0, sourceRate: 1, bedRate: 1.07, headRate: 1, read: "passthrough" },
 };
 
 // ---- THE SPEC ------------------------------------------------------------

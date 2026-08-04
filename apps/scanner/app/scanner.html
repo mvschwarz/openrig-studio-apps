@@ -305,7 +305,11 @@ function drawBed(P) {
     bed2d.translate(w / 2 + (P.bedX || 0) * (w / (srcW || w)), h / 2 + (P.bedY || 0) * (h / (srcH || h)));
     bed2d.rotate((P.bedRotate || 0) * Math.PI / 180);
     bed2d.scale(P.bedScale ?? 1, P.bedScale ?? 1);
-    try { bed2d.drawImage(isVideo ? vid : srcEl, -w / 2, -h / 2, w, h); } catch (e) {}
+    // Not swallowed. A draw that fails silently here is the difference between
+    // "the source is black" and "the source never arrived", and only one of
+    // those is worth debugging.
+    try { bed2d.drawImage(isVideo ? vid : srcEl, -w / 2, -h / 2, w, h); }
+    catch (e) { fail(`the bed could not draw the source: ${e.message}`); }
     bed2d.restore();
   }
   const vertical = (P.axis || 'vertical') === 'vertical';
@@ -331,7 +335,12 @@ function tick(now) {
     // The output transport advances on its OWN rate. Equal to the sweep gives
     // the picture back; every interesting result is a mismatch.
     const span = ((P.axis || 'vertical') === 'vertical') ? OUT_W : OUT_H;
-    writeAt += (P.advance ?? 1) * (dt * 60) / span;
+    // advance 0 means FIT: lay the whole tape across the scan duration. Without
+    // it the honest default of "one column per step" leaves the tape part-empty
+    // whenever the sweep is shorter than the buffer is wide — 12s at 60fps is
+    // 720 columns into a 1280-wide tape, which reads as the app not working.
+    const adv = (P.advance === 0) ? (duration > 0 ? span / (duration * 60) : 1) : (P.advance ?? 1);
+    writeAt += adv * (dt * 60) / span;
     if (writeAt >= 1) writeAt -= 1;      // wrap — a tape that loops is honest
     if (writeAt < 0)  writeAt += 1;
     writeStrip(P);
@@ -398,8 +407,27 @@ async function useSource(rel) {
   if (!rel) return;
   isVideo = /\.(mp4|mov|webm|m4v)$/i.test(rel);
   if (isVideo) {
+    // AN AWAIT THAT CAN NEVER RESOLVE IS A BLACK SCREEN. Assigning the same src
+    // twice does not re-fire loadeddata, so waiting on that event alone hangs
+    // forever the second time a clip is selected — and a hung load looks exactly
+    // like a broken renderer. Resolve on readiness OR the event OR a deadline;
+    // never on the event alone.
     vid.src = `/media/${encodeURIComponent(rel)}`;
-    await new Promise((r) => { vid.onloadeddata = r; vid.onerror = () => { fail(`could not load ${rel}`); r(); }; });
+    vid.load();
+    await new Promise((r) => {
+      let done = false;
+      const finish = () => { if (!done) { done = true; r(); } };
+      if (vid.readyState >= 2) return finish();
+      vid.addEventListener('loadeddata', finish, { once: true });
+      vid.addEventListener('error', () => { fail(`could not load ${rel}`); finish(); }, { once: true });
+      setTimeout(finish, 5000);
+    });
+    // A FROZEN SOURCE STILL NEEDS ONE DECODED FRAME. sourceRate 0 pauses the
+    // video, and a video that never played has nothing to upload — which is a
+    // black bed that reads as the app being broken rather than as a still.
+    if (vid.readyState < 2) {
+      try { await vid.play(); vid.pause(); } catch (e) { /* pause is enough */ }
+    }
     srcEl = vid;
   } else {
     const im = new Image(); im.src = `/media/${encodeURIComponent(rel)}`;
@@ -470,10 +498,51 @@ async function boot() {
       if (spec.source?.rate !== undefined) params.sourceRate = spec.source.rate;
       clearTape();
     };
+    // A SCANNER SHOULD SCAN BY DEFAULT. headPosition's default of 0 with no lane
+    // driving it parks the head on the far-left edge, so the first recording
+    // anyone makes is eight seconds of the leftmost column — which looks exactly
+    // like the app not working. The default is now a sweep, because that is what
+    // the word means; hold it still deliberately and you get slit-scan.
+    duration = 12;
+    tracks.headPosition = [{ t: 0, v: 0, ease: 'linear' }, { t: duration, v: 1, ease: 'linear' }];
     ensureTape(); clearTape();
     rafId = requestAnimationFrame(tick);
-    say('ready — pick a source, then record');
+    pollDrive();
+    say('ready — pick a source, then record. The head sweeps by default.');
   } catch (e) { fail(`could not start: ${e.message}`); }
+}
+
+// ---- the reverse channel -------------------------------------------------
+// Shares the effects drive endpoint rather than minting a second one, and acts
+// ONLY on ops carrying a `scanner` key — so an op aimed at one surface is inert
+// on the other instead of half-applying.
+let driveSeen = -1, driveBoot = null;
+async function applyScannerDrive(op) {
+  if (op.spec) {
+    $('#spec').value = typeof op.spec === 'string' ? op.spec : JSON.stringify(op.spec, null, 2);
+    $('#compile').click();
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+  if (op.source !== undefined) { $('#source').value = op.source || ''; await useSource(op.source || ''); }
+  if (op.preset) { Object.assign(params, PRESETS[op.preset] || {}); buildControls(); }
+  if (op.params) { Object.assign(params, op.params); buildControls(); }
+  if (op.clear) clearTape();
+  if (op.record !== undefined) setRecording(!!op.record);
+  if (op.say) say(op.say);
+}
+async function pollDrive() {
+  for (;;) {
+    try {
+      const r = await (await fetch('/api/effects/drive')).json();
+      if (driveBoot === null) driveBoot = r.boot;
+      else if (r.boot && r.boot !== driveBoot) { location.reload(); return; }
+      if (r.op && r.op.scanner && r.gen !== driveSeen) {
+        driveSeen = r.gen;
+        await applyScannerDrive(r.op.scanner);
+      }
+    } catch (e) { /* the provider restarting is not an error worth shouting about */ }
+    await new Promise((res) => setTimeout(res, 350));
+  }
 }
 
 // The same handles the effects app exposes, so an agent drives this the same way.
