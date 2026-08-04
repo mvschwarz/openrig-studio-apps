@@ -34,6 +34,11 @@
     canvas { display:block; width:100%; height:auto; }
     .arrow { align-self:center; color:var(--faint); font-family:var(--mono); font-size:15px; line-height:1; }
     .transport { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    /* At the top, because it is the control that starts everything and at the
+       bottom it fell off the screen. */
+    .transport.top { position:sticky; top:0; z-index:5; background:var(--bg); padding:2px 0 6px; }
+    button.run { color:var(--accent); border-color:var(--accent); font-weight:600; padding:7px 16px; }
+    button.run.on { color:var(--bg); background:var(--accent); }
     button, select { font-family:var(--mono); font-size:12px; padding:6px 10px; border-radius:3px;
       border:1px solid var(--line); background:var(--panel); color:var(--dim); cursor:pointer; }
     button:hover { border-color:var(--accent); color:var(--ink); }
@@ -64,16 +69,17 @@
       <div class="eyebrow">Studio</div>
       <h1>Scanner</h1>
     </div>
-    <div class="chain" id="chain"></div>
-    <div class="transport">
-      <button id="rec">record</button>
+    <div class="transport top">
+      <button id="rec" class="run">▶ run</button>
       <button id="clear">clear</button>
       <button id="save">save final</button>
+      <select id="specpick"><option value="">— saved spec —</option></select>
+      <select id="preset"><option value="">— built-in chain —</option></select>
       <select id="source"><option value="">— source —</option></select>
-      <select id="preset"><option value="">— chain preset —</option></select>
     </div>
     <div class="status" id="status">ready</div>
     <div class="err" id="error"></div>
+    <div class="chain" id="chain"></div>
     <div class="meta" id="meta"></div>
   </main>
 
@@ -81,7 +87,10 @@
     <div class="card">
       <h2>Chain spec</h2>
       <textarea id="spec" spellcheck="false"></textarea>
-      <div class="transport"><button id="compile">compile + load</button></div>
+      <div class="transport">
+        <button id="compile">compile + load</button>
+        <button id="specsave">save as…</button>
+      </div>
       <div class="status" id="specnote">the spec is the complete surface</div>
     </div>
     <div class="card">
@@ -381,7 +390,7 @@ function tick(now) {
 }
 function setRecording(on, why) {
   recording = on;
-  $('#rec').textContent = on ? 'pause' : 'record';
+  $('#rec').textContent = on ? '❚❚ pause' : '▶ run';
   $('#rec').classList.toggle('on', on);
   const P = stages[0] ? effectiveFor(stages[0]) : {};
   if (isVideo) {
@@ -540,9 +549,24 @@ async function loadSpec(text) {
   if (clip) { $('#source').value = clip; await useSource(clip); }
 }
 
+async function refreshSpecList() {
+  try {
+    const r = await (await fetch('/api/scanner/specs')).json();
+    const sel = $('#specpick');
+    sel.innerHTML = '<option value="">— saved spec —</option>';
+    for (const n of r.specs || []) { const o=document.createElement('option'); o.value=o.textContent=n; sel.appendChild(o); }
+  } catch (e) {}
+}
+
 // ---- drive channel -------------------------------------------------------
 let driveSeen=-1, driveBoot=null;
 async function applyDrive(op) {
+  if (op.specFile) {
+    const r = await (await fetch(`/api/scanner/specs?name=${encodeURIComponent(op.specFile)}`)).json();
+    if (r.ok) { $('#spec').value = JSON.stringify(r.spec,null,2); await refreshSpecList();
+                $('#specpick').value = r.name; await loadSpec(r.spec); }
+    else fail(r.error || `could not load ${op.specFile}`);
+  }
   if (op.spec) { $('#spec').value = typeof op.spec==='string'?op.spec:JSON.stringify(op.spec,null,2);
     await loadSpec($('#spec').value); }
   if (op.source !== undefined) { $('#source').value = op.source||''; await useSource(op.source||''); }
@@ -593,12 +617,31 @@ async function boot() {
     $('#compile').onclick = () => loadSpec($('#spec').value);
     $('#showall').onclick = () => { showAll = !showAll; buildControls();
       $('#showall').textContent = showAll ? 'show only what matters' : 'show every control'; };
-    $('#rec').onclick = () => setRecording(!recording);
+    $('#rec').onclick = () => { if (!recording) clearAll(); setRecording(!recording); };
     $('#clear').onclick = () => { clearAll(); say('tapes cleared'); };
     $('#save').onclick = () => { const last = stages[stages.length-1];
       if (!last) return; const a=document.createElement('a');
       a.download=`scan-${Date.now()}.png`; a.href=last.canvas.toDataURL('image/png'); a.click(); say('final saved'); };
 
+    await refreshSpecList();
+    $('#specpick').onchange = async () => {
+      const n = $('#specpick').value; if (!n) return;
+      const r = await (await fetch(`/api/scanner/specs?name=${encodeURIComponent(n)}`)).json();
+      if (!r.ok) return fail(r.error || `could not load ${n}`);
+      $('#spec').value = JSON.stringify(r.spec, null, 2);
+      await loadSpec(r.spec);
+      say(`loaded ${n} — press run`);
+    };
+    $('#specsave').onclick = async () => {
+      const n = prompt('save this spec as:', 'my-scan');
+      if (!n) return;
+      let spec; try { spec = JSON.parse($('#spec').value); }
+      catch (e) { return fail(`spec is not valid JSON: ${e.message}`); }
+      const r = await (await fetch('/api/scanner/specs', { method:'POST',
+        headers:{'content-type':'application/json'}, body:JSON.stringify({ name:n, spec }) })).json();
+      if (!r.ok) return fail(r.error || 'could not save');
+      await refreshSpecList(); $('#specpick').value = r.name; say(`saved ${r.name}`);
+    };
     await loadSpec(DEFAULT_SPEC);
     rafId = requestAnimationFrame(tick);
     pollDrive();

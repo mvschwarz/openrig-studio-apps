@@ -361,6 +361,76 @@ export function compileLane(value, duration) {
     return out;
   }
   // from-audio and from-video are resolved by the server, which has the clip.
+  // HAND — motion with a person in it.
+  //
+  // A ramp is machine motion: constant velocity, no correction, no hesitation.
+  // The original scanner's whole character came from somebody DRAGGING a photo
+  // on the glass, and a hand does none of those things. Rather than imitate the
+  // LOOK of that, reproduce the MECHANISM, which is well characterised:
+  //
+  //   MINIMUM JERK. A reaching movement between two points follows
+  //   10u^3 - 15u^4 + 6u^5 -- not a line, and not a smoothstep. It accelerates
+  //   slowly, peaks mid-flight and settles gently. This is the single biggest
+  //   difference between hand motion and an eased ramp.
+  //   OVERSHOOT AND CORRECTION. A fast reach lands past its target and comes
+  //   back. That small reversal is most of what reads as alive.
+  //   HESITATION. A hand stops -- not rhythmically, at irregular via-points.
+  //   TREMOR. Physiological tremor sits around 8-12Hz at tiny amplitude and
+  //   never switches off, so even a held hand is never quite still.
+  //
+  // Sampled densely to keyframes like every other generator, so there is still
+  // exactly ONE evaluation path and the result stays inspectable and editable.
+  if (value.hand) {
+    const h = value.hand;
+    const [lo, hi] = h.range || [0, 1];
+    const pace       = Math.max(0.05, h.pace ?? 0.55);
+    const tremor     = h.tremor ?? 0.22;
+    const hesitation = Math.min(0.9, Math.max(0, h.hesitation ?? 0.35));
+    const overshoot  = h.overshoot ?? 0.28;
+    const hz         = Math.min(60, Math.max(10, h.hz ?? 30));
+    // Deterministic, because a look you cannot reproduce is not a look.
+    let s = ((h.seed ?? 1) >>> 0) || 1;
+    const rnd = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+    const minJerk = (u) => u * u * u * (10 - 15 * u + 6 * u * u);
+
+    // Via-points first: where the hand goes, how long the reach takes, and where
+    // it pauses. Irregular by construction -- a regular interval is a metronome,
+    // which is the thing being avoided.
+    const legs = [];
+    let t = 0, from = lo + rnd() * (hi - lo);
+    while (t < duration) {
+      const travel = (0.45 + rnd() * 1.1) / pace;
+      let to = lo + rnd() * (hi - lo);
+      if (Math.abs(to - from) < (hi - lo) * 0.12) to = from + (rnd() < 0.5 ? -1 : 1) * (hi - lo) * 0.3;
+      to = Math.max(lo, Math.min(hi, to));
+      const over = rnd() < 0.55 ? (to - from) * overshoot * (0.4 + rnd()) : 0;
+      legs.push({ t0: t, t1: Math.min(duration, t + travel), from, to, over });
+      t += travel;
+      if (rnd() < hesitation) t += (0.15 + rnd() * 0.9) / pace;
+      from = to;
+    }
+
+    const out = [];
+    const step = 1 / hz;
+    const phase = rnd() * 6.283;
+    const tremHz = 8 + rnd() * 4;
+    for (let x = 0; x <= duration + 1e-9; x += step) {
+      const leg = legs.find((l) => x >= l.t0 && x <= l.t1);
+      let v;
+      if (!leg) {
+        const past = legs.filter((l) => l.t1 <= x);
+        v = past.length ? past[past.length - 1].to : (legs[0] ? legs[0].from : lo);
+      } else {
+        const u = leg.t1 > leg.t0 ? (x - leg.t0) / (leg.t1 - leg.t0) : 1;
+        const m = minJerk(Math.min(1, Math.max(0, u)));
+        v = leg.from + (leg.to - leg.from) * m + leg.over * Math.sin(Math.PI * m) * m;
+      }
+      v += Math.sin(x * tremHz * 6.283 + phase) * tremor * (hi - lo) * 0.012;
+      out.push({ t: +x.toFixed(3), v: +Math.max(lo, Math.min(hi, v)).toFixed(4), ease: "linear" });
+    }
+    return out;
+  }
+
   if (value["from-audio"] || value["from-video"]) return { derive: value };
   return null;
 }
