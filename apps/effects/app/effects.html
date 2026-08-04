@@ -642,7 +642,7 @@
     // THE OFFSCREEN TARGET for stage one. Sized to the canvas, because the two
     // stages render at the same resolution — analog caps the internal width and
     // the second stage inherits that rather than fighting it.
-    let stageTex = null, stageFbo = null, stageW = 0, stageH = 0;
+    let stageTex = null, stageFbo = null, stageW = 0, stageH = 0, tileOutTex = null;
     function ensureStage() {
       if (!stageFbo) stageFbo = gl.createFramebuffer();
       if (!stageTex) stageTex = gl.createTexture();
@@ -745,7 +745,35 @@
       // being rendered rather than the state when the request was made.
       const gen = paramGen;
       if (FAMILY && FAMILY.engine === 'canvas2d') {
-        try { drawTiles(); errEl.textContent = ''; } catch (e) { fail(e.message); }
+        try {
+          drawTiles();
+          // TILE FEEDING THE GPU CHAIN. Tile draws on a 2D canvas, so until now it
+          // could not be stacked — the second effect had nothing to read. A canvas
+          // IS a valid texture source, so its output uploads exactly like a video
+          // frame and then runs through the SAME stage renderer the GPU families
+          // share. No new shader, no second code path, and the combination that
+          // wanted this most — a halftone that is then broadcast through a bad
+          // cable — becomes available for free.
+          const twoStage = !!(stackFamily && stackParams && programs[stackFamily]);
+          if (twoStage) {
+            canvas.width = c2d.width; canvas.height = c2d.height;
+            if (!tileOutTex) tileOutTex = gl.createTexture();
+            gl.activeTexture(gl.TEXTURE0 + UNIT_STAGE);
+            gl.bindTexture(gl.TEXTURE_2D, tileOutTex);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c2d);
+            await drawStage(stackFamily, stackParams, tileOutTex, UNIT_STAGE, null);
+          }
+          // WHICHEVER CANVAS HOLDS THE RESULT IS THE ONE ON SCREEN. Stacked, the
+          // answer is the GL canvas; unstacked it is the 2D one. Getting this wrong
+          // shows both at once, which reads as one effect producing a split image.
+          canvas.hidden = !twoStage; c2d.hidden = twoStage;
+          errEl.textContent = '';
+        } catch (e) { fail(e.message); }
         return finish(gen);
       }
       if (!PROGRAM || !srcTex) { drawing = false; if (drawPending) { drawPending = false; draw(); } return; }
