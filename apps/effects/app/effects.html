@@ -343,12 +343,32 @@
     // them apart is what lets a curve animate a knob without destroying what the
     // user or the agent actually set. The sliders keep showing the authored value;
     // the renderer reads the curved one.
+    // Surfaced in the error line rather than the status line: a track that names a
+    // knob which does not exist is a MISTAKE, not news, and it should look like one.
+    // Deduplicated because this runs per frame and a repeating message reads as a
+    // stutter rather than a fault.
+    let lastNoteKey = '';
+    function curveNotes(notes, which) {
+      if (!notes || !notes.length) { if (lastNoteKey.startsWith(which)) { lastNoteKey = ''; errEl.textContent = ''; } return; }
+      const key = which + ':' + notes.join('|');
+      if (key === lastNoteKey) return;
+      lastNoteKey = key;
+      errEl.textContent = `${which} stage curve — ${notes.join('; ')}`;
+    }
+
     function effective() {
       if (!CURVES || !curveSpec || !FAMILY) return params;
       const dur = isVideo && Number.isFinite(vid.duration) ? vid.duration : 0;
       const at = isVideo ? vid.currentTime : 0;
       const r = CURVES.evalCurves(curveSpec, FAMILY, at, dur);
       lastCurve = { t: r.t, driving: Object.keys(r.patch), notes: r.notes, stack: null };
+      // A CURVE THAT DRIVES NOTHING MUST SAY SO. The engine already reports an
+      // unknown parameter in `notes` and nothing surfaced it, so a track naming a
+      // knob that does not exist looked exactly like one that worked — the picture
+      // simply sat still. Found the hard way: a demo curved `cell` on the tile
+      // family, whose parameter is `gridSize`, and the whole first stage was frozen
+      // while I reported it as animating.
+      curveNotes(r.notes, 'first');
       return { ...params, ...r.patch };
     }
 
@@ -375,6 +395,7 @@
       // Reported separately so a handle cannot claim stage two is being driven when
       // only stage one is — the two stages fail independently and must read that way.
       lastCurve = { ...(lastCurve || {}), stack: { t: r.t, driving: Object.keys(r.patch), notes: r.notes } };
+      curveNotes(r.notes, 'second');
       return { ...stackParams, ...r.patch };
     }
 
