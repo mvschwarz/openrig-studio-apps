@@ -348,8 +348,34 @@
       const dur = isVideo && Number.isFinite(vid.duration) ? vid.duration : 0;
       const at = isVideo ? vid.currentTime : 0;
       const r = CURVES.evalCurves(curveSpec, FAMILY, at, dur);
-      lastCurve = { t: r.t, driving: Object.keys(r.patch), notes: r.notes };
+      lastCurve = { t: r.t, driving: Object.keys(r.patch), notes: r.notes, stack: null };
       return { ...params, ...r.patch };
+    }
+
+    // THE SECOND STAGE GETS ITS OWN CURVE, under `stack` in the same spec, and it
+    // is evaluated against ITS OWN family — a knob named `noise` means one thing to
+    // analog and another to scan, so a single flat namespace would silently drive
+    // the wrong parameter whenever the two families shared a word.
+    //
+    // One clock, two curves: both read the same video time, so the halftone's dot
+    // size on a slow ramp and the broadcast noise on a beat stay in phase with each
+    // other by construction rather than by the author matching two timelines.
+    //
+    // This is why the curve engine emits KEYFRAMES and nothing else. A second
+    // evaluator for the second stage would be the duplicated-shader defect wearing
+    // different clothes; instead the same evaluation path runs twice with different
+    // inputs.
+    function effectiveStack() {
+      if (!stackParams) return null;
+      const sub = curveSpec && curveSpec.stack;
+      if (!CURVES || !sub || !stackFamily || !ALL[stackFamily]) return stackParams;
+      const dur = isVideo && Number.isFinite(vid.duration) ? vid.duration : 0;
+      const at = isVideo ? vid.currentTime : 0;
+      const r = CURVES.evalCurves(sub, ALL[stackFamily], at, dur);
+      // Reported separately so a handle cannot claim stage two is being driven when
+      // only stage one is — the two stages fail independently and must read that way.
+      lastCurve = { ...(lastCurve || {}), stack: { t: r.t, driving: Object.keys(r.patch), notes: r.notes } };
+      return { ...stackParams, ...r.patch };
     }
 
     // A procedural frame so the app WORKS before any media is bound. It is built
@@ -828,7 +854,7 @@
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c2d);
-            await drawStage(stackFamily, stackParams, tileOutTex, UNIT_STAGE, null);
+            await drawStage(stackFamily, effectiveStack(), tileOutTex, UNIT_STAGE, null);
           }
           // WHICHEVER CANVAS HOLDS THE RESULT IS THE ONE ON SCREEN. Stacked, the
           // answer is the GL canvas; unstacked it is the 2D one. Getting this wrong
@@ -849,7 +875,7 @@
           const twoStage = !!(stackFamily && stackParams && programs[stackFamily]);
           if (twoStage) ensureStage();
           await drawStage(familyId, P, srcTex, UNIT_SRC, twoStage ? stageFbo : null);
-          if (twoStage) await drawStage(stackFamily, stackParams, stageTex, UNIT_STAGE, null);
+          if (twoStage) await drawStage(stackFamily, effectiveStack(), stageTex, UNIT_STAGE, null);
           errEl.textContent = '';
         } catch (e) { fail(e.message); }
         return finish(gen);
