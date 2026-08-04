@@ -84,6 +84,17 @@
       </div>
 
       <div class="card">
+        <h2>Then</h2>
+        <div class="srcrow">
+          <select id="stackfam"><option value="">nothing — one effect only</option></select>
+          <select id="stackpreset" hidden></select>
+        </div>
+        <p class="note" id="stacknote">A second effect run on the output of the first. Order matters:
+          a halftone that is then broadcast through a bad cable is not the same picture as a
+          broadcast that is then halftoned.</p>
+      </div>
+
+      <div class="card">
         <h2>Looks</h2>
         <div class="presets" id="presets"></div>
         <div class="presets" style="margin-top:10px">
@@ -119,7 +130,7 @@
     // so a helper that binds without choosing its unit writes into a variable it
     // does not own. Two call sites agreeing on a bare 0 and 1 is how one of them
     // ended up on the wrong unit with nothing looking odd.
-    const UNIT_SRC = 0, UNIT_PATH = 1;
+    const UNIT_SRC = 0, UNIT_PATH = 1, UNIT_STAGE = 2;
     // A parameter as a function of time. Null until something sets one, so the
     // app is a still-image tool by default and a motion-graphics one on request.
     let curveSpec = null, lastCurve = null;
@@ -142,6 +153,11 @@
       // one, a timeline can store one, a beat track can generate one.
       curves: (spec) => { curveSpec = spec ?? null; lastCurve = null; draw(); return curveSpec; },
       curveInfo: () => lastCurve,
+      // Stack a second effect on the first. `stack('analog','vhs')` — pass no
+      // family to go back to one effect. An agent gets the same surface a person
+      // does rather than a second, weaker one.
+      stack: (fid, preset) => setStack(fid, preset),
+      stacked: () => (stackFamily ? { family: stackFamily, params: { ...stackParams } } : null),
       renderSize: () => ({ width: canvas.width, height: canvas.height, sourceWidth: srcW, sourceHeight: srcH }),
       frameHash: () => frameHash(),
       // Export handles. An agent driving this should be able to LOOK at what it
@@ -165,6 +181,17 @@
         }
         sel.value = familyId;
         sel.addEventListener('change', async () => { familyId = sel.value; await useFamily(); });
+        // The second stage offers only GPU families. Tile is canvas2d and renders
+        // through a different path entirely; offering it here would be a control
+        // that looks available and does nothing, which is the shape this tier has
+        // been punished for twice.
+        const sf = $('#stackfam');
+        for (const [id, f] of Object.entries(ALL)) {
+          if (f.engine !== 'webgl2') continue;
+          const o = document.createElement('option'); o.value = id; o.textContent = f.name; sf.appendChild(o);
+        }
+        sf.addEventListener('change', () => setStack(sf.value, ''));
+        $('#stackpreset').addEventListener('change', (e) => setStack(stackFamily, e.target.value));
         await useFamily();
         await loadSources();
         await useSource('');
@@ -531,6 +558,129 @@
     //
     // A request arriving mid-render is REMEMBERED rather than dropped, so the
     // newest intent always gets drawn eventually.
+    // STAGE TWO. Its parameters come from the PROVIDER's preset resolution, exactly
+    // like stage one's — so "vhs then dragged" means the same thing to an agent, to
+    // this surface, and to anything that renders it later. Held as resolved values
+    // rather than a preset name, because a name is a promise and values are a fact.
+    let stackFamily = '', stackParams = null;
+    async function setStack(fid, presetName) {
+      stackFamily = fid || '';
+      $('#stackfam').value = stackFamily;
+      const ps = $('#stackpreset');
+      if (!stackFamily) {
+        stackParams = null; ps.innerHTML = ''; ps.hidden = true;
+        paramGen++; draw(); say('one effect'); return;
+      }
+      ps.hidden = false;
+      const looks = Object.keys(ALL[stackFamily].presets || {});
+      const want = presetName || looks[0] || '';
+      if (ps.dataset.family !== stackFamily) {
+        ps.innerHTML = '';
+        for (const n of looks) { const o = document.createElement('option'); o.value = o.textContent = n; ps.appendChild(o); }
+        ps.dataset.family = stackFamily;
+      }
+      ps.value = want;
+      if (!programs[stackFamily]) {
+        const sh = await (await fetch(`/api/effects/shader?family=${stackFamily}`)).json();
+        if (!sh.ok) { fail(sh.error || 'no shader for the second effect'); return; }
+        programs[stackFamily] = build(sh.vertex, sh.fragment);
+      }
+      const r = await (await fetch('/api/effects/resolve', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ family: stackFamily, preset: want }),
+      })).json();
+      if (!r.ok) { fail(r.error || 'could not resolve the second effect'); return; }
+      stackParams = r.params;
+      paramGen++; draw();
+      say(`${FAMILY.name.toLowerCase()} → ${ALL[stackFamily].name.toLowerCase()}: ${want}`);
+    }
+
+    // THE OFFSCREEN TARGET for stage one. Sized to the canvas, because the two
+    // stages render at the same resolution — analog caps the internal width and
+    // the second stage inherits that rather than fighting it.
+    let stageTex = null, stageFbo = null, stageW = 0, stageH = 0;
+    function ensureStage() {
+      if (!stageFbo) stageFbo = gl.createFramebuffer();
+      if (!stageTex) stageTex = gl.createTexture();
+      if (stageW !== canvas.width || stageH !== canvas.height) {
+        stageW = canvas.width; stageH = canvas.height;
+        gl.activeTexture(gl.TEXTURE0 + UNIT_STAGE);
+        gl.bindTexture(gl.TEXTURE_2D, stageTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, stageW, stageH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, stageFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, stageTex, 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.activeTexture(gl.TEXTURE0 + UNIT_SRC);
+      }
+    }
+    // ONE RENDER PASS, for either family, reading whatever texture it is handed.
+    // Extracted so the second stage is the same code path as the first rather than
+    // a copy that can drift — the one-definition rule that the sampling geometry
+    // already follows.
+    async function drawStage(fid, P, tex, unit, fbo) {
+      const prog = programs[fid];
+      if (!prog) return;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo || null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(prog);
+      const u = (n) => gl.getUniformLocation(prog, n);
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.uniform1i(u('uSrc'), unit);
+      if (fid === 'analog') {
+        gl.uniform2f(u('uRes'), canvas.width, canvas.height);
+        gl.uniform1f(u('uCycles'), P.subcarrierCycles);
+        gl.uniform1f(u('uPhaseAlt'), P.phaseAlternation ? 1 : 0);
+        gl.uniform1f(u('uPhaseJitter'), P.phaseJitter);
+        gl.uniform1f(u('uHueError'), (P.hueError * Math.PI) / 180);
+        // THE FRAME INDEX COMES FROM THE VIDEO CLOCK, never from the render loop.
+        // Driven by rAF the crawl speed would change with the monitor's refresh
+        // rate — correct on 60Hz, visibly wrong on 120Hz.
+        gl.uniform1i(u('uFrame'), isVideo && vid.duration
+          ? Math.floor(vid.currentTime * 59.94) : frameCounter);
+        gl.uniform1f(u('uCombMix'), P.combMix);
+        const win = ANALOG.analogWindows(P, canvas.width);
+        gl.uniform1f(u('uLumaTaps'), win.lumaTaps);
+        gl.uniform1f(u('uChromaTaps'), win.chromaTaps);
+        lastWindows = win;
+        gl.uniform1f(u('uChromaQRatio'), P.chromaQRatio);
+        gl.uniform1f(u('uSharpen'), P.sharpen);
+        gl.uniform1f(u('uSmear'), P.smear);
+        gl.uniform1f(u('uNoise'), P.noise);
+        gl.uniform1f(u('uChromaNoise'), P.chromaNoise);
+        gl.uniform2f(u('uChromaDelay'), P.chromaDelayX, P.chromaDelayY);
+        gl.uniform1f(u('uVertBlend'), P.chromaVertBlend);
+        gl.uniform1f(u('uScanlines'), P.scanlines);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        return;
+      }
+      await refreshPath(P);
+      gl.activeTexture(gl.TEXTURE0 + UNIT_PATH);
+      gl.bindTexture(gl.TEXTURE_2D, pathTex);
+      gl.uniform1i(u('uPath'), UNIT_PATH);
+      // refreshPath leaves UNIT_SRC current; this stage may be reading another unit
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.uniform2f(u('uRes'), canvas.width, canvas.height);
+      gl.uniform2f(u('uAxis'), P.scanAxis === 'horizontal' ? 1 : 0, P.scanAxis === 'horizontal' ? 0 : 1);
+      gl.uniform1f(u('uAmp'), 1);
+      gl.uniform1f(u('uChroma'), P.chromaShift);
+      gl.uniform1f(u('uGrain'), P.grain);
+      gl.uniform1f(u('uGrainScale'), P.grainScale);
+      const c = P.paperColor || '#ffffff';
+      gl.uniform3f(u('uPaper'), parseInt(c.slice(1, 3), 16) / 255, parseInt(c.slice(3, 5), 16) / 255, parseInt(c.slice(5, 7), 16) / 255);
+      gl.uniform1f(u('uMono'), P.mono ? 1 : 0);
+      gl.uniform1f(u('uSubpixel'), P.subpixel ? 1 : 0);
+      gl.uniform1f(u('uSeed'), P.seed);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+
     let drawing = false, drawPending = false;
     function draw() {
       if (drawing) { drawPending = true; return; }
@@ -558,61 +708,14 @@
       {
         try {
           const P = effective();
-          if (!gl.getExtension('EXT_color_buffer_float')) { /* path texture only; sampling is fine */ }
-          gl.viewport(0, 0, canvas.width, canvas.height);
-          gl.useProgram(PROGRAM);
-          const u = (n) => gl.getUniformLocation(PROGRAM, n);
-          gl.activeTexture(gl.TEXTURE0 + UNIT_SRC); gl.bindTexture(gl.TEXTURE_2D, srcTex); gl.uniform1i(u('uSrc'), UNIT_SRC);
-
-          if (familyId === 'analog') {
-            gl.uniform2f(u('uRes'), canvas.width, canvas.height);
-            gl.uniform1f(u('uCycles'), P.subcarrierCycles);
-            gl.uniform1f(u('uPhaseAlt'), P.phaseAlternation ? 1 : 0);
-            gl.uniform1f(u('uPhaseJitter'), P.phaseJitter);
-            gl.uniform1f(u('uHueError'), (P.hueError * Math.PI) / 180);
-            // THE FRAME INDEX COMES FROM THE VIDEO CLOCK, never from the render
-            // loop. Driven by rAF the crawl speed would change with the monitor's
-            // refresh rate — correct on 60Hz, visibly wrong on 120Hz — and that is
-            // the bug most implementations of this ship with.
-            gl.uniform1i(u('uFrame'), isVideo && vid.duration
-              ? Math.floor(vid.currentTime * 59.94) : frameCounter);
-            gl.uniform1f(u('uCombMix'), P.combMix);
-            // A luma window one carrier period wide is a perfect null; detuning it
-            // is precisely what leaks residual carrier into brightness, which IS
-            // dot crawl. So the knob is physical rather than a fudge.
-            // Computed by the engine, never here — the shader walks the same
-            // reach and a disagreement tints the picture instead of erroring.
-            const win = ANALOG.analogWindows(P, canvas.width);
-            gl.uniform1f(u('uLumaTaps'), win.lumaTaps);
-            gl.uniform1f(u('uChromaTaps'), win.chromaTaps);
-            lastWindows = win;
-            gl.uniform1f(u('uChromaQRatio'), P.chromaQRatio);
-            gl.uniform1f(u('uSharpen'), P.sharpen);
-            gl.uniform1f(u('uSmear'), P.smear);
-            gl.uniform1f(u('uNoise'), P.noise);
-            gl.uniform1f(u('uChromaNoise'), P.chromaNoise);
-            gl.uniform2f(u('uChromaDelay'), P.chromaDelayX, P.chromaDelayY);
-            gl.uniform1f(u('uVertBlend'), P.chromaVertBlend);
-            gl.uniform1f(u('uScanlines'), P.scanlines);
-            gl.drawArrays(gl.TRIANGLES, 0, 3);
-            errEl.textContent = '';
-            return finish(gen);
-          }
-
-          await refreshPath(P);
-          gl.activeTexture(gl.TEXTURE0 + UNIT_PATH); gl.bindTexture(gl.TEXTURE_2D, pathTex); gl.uniform1i(u('uPath'), UNIT_PATH);
-          gl.uniform2f(u('uRes'), canvas.width, canvas.height);
-          gl.uniform2f(u('uAxis'), P.scanAxis === 'horizontal' ? 1 : 0, P.scanAxis === 'horizontal' ? 0 : 1);
-          gl.uniform1f(u('uAmp'), 1);
-          gl.uniform1f(u('uChroma'), P.chromaShift);
-          gl.uniform1f(u('uGrain'), P.grain);
-          gl.uniform1f(u('uGrainScale'), P.grainScale);
-          const c = P.paperColor || '#ffffff';
-          gl.uniform3f(u('uPaper'), parseInt(c.slice(1, 3), 16) / 255, parseInt(c.slice(3, 5), 16) / 255, parseInt(c.slice(5, 7), 16) / 255);
-          gl.uniform1f(u('uMono'), P.mono ? 1 : 0);
-          gl.uniform1f(u('uSubpixel'), P.subpixel ? 1 : 0);
-          gl.uniform1f(u('uSeed'), P.seed);
-          gl.drawArrays(gl.TRIANGLES, 0, 3);
+          // TWO STAGES, WHEN ASKED FOR. The second effect reads the FIRST one's
+          // output instead of the source, which is the whole point: a halftone that
+          // is then broadcast through a bad cable is a different picture from a
+          // broadcast that is then halftoned. Order is the parameter.
+          const twoStage = !!(stackFamily && stackParams && programs[stackFamily]);
+          if (twoStage) ensureStage();
+          await drawStage(familyId, P, srcTex, UNIT_SRC, twoStage ? stageFbo : null);
+          if (twoStage) await drawStage(stackFamily, stackParams, stageTex, UNIT_STAGE, null);
           errEl.textContent = '';
         } catch (e) { fail(e.message); }
         return finish(gen);

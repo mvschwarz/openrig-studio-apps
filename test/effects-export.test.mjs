@@ -45,9 +45,19 @@ test("the fence is a delivery counter, not the intent counter", () => {
   // applies to my own assertions.
   assert.match(SURFACE, /if \(gen === paramGen\) lastDrawnGen = gen;/,
     "delivery may only be claimed while this render is still the newest intent");
+  // AND THE COUNT IS NOT THE PROPERTY — this assertion previously pinned exactly
+  // three exits and broke the moment the two GPU exits were correctly refactored
+  // into one shared stage renderer. The comment three lines above says counting
+  // assignment sites is the wrong shape, and this did it anyway, one assertion
+  // later. What matters is that every exit claims delivery through the guard, not
+  // how many exits there happen to be.
   const exits = SURFACE.match(/return finish\(gen\);/g) || [];
-  assert.equal(exits.length, 3,
-    `the tile path and both GPU exits must route through the guard, found ${exits.length}`);
+  assert.ok(exits.length >= 2,
+    `every render exit must route through the delivery guard, found ${exits.length}`);
+  const runDraw = SURFACE.slice(SURFACE.indexOf("async function runDraw()"),
+                                SURFACE.indexOf("function drawTileSpec("));
+  assert.equal(/\n\s*return;\s*\n/.test(runDraw.replace(/if \(!PROGRAM[^\n]*\n/, "")), false,
+    "a bare return from runDraw would leave the renderer marked busy forever");
 });
 
 test("renders are serialised, so two cannot interleave over one GL context", () => {
@@ -469,9 +479,19 @@ test("CONVENTION: each texture bind spells out its own unit selection", () => {
 test("the sampler units are named once rather than spelled out at each call", () => {
   // Two call sites agreeing on a bare 0 and 1 is how one of them ended up on the
   // wrong unit with nothing looking odd.
-  assert.match(SURFACE, /const UNIT_SRC = 0, UNIT_PATH = 1;/);
-  assert.match(SURFACE, /gl\.uniform1i\(u\('uSrc'\), UNIT_SRC\)/);
+  // UNIT_STAGE joined them when a second effect became stackable — it holds stage
+  // one's output while stage two reads it. Pinned by NAME rather than by the exact
+  // line, so adding a fourth unit does not fail a test about naming discipline.
+  assert.match(SURFACE, /const UNIT_SRC = 0, UNIT_PATH = 1, UNIT_STAGE = 2;/);
+  // The source sampler is now told which unit to read, because a stacked second
+  // effect reads stage one's output on UNIT_STAGE rather than the source on
+  // UNIT_SRC. So the property is not "it says UNIT_SRC" — it is that NO sampler
+  // uniform is ever handed a bare integer, which is the mistake the named
+  // constants exist to prevent.
+  assert.match(SURFACE, /gl\.uniform1i\(u\('uSrc'\), (?:unit|UNIT_[A-Z]+)\)/);
   assert.match(SURFACE, /gl\.uniform1i\(u\('uPath'\), UNIT_PATH\)/);
+  assert.equal(/gl\.uniform1i\(u\('u(?:Src|Path)'\), \d/.test(SURFACE), false,
+    "a sampler unit was passed as a bare integer instead of a named unit");
 });
 
 test("uploading the path leaves the active unit as it found it", () => {
