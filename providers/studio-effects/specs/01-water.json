@@ -1,5 +1,5 @@
 {
-  "_": "WATER, AS A MOVING PICTURE. Hard edges undulate like a picture seen through moving water. Adjacent columns are sampled at different MOMENTS OF THE FOOTAGE, so the clip's own frame rate is what ripples — the bed never moves. The shear knob is headWidth*source.rate/(advance*60) = 8*2/240 = 0.067 source-seconds between columns, about a frame and a half: enough to ripple, not enough to smear. FRAMES 16 IS WHAT MAKES IT A VIDEO RATHER THAN A WIPE: every column holds 16 instants and playback advances all of them at once, so the picture moves with the head standing still. At frames 1 there is no stack, nothing to play, and the only recordable thing is the sweep laying the tape down — which is a recording of the process, not of the result. WANTS A CONTINUOUS SHOT: one wrap spends 8 seconds of footage, so a clip that cuts inside that window gives a collage of different shots instead of one undulating picture. Too subtle: raise source.rate toward 3-4. Too violent: drop it toward 1.5. Costs 16 strip draws per step — on a software renderer that is slow.",
+  "_": "WATER. Recovered from the transcript, not re-derived: this is the configuration that was on screen at 2026-08-04T19:22Z when the founder first called it water and 'probably the coolest thing we've made so far'. Do not tune it from the formula — it was lost that way once. THE THREE THINGS THAT MATTER, in order. (1) A NEARLY STILL SUBJECT. The founder's own words: 'probably because the source image is just a person kind of like standing there not moving very much'. Feed this an action shot and you get smear, not water. (2) advance 0 — the sweep is FITTED to the run, which is a slow sweep, and a slow sweep is what puts real source-time between adjacent columns. Raising advance to make the tape fill faster is exactly how this effect was destroyed. (3) A WIDE HEAD, 24 not 8. headWidth multiplies the same quantity. Together at 10s: 24/(1.6*60) = 0.25 source-seconds between columns; at 20s it doubles to 0.5, which is what the original ran at. source.rate stays 1 — it was DEAD when this was discovered, so 1x is the proven value and raising it is not the way back. frames 24 is not decoration: the water lives inside the parade, and the founder saw it there.",
   "scan": {
     "duration": "10s"
   },
@@ -7,7 +7,7 @@
     {
       "id": "a",
       "source": {
-        "rate": 2
+        "rate": 1
       },
       "head": {
         "axis": "vertical",
@@ -17,16 +17,16 @@
             1
           ]
         },
-        "width": 8,
-        "softness": 0.25
+        "width": 24,
+        "softness": 0
       },
       "response": {
         "read": "passthrough"
       },
       "write": {
         "mode": "direct",
-        "advance": 4,
-        "frames": 16,
+        "advance": 0,
+        "frames": 24,
         "fps": 12
       }
     }
