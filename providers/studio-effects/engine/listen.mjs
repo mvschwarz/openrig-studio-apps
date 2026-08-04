@@ -101,7 +101,7 @@ export function envelopeTrack(env, { min, max, lowPct = 5, highPct = 95, gamma =
 
 // An onset becomes a HIT: jump to the top, fall back. Three keyframes each, so
 // the shape is legible in the data rather than hidden in an evaluator.
-export function onsetTrack(hits, { min, max, decay = 0.22, dynamics = 1 } = {}) {
+export function onsetTrack(hits, { min, max, decay = 0.22, dynamics = 1, floor = 0.3, gamma = 0.6 } = {}) {
   // EACH HIT CARRIES ITS OWN WEIGHT. The first version sent every onset to the
   // same peak, so a soft tom and a hard snare rendered identically — the detector
   // had already measured the difference and the track threw it away. Found by the
@@ -119,7 +119,16 @@ export function onsetTrack(hits, { min, max, decay = 0.22, dynamics = 1 } = {}) 
   const pts = [{ t: 0, v: min }];
   for (const h of hits) {
     const t = +h.t.toFixed(3);
-    const u = span > 1e-9 ? Math.min(1, Math.max(0, (h.strength - lo) / span)) : 1;
+    let u = span > 1e-9 ? Math.min(1, Math.max(0, (h.strength - lo) / span)) : 1;
+    // DYNAMICS MUST NOT COST PRESENCE, and the first version charged for it. A
+    // straight linear map sends the median hit to half strength, so turning
+    // dynamics on halved the whole effect and the founder had to run depth at 1.0
+    // to get back to where it was. Two corrections, both measured rather than
+    // guessed:
+    //   gamma < 1 lifts the middle, so a median hit lands high rather than halfway
+    //   floor keeps the weakest hits VISIBLE — a soft tom should brush the picture,
+    //   not vanish, and vanishing is what a linear map does to the bottom decile.
+    u = floor + (1 - floor) * Math.pow(u, gamma);
     // dynamics 0 reproduces the old flat behaviour, 1 gives the hits their full
     // spread. Kept as a knob because a uniform hit is right for a metronome and
     // wrong for a drum kit, and only the author knows which they are scoring.

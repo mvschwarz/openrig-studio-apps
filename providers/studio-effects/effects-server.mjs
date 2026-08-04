@@ -130,7 +130,7 @@ http.createServer(async (req, res) => {
       const mode = b.mode === "onsets" ? "onsets" : "envelope";
       const hits = onsets(env, { sensitivity: Number(b.sensitivity) || 1.6, minGap: Number(b.minGap) || 0.12 });
       const track = mode === "onsets"
-        ? onsetTrack(hits, { min, max, decay: Number(b.decay) || 0.22, dynamics: b.dynamics === undefined ? 1 : Number(b.dynamics) })
+        ? onsetTrack(hits, { min, max, decay: Number(b.decay) || 0.22, dynamics: b.dynamics === undefined ? 1 : Number(b.dynamics), floor: b.floor === undefined ? 0.3 : Number(b.floor), gamma: b.hitGamma === undefined ? 0.6 : Number(b.hitGamma) })
         : envelopeTrack(env, { min, max, gamma: Number(b.gamma) || 1 });
 
       const gaps = hits.slice(1).map((h, i) => h.t - hits[i].t).sort((x, y) => x - y);
