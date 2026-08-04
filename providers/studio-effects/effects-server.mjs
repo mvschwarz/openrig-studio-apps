@@ -237,7 +237,14 @@ http.createServer(async (req, res) => {
       const family = body.family || "scan";
       const r = body.preset ? applyPreset(family, body.preset) : coerce(family, body.params || {});
       if (r.error) return json(res, 400, { ok: false, ...r });
-      return json(res, 200, { ok: true, family, preset: body.preset ?? null, ...r });
+      // The highlight travels WITH the resolved look, so a surface never has to
+      // know which family it is rendering to know what to put in front of someone.
+      const fam2 = FAMILIES[family];
+      const highlight = body.preset && fam2?.highlights?.[body.preset] ? fam2.highlights[body.preset] : [];
+      return json(res, 200, {
+        ok: true, family, preset: body.preset ?? null, highlight,
+        dramatic: fam2?.dramatic || [], ...r,
+      });
     }
 
     // A PARAMETER AS A FUNCTION OF TIME, resolved here for the same reason a

@@ -21,19 +21,19 @@ export const FAMILIES = {
     params: {
       quality:          { type: "float", min: 1, max: 100, default: 38,
                           says: "luma quality, scaled exactly as libjpeg scales it — 50 uses the published table, lower rounds harder" },
-      chromaQuality:    { type: "float", min: 1, max: 100, default: 26,
+      chromaQuality:    { type: "float", min: 1, max: 100, default: 26, pairsWith: ["subsample"],
                           says: "colour quality, separately; drop this alone and colour falls apart while detail survives" },
       blockSize:        { type: "int", min: 2, max: 32, default: 8,
                           says: "block size in pixels; 8 is what real encoders use and anything else is exaggeration" },
       keepCoefficients: { type: "int", min: 1, max: 64, default: 64,
                           says: "how many coefficients survive, in zigzag order — low numbers keep only the coarsest shape of each block" },
-      quantJitter:      { type: "float", min: 0, max: 1, default: 0,
-                          says: "per-block variation in how hard it rounds, so some blocks survive better than their neighbours" },
+      quantJitter:      { type: "float", min: 0, max: 1, default: 0, pairsWith: ["quality"],
+                          says: "per-block variation in how hard it rounds — does almost nothing at high quality, because there is little rounding to vary" },
       dcBias:           { type: "float", min: 0, max: 0.4, default: 0,
                           says: "shifts each block's average brightness independently — the blotchy patchwork of a broken decode" },
       gridOffsetX:      { type: "float", min: 0, max: 16, default: 0,
                           says: "slide the block grid sideways so the blocking does not line up with the picture" },
-      gridOffsetY:      { type: "float", min: 0, max: 16, default: 0,
+      gridOffsetY:      { type: "float", min: 0, max: 16, default: 0, pairsWith: ["gridOffsetX", "blockSize"],
                           says: "slide the block grid vertically" },
       subsample:        { type: "enum", values: ["4:4:4", "4:2:2", "4:2:0"], default: "4:2:0",
                           says: "how much colour resolution is thrown away before compressing — 4:2:0 is what almost everything ships" },
@@ -46,7 +46,37 @@ export const FAMILIES = {
       "'blocky' — raise blockSize. Real encoders use 8, so anything larger is a deliberate exaggeration rather than more compression.",
       "'glitchy' or 'broken file' — raise dcBias and quantJitter together; that is the patchwork of blocks decoding inconsistently.",
       "'melted' or 'smeared' — drop keepCoefficients to 3-8, which keeps only each block's coarsest shape.",
+      "'I cannot see it' — this family is FAITHFUL, and real compression at usable quality is meant to be hard to see. For something visible rather than accurate, move blockSize (16-32) or keepCoefficients (3-8); those two change the picture completely. Quality alone below about 15 also does it.",
     ],
+    // WHICH KNOBS TO PUT IN FRONT OF A PERSON, as DATA rather than as UI.
+    //
+    // A family can have forty parameters and a given look is usually reachable by
+    // moving two of them. Which two is knowledge the person building the family
+    // has and the person using it does not, and it is not recoverable from the
+    // parameter names — this family's most dramatic knob is blockSize, whose name
+    // suggests a detail and whose effect is total.
+    //
+    // Carried in the spec so ANY surface can render it: these sliders, a knob
+    // panel, a hardware controller, or an agent deciding what to reach for. The
+    // UI decides how to show a highlight; the schema decides what deserves one.
+    //
+    // `pairsWith` is the other half — knobs that only mean something together.
+    // Dropping chromaQuality alone does nothing visible unless subsampling is
+    // throwing colour away too, and nothing in either name says so.
+    highlights: {
+      "web jpeg":             ["quality", "chromaQuality"],
+      "saved too many times": ["quality", "quantJitter"],
+      "colour goes first":    ["chromaQuality", "subsample"],
+      "big blocks":           ["blockSize", "quality"],
+      "misaligned encoder":   ["gridOffsetX", "gridOffsetY"],
+      "broken decode":        ["dcBias", "quantJitter"],
+      "melted":               ["keepCoefficients", "quality"],
+    },
+    // THE HONEST NOTE ABOUT THIS FAMILY: it is faithful, and faithful compression
+    // is SUBTLE. Real JPEG at quality 60 is meant to be hard to see. The knobs
+    // that produce something dramatic rather than something accurate are named
+    // here, because a person who cannot find them concludes the tool is broken.
+    dramatic: ["blockSize", "keepCoefficients", "dcBias", "quality"],
     presets: {
       "web jpeg":            { quality: 62, chromaQuality: 48, subsample: "4:2:0" },
       "saved too many times":{ quality: 11, chromaQuality: 7, subsample: "4:2:0", quantJitter: 0.15 },

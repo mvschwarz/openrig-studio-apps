@@ -112,12 +112,14 @@
         <div class="presets" style="margin-top:10px">
           <button class="ghost" id="saveframe" title="save what is on screen right now">save frame</button>
           <button class="ghost" id="sheet" title="every look on this source, side by side">look sheet</button>
+          <button class="ghost" id="sens" title="measure which knobs actually change the picture at these settings">what matters?</button>
         </div>
       </div>
 
       <div class="card">
         <h2>Parameters</h2>
         <div id="params"></div>
+        <p class="note" id="hlnote"></p>
         <button class="ghost" id="reset" style="margin-top:8px">reset to defaults</button>
       </div>
 
@@ -160,6 +162,15 @@
       families: () => ALL,
       family: (id) => { if (id) { familyId = id; $('#family').value = id; return useFamily(); } return familyId; },
       stats: () => lastStats,
+      // Measure what each knob does at the CURRENT settings. For an agent this is
+      // the map of the reachable space — which parameters are live, which are
+      // inert until something else moves, and which are worth reaching for.
+      sensitivity: () => measureSensitivity(),
+      // An agent telling a person where to look. The same primitive the schema
+      // and the presets use, so there is one way to say "this knob matters".
+      highlight: (list, why) => setHighlight(list, why),
+      highlighted: () => ({ params: [...highlighted], why: highlightWhy }),
+      lastSensitivity: () => sensitivity,
       // THE VALUES ACTUALLY BEING RENDERED, for both stages. `params` is what was
       // AUTHORED — it does not move when a curve drives it, which is correct for a
       // slider and useless as evidence. Three times now a check of mine has read
@@ -258,6 +269,7 @@
       // canvas dimensions.
       if (srcEl && gpu) upload(srcEl, srcW, srcH);
       buildControls();
+      renderHighlight();
       applyDefaults();
       atlasFor = '';
       draw();
@@ -286,6 +298,7 @@
       const host = $('#params'); host.innerHTML = '';
       for (const [key, spec] of Object.entries(FAMILY.params)) {
         const row = document.createElement('div'); row.className = 'row';
+        row.dataset.param = key;
         const lab = document.createElement('label');
         lab.textContent = key; lab.title = spec.says || key;
         row.appendChild(lab);
@@ -356,6 +369,10 @@
         return { ...params };
       }
       params = r.params; syncInputs(); draw(); say(`look: ${name}`);
+      // The preset says which of its knobs are the ones worth moving. Without
+      // this a look is a dead end: it either is what you wanted or it is not,
+      // and nothing tells you which way to push.
+      setHighlight(r.highlight || [], r.highlight?.length ? `the knobs that shape "${name}"` : '');
       return r.params;
     }
     function syncInputs() {
@@ -583,6 +600,8 @@
     $('#depth').addEventListener('input', (e) => setDepth(e.target.value));
     $('#depthNum').addEventListener('change', (e) => setDepth(e.target.value));
 
+    $('#sens').addEventListener('click', () => measureSensitivity());
+
     $('#sound').addEventListener('click', async () => {
       const want = vid.muted;
       setSound(want);
@@ -769,6 +788,8 @@
       if (op.curves !== undefined) { curveSpec = op.curves || null; lastCurve = null; draw(); }
       // An agent can ASK for sound, but only a click can grant it — so this sets
       // the intent and the button reflects reality rather than the request.
+      if (op.highlight !== undefined) setHighlight(op.highlight, op.highlightWhy);
+      if (op.measure) await measureSensitivity();
       if (op.depth !== undefined) setDepth(op.depth);
       if (op.sound !== undefined && isVideo) setSound(!!op.sound);
       if (op.play !== undefined && isVideo) {
@@ -1215,6 +1236,178 @@
     // bound exists to stop a hang, NOT to stand in for the signal — reaching it
     // throws, because capturing a frame we cannot prove is the right one is the
     // exact defect this replaces.
+    // WHICH KNOBS ACTUALLY DO ANYTHING, MEASURED RATHER THAN DECLARED.
+    //
+    // Most parameters on most families are inert at any given setting: chroma
+    // delay does nothing while bleed is zero, a tile palette does nothing in mono,
+    // quantiser jitter does nothing at quality 100. A schema can only DECLARE
+    // those dependencies, and a declaration is a status line — written once,
+    // correct until someone changes the code, and silently wrong after.
+    //
+    // So: perturb each parameter, re-render, and diff the pixels. What comes back
+    // is what this knob does HERE, at these settings, on this frame. It cannot go
+    // stale because it is recomputed from the thing itself.
+    //
+    // For a person it answers "which of these forty sliders is worth touching".
+    // For an agent it is better than that — it is a map of the reachable space,
+    // and the thing you cannot get from reading parameter names.
+    function samplePixels() {
+      // A coarse grid, deliberately. We are asking "did the picture change", not
+      // "by how much exactly", and a full readback per parameter would make this
+      // too slow to run often enough to be useful.
+      const live = (FAMILY && FAMILY.engine === 'canvas2d') ? c2d : canvas;
+      const W = 64, H = 32;
+      if (live === canvas) {
+        const buf = new Uint8Array(canvas.width * canvas.height * 4);
+        gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        const out = new Uint8Array(W * H * 3);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          const sx = Math.floor((x + 0.5) * canvas.width / W);
+          const sy = Math.floor((y + 0.5) * canvas.height / H);
+          const i = (sy * canvas.width + sx) * 4, o = (y * W + x) * 3;
+          out[o] = buf[i]; out[o + 1] = buf[i + 1]; out[o + 2] = buf[i + 2];
+        }
+        return out;
+      }
+      const ctx = c2d.getContext('2d', { willReadFrequently: true });
+      const img = ctx.getImageData(0, 0, c2d.width, c2d.height).data;
+      const out = new Uint8Array(W * H * 3);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const sx = Math.floor((x + 0.5) * c2d.width / W);
+        const sy = Math.floor((y + 0.5) * c2d.height / H);
+        const i = (sy * c2d.width + sx) * 4, o = (y * W + x) * 3;
+        out[o] = img[i]; out[o + 1] = img[i + 1]; out[o + 2] = img[i + 2];
+      }
+      return out;
+    }
+    const pixelDelta = (a, b) => {
+      let sum = 0;
+      for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i]);
+      return sum / a.length / 255;
+    };
+
+    async function renderAndSample() {
+      const gen = ++paramGen;
+      draw();
+      try { await awaitRender(gen, 4000); } catch { /* fall through and sample what is there */ }
+      return samplePixels();
+    }
+
+    // A probe VALUE, not a fixed delta. Moving every knob by "10%" compares a
+    // hue rotation in degrees against a mix in 0..1, which measures the units
+    // rather than the effect. This moves each one a third of ITS OWN range, away
+    // from wherever it currently sits so the probe never lands on the value it
+    // started at.
+    function probeValue(spec, current) {
+      if (spec.type === 'bool') return !current;
+      if (spec.type === 'enum') {
+        const i = spec.values.indexOf(current);
+        return spec.values[(i + 1) % spec.values.length];
+      }
+      const lo = spec.min ?? 0, hi = spec.max ?? 1, span = hi - lo;
+      if (!(span > 0)) return current;
+      const up = current + span / 3, down = current - span / 3;
+      const v = (up <= hi) ? up : down;
+      const clamped = Math.min(hi, Math.max(lo, v));
+      return spec.type === 'int' ? Math.round(clamped) : clamped;
+    }
+
+    let sensitivity = null;
+    async function measureSensitivity() {
+      if (!FAMILY) return null;
+      const before = { ...params };
+      const wasCurve = curveSpec;
+      // Curves would move the picture underneath the measurement and every knob
+      // would read as live. The question is what THIS parameter does, so nothing
+      // else may be changing while it is asked.
+      curveSpec = null;
+      say('measuring which knobs do anything…');
+      try {
+        const base = await renderAndSample();
+        const scores = {};
+        for (const [key, spec] of Object.entries(FAMILY.params)) {
+          const probe = probeValue(spec, params[key]);
+          if (probe === params[key]) { scores[key] = 0; continue; }
+          params[key] = probe;
+          const after = await renderAndSample();
+          scores[key] = +pixelDelta(base, after).toFixed(5);
+          params[key] = before[key];
+        }
+        params = { ...before };
+        curveSpec = wasCurve;
+        paramGen++; draw();
+        const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+        sensitivity = {
+          family: familyId,
+          at: { ...before },
+          scores,
+          // The threshold is relative to the strongest knob rather than absolute,
+          // because "did anything happen" means something different on a subtle
+          // look than on a violent one.
+          inert: ranked.filter(([, v]) => v < (ranked[0]?.[1] || 1) * 0.02).map(([k]) => k),
+          strongest: ranked.slice(0, 5).map(([k, v]) => ({ param: k, delta: v })),
+        };
+        annotateSensitivity();
+        const dead = sensitivity.inert.length;
+        say(`${Object.keys(scores).length - dead} of ${Object.keys(scores).length} knobs do something here`);
+        return sensitivity;
+      } catch (e) {
+        params = { ...before }; curveSpec = wasCurve; paramGen++; draw();
+        fail(`sensitivity: ${e.message}`);
+        return null;
+      }
+    }
+
+    // HIGHLIGHTS ARE DATA AND THIS IS THE ONLY PLACE THAT KNOWS HOW TO SHOW THEM.
+    //
+    // The list comes from the schema, from a preset, from an agent, or from a
+    // measurement — this does not care which. Swap the sliders for knobs or a
+    // hardware surface and only this function changes, which is what makes the
+    // highlight portable rather than a property of these particular controls.
+    let highlighted = [], highlightWhy = '';
+    function setHighlight(params4, why) {
+      highlighted = Array.isArray(params4) ? params4 : [];
+      highlightWhy = why || '';
+      renderHighlight();
+      return highlighted;
+    }
+    function renderHighlight() {
+      for (const row of document.querySelectorAll('#params .row[data-param]')) {
+        const k = row.dataset.param;
+        const on = highlighted.includes(k);
+        const lab = row.querySelector('label');
+        // A marker in the label rather than a colour alone, so it survives a UI
+        // that has no colour to spend and reads for anyone who cannot see it.
+        lab.textContent = (on ? '\u25c6 ' : '') + k;
+        lab.style.color = on ? 'var(--info)' : '';
+        row.style.borderLeft = on ? '2px solid var(--info)' : '';
+        row.style.paddingLeft = on ? '6px' : '';
+        if (on && highlightWhy) lab.title = `${FAMILY.params[k]?.says || k}\n\n${highlightWhy}`;
+      }
+      const note = $('#hlnote');
+      if (note) note.textContent = highlighted.length
+        ? `${highlighted.length} knob${highlighted.length === 1 ? '' : 's'} highlighted${highlightWhy ? ' — ' + highlightWhy : ''}`
+        : '';
+    }
+
+    function annotateSensitivity() {
+      if (!sensitivity) return;
+      const top = Math.max(...Object.values(sensitivity.scores), 1e-9);
+      for (const row of document.querySelectorAll('#params .row[data-param]')) {
+        const k = row.dataset.param;
+        const v = sensitivity.scores[k];
+        const lab = row.querySelector('label');
+        if (v === undefined) continue;
+        const rel = v / top;
+        // Dim rather than disable. A knob that does nothing HERE may be the one
+        // that matters after the next change, and hiding it would teach the wrong
+        // thing about the instrument.
+        row.style.opacity = rel < 0.02 ? '0.35' : '1';
+        lab.style.color = rel > 0.4 ? 'var(--fresh)' : '';
+        lab.title = `${FAMILY.params[k].says || k}\n\nmeasured effect here: ${(rel * 100).toFixed(0)}% of the strongest knob`;
+      }
+    }
+
     function awaitRender(gen, bailAfterMs = 8000) {
       return new Promise((resolve, reject) => {
         const t0 = performance.now();
