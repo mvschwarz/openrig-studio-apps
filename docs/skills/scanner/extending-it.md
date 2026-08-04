@@ -11,7 +11,17 @@ is a real recipe with the ordering contract that will otherwise bite you.
 2. **Every clock is declared.** No new transport may read the render loop, wall
    time, or `Date.now()`.
 3. **The spec is complete; the panel is a subset.** Never add a capability that
-   only the UI can reach.
+   only the UI can reach. **This one has a test, and it is the most valuable check
+   in the tool: `test/scanner-spec-reach.test.mjs` asserts that EVERY published
+   parameter is reachable from a spec.** Adding a knob to `SCANNER_PARAMS` without
+   also giving it a spec key fails immediately, by name. Three separate bugs were
+   already this exact shape — `headSoftness` declared and unread, `bedRate` and
+   `headRate` published and read by nothing, and `sourceRate` read by the surface
+   but never produced by the compiler — and each one presented as *"the effect
+   just isn't happening"*, which is the most expensive symptom available: an agent
+   finds the knob in the schema, writes it into a spec, gets no error, and gets no
+   effect. Three patches would have fixed three bugs. The invariant closes the
+   class, including the instances nobody knew to look for.
 4. **The write pass never reads the tape.** If your feature needs the previous
    contents, it is a separate pass with its own target, like the fade.
 5. **Both halves on any path.** Sanitise to a single segment *and* validate the
