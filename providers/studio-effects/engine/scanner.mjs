@@ -176,14 +176,24 @@ void main() {
   // was already on the tape, not a smear applied afterwards.
   float a = 1.0;
   if (uSoftness > 0.001) {
-    // ONE-SIDED, and that is the whole correction. Strips are laid down in
-    // increasing column order, so a strip's TRAILING edge abuts material that is
-    // already on the tape while its LEADING edge abuts nothing yet. Feathering
-    // both edges fades the leading one toward BLACK rather than toward a
-    // neighbour, and every strip leaves a dark seam that accumulates into
-    // corduroy over repeated wraps.
-    float pos = (uAxis < 0.5 ? gl_FragCoord.x : gl_FragCoord.y) - uStripAt;
+    // ONE-SIDED, AND THE RAMP LIVES IN THE OVERLAP -- both halves matter, and
+    // getting only the first one right is what produced the dark corduroy.
+    //
+    // Strips are laid down in increasing column order, so a strip's TRAILING
+    // edge abuts material already on the tape while its LEADING edge abuts
+    // nothing yet. Feathering BOTH fades the leading one toward black. That much
+    // was fixed. But anchoring the ramp at uStripAt still fades in across the
+    // strip's own first pixels -- which are new territory, so the crossfade
+    // partner is again BLACK, and every strip laid a thin dark seam. With
+    // softness 0.25 on an 8px strip that is a 2px dark line every strip, all the
+    // way across, and it reads as deliberate banding rather than as a bug.
+    //
+    // The ramp belongs entirely in the region the scissor already widened into:
+    // 0 at uStripAt - f, deep inside the PREVIOUS strip, reaching 1 exactly
+    // where this strip's core begins. Then the fade genuinely crossfades with a
+    // neighbour and the core is always written at full strength.
     float f = max(1.0, uSoftness * uStripW);
+    float pos = (uAxis < 0.5 ? gl_FragCoord.x : gl_FragCoord.y) - (uStripAt - f);
     a = clamp(pos / f, 0.0, 1.0);
     a = a * a * (3.0 - 2.0 * a);
   }
@@ -220,8 +230,11 @@ export const SCANNER_PARAMS = {
                  says: "turn the picture on the glass, in degrees" },
   bedScale:    { type: "float", min: 0.1, max: 4, default: 1, group: "bed",
                  says: "how large the picture sits on the glass" },
-  bedRate:     { type: "float", min: -4, max: 4, default: 1, group: "bed",
-                 says: "this transport's speed against the master clock; differs from headRate and the two beat against each other" },
+  // NO bedRate / headRate HERE. They predate named clocks and nothing ever read
+  // them. A transport's speed is declared by pointing it at a clock —
+  // `bed: { clock: "slow" }` — which is the same capability with the drift made
+  // visible in the spec instead of implied by a number. Two knobs an agent could
+  // find, write, and get nothing from.
 
   axis:        { type: "enum", values: ["vertical", "horizontal"], default: "vertical", group: "head",
                  says: "how the head LIES, which is perpendicular to how it TRAVELS — a vertical head stands upright and sweeps sideways, writing columns; a horizontal head lies flat and sweeps up the frame, writing rows. Watch a run and you see the travel, so the name will feel like the opposite of what you observe" },
@@ -233,8 +246,6 @@ export const SCANNER_PARAMS = {
                  says: "tilt the head off-axis so it samples a diagonal" },
   headSoftness:{ type: "float", min: 0, max: 1, default: 0, group: "head",
                  says: "feather the strip's edges; 0 is a hard slit" },
-  headRate:    { type: "float", min: -4, max: 4, default: 1, group: "head",
-                 says: "the head transport's speed against the master clock" },
 
   read:        { type: "enum", values: READS, default: "passthrough", group: "response",
                  says: "what the head responds to — the picture itself, its brightness, or where it changed" },
@@ -263,8 +274,13 @@ export const SCANNER_PARAMS = {
                  says: "playback rate of the frame stack; only means anything when frames is above 1" },
   persistence: { type: "float", min: 0.9, max: 1, default: 1, group: "output",
                  says: "1 means the tape retains, which is what a tape does; below 1 the recording fades as it is laid down" },
-  sourceRate:  { type: "float", min: -4, max: 4, default: 1, group: "output",
-                 says: "clip time per unit of master clock; 0 freezes the frame and 1 is normal playback" },
+  // THE TEMPORAL-SHEAR KNOB. Two adjacent columns of the recording are separated
+  // by `headWidth * sourceRate / (advance * 60)` seconds OF THE FOOTAGE, and this
+  // is the only term in that numerator you can raise without also slowing the
+  // sweep. Range matches what the surface will actually apply to a video element
+  // rather than stopping at 4 and telling an agent 6 is out of bounds.
+  sourceRate:  { type: "float", min: 0, max: 16, default: 1, group: "output",
+                 says: "clip time per unit of master clock; 0 freezes the frame into a still, 1 is normal playback, and high values are what make a recognisable picture undulate — the footage's own frame rate becomes the thing being interpolated across the tape" },
 };
 
 // PRESETS ARE CHAIN SPECS NOW, not flat parameter sets — because the thing
@@ -511,6 +527,14 @@ const laneGroups = {
   head:     ["position", "width", "angle", "softness"],
   response: ["gain", "bias", "threshold"],
   write:    ["advance", "persistence"],
+  // `source` IS A LANE GROUP, not just a place to name a clip. Leaving `rate`
+  // out of here is what made every spec that set source.rate run at 1x: the key
+  // was read from the spec by nobody, produced nothing, and raised no problem —
+  // so the knob that governs temporal shear was unreachable from the one surface
+  // that is supposed to be complete. A lane rather than a constant because a rate
+  // that climbs mid-scan is the point: the footage accelerates under a head that
+  // does not.
+  source:   ["rate"],
 };
 const passthroughKeys = [
   ["response", "read", "read"], ["response", "invert", "invert"],
@@ -521,7 +545,7 @@ const passthroughKeys = [
   ["head", "axis", "axis"],
 ];
 const nameOf = (group, key) =>
-  group === "bed" || group === "head"
+  group === "bed" || group === "head" || group === "source"
     ? group + key[0].toUpperCase() + key.slice(1)
     : key;
 
