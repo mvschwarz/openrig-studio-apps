@@ -20,6 +20,7 @@ import { TILE_FAMILIES, PALETTES } from "./engine/tile.mjs";
 import { ANALOG_FRAGMENT, ANALOG_VERTEX } from "./engine/analog.mjs";
 import { evalCurves, pulses, ramp, EASING_NAMES } from "./engine/curves.mjs";
 import { pcm, envelope, onsets, envelopeTrack, onsetTrack } from "./engine/listen.mjs";
+import { cuts, lockLossTrack } from "./engine/watch.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const arg = (flag, fallback) => {
@@ -141,6 +142,45 @@ http.createServer(async (req, res) => {
         perMinute: median ? +(60 / median).toFixed(1) : null,
         keyframes: track.length,
         spec: { unit: "seconds", tracks: { [b.param]: track } },
+      });
+    }
+
+    // A CURVE DERIVED FROM THE EDIT. The companion to from-audio: that one listens
+    // to the track, this one watches the picture.
+    //
+    // Takes SEVERAL tracks in one request on purpose. Losing lock is not one
+    // parameter — a receiver dropping sync tears the geometry, unlocks the colour
+    // and lifts the noise floor together, and asking the caller to make three
+    // requests and keep them in phase would be handing them a job the server can
+    // do correctly once.
+    if (url.pathname === "/api/effects/curve/from-video" && req.method === "POST") {
+      const b = JSON.parse((await readBody(req)) || "{}");
+      const file = insideMedia(b.source || "");
+      if (!file) return json(res, 400, { ok: false, error: `no such source in the media root: ${b.source}` });
+      const fam = FAMILIES[b.family || "analog"];
+      if (!fam) return json(res, 400, { ok: false, error: `no family ${b.family}` });
+
+      const found = cuts(file, { threshold: b.threshold === undefined ? 0.3 : Number(b.threshold) });
+      const wanted = Array.isArray(b.tracks) ? b.tracks : [];
+      const tracks = {};
+      const notes = [];
+      for (const t of wanted) {
+        const spec = fam.params?.[t.param];
+        if (!spec) { notes.push(`no parameter ${t.param} on family ${b.family || "analog"}`); continue; }
+        tracks[t.param] = lockLossTrack(found.cuts, {
+          rest: t.rest === undefined ? (spec.default ?? spec.min ?? 0) : Number(t.rest),
+          peak: t.peak === undefined ? (spec.max ?? 1) : Number(t.peak),
+          recover: t.recover === undefined ? 0.45 : Number(t.recover),
+        });
+      }
+      // A continuous shot is a legitimate thing to point this at, so no cuts is an
+      // answer rather than an error — but it is SAID, because a silent empty curve
+      // is indistinguishable from a broken one.
+      return json(res, 200, {
+        ok: true, cuts: found.cuts.length, at: found.cuts.map((t) => +t.toFixed(2)),
+        threshold: found.threshold, notes,
+        note: found.cuts.length ? null : "no cuts found at this threshold — a continuous shot, or lower the threshold",
+        spec: { unit: "seconds", tracks },
       });
     }
 
