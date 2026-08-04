@@ -1,0 +1,33 @@
+{
+  "_": "THE WINDOW, ALONE. advance 6 sweeps six times faster, so adjacent columns are nearly SIMULTANEOUS and there is almost no shear - the still is clean. All the motion you see is each band playing its own slice of time. This is the parade without the warp.",
+  "scan": {
+    "duration": "24s"
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 12
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 6,
+        "frames": 24,
+        "fps": 12
+      }
+    }
+  ]
+}

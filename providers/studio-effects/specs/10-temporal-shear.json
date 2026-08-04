@@ -1,0 +1,32 @@
+{
+  "_": "TEMPORAL SHEAR, ALONE. The bed never moves and there is no playback stack - a single still. Every bit of warp comes from the VIDEO ADVANCING between one column and the next, so the footage's own frame rate is the interpolation source. Slow sweep = more time between columns = more warp. This is the effect that makes rooftops look like water.",
+  "scan": {
+    "duration": "24s"
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 2
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 0,
+        "frames": 1
+      }
+    }
+  ]
+}

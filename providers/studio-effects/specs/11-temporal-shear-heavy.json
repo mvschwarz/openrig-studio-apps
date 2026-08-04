@@ -1,0 +1,32 @@
+{
+  "_": "TEMPORAL SHEAR pushed hard. Same as 10 but the sweep is slower relative to the clip (source rate 3), so far more source time passes between adjacent columns and the shear becomes violent rather than liquid. Still one frame, still no parade.",
+  "scan": {
+    "duration": "24s"
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 3
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 2
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 0,
+        "frames": 1
+      }
+    }
+  ]
+}
