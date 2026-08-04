@@ -1,0 +1,33 @@
+{
+  "_": "WATER. Shear comes from SOURCE-TIME between adjacent columns = headWidth*source.rate/(advance*60). Here 8*6/(4*60) = 0.2s per column, which is strong shear, while advance 4 still fills the tape in 4s so it wraps and keeps moving. If it is too violent drop source.rate toward 2-3; too subtle, raise headWidth before touching advance.",
+  "scan": {
+    "duration": "10s"
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 6
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 8,
+        "softness": 0.25
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 4,
+        "frames": 1
+      }
+    }
+  ]
+}
