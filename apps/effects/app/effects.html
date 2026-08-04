@@ -874,6 +874,23 @@
       gl.activeTexture(gl.TEXTURE0 + unit);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.uniform1i(u('uSrc'), unit);
+      if (fid === 'codec') {
+        gl.uniform2f(u('uRes'), canvas.width, canvas.height);
+        gl.uniform1f(u('uQuality'), P.quality);
+        gl.uniform1f(u('uChromaQuality'), P.chromaQuality);
+        gl.uniform1f(u('uBlock'), P.blockSize);
+        gl.uniform2f(u('uGridOffset'), P.gridOffsetX, P.gridOffsetY);
+        gl.uniform1f(u('uKeep'), P.keepCoefficients);
+        gl.uniform1f(u('uJitter'), P.quantJitter);
+        gl.uniform1f(u('uDcBias'), P.dcBias);
+        // The enum crosses as a number because GLSL has no strings; named here so
+        // the schema stays the readable surface and the shader stays fast.
+        gl.uniform1f(u('uSubsample'), P.subsample === '4:4:4' ? 0 : P.subsample === '4:2:2' ? 1 : 2);
+        gl.uniform1f(u('uSeed'), P.seed);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        return;
+      }
       if (fid === 'analog') {
         gl.uniform2f(u('uRes'), canvas.width, canvas.height);
         gl.uniform1f(u('uCycles'), P.subcarrierCycles);
