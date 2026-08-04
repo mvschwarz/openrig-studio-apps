@@ -40,7 +40,8 @@ uniform sampler2D uSrc;      // the source frame, at scanTime
 uniform sampler2D uPrev;     // the source one step earlier, for motion
 uniform vec2  uOut;          // output buffer size
 uniform vec2  uSrcSize;
-uniform float uAxis;         // 0 vertical head (writes columns), 1 horizontal
+uniform float uAxis;         // 0 = head lies vertical, travels sideways, writes columns
+                             // 1 = head lies horizontal, travels upward, writes rows
 uniform float uWriteAt;      // where in the output this strip lands, 0..1
 uniform float uHeadAt;       // where on the bed the head is reading, 0..1
 uniform float uHeadWidth;
@@ -199,7 +200,7 @@ export const SCANNER_PARAMS = {
                  says: "this transport's speed against the master clock; differs from headRate and the two beat against each other" },
 
   axis:        { type: "enum", values: ["vertical", "horizontal"], default: "vertical", group: "head",
-                 says: "which way the head lies — vertical writes columns, horizontal writes rows" },
+                 says: "how the head LIES, which is perpendicular to how it TRAVELS — a vertical head stands upright and sweeps sideways, writing columns; a horizontal head lies flat and sweeps up the frame, writing rows. Watch a run and you see the travel, so the name will feel like the opposite of what you observe" },
   headPosition:{ type: "float", min: 0, max: 1, default: 0, group: "head",
                  says: "where the head is reading, across the bed; hold it still and you get slit-scan" },
   headWidth:   { type: "float", min: 1, max: 128, default: 6, group: "head",

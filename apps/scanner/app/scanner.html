@@ -425,7 +425,12 @@ function buildChain() {
     const n = document.createElement('div');
     n.className = 'node' + (i === stages.length-1 ? ' final' : '');
     const readsFrom = st.from ? `reads ${st.from}` : 'reads the clip';
-    n.innerHTML = `<span class="cap">${i===stages.length-1?'FINAL — ':''}${st.id} · ${readsFrom}</span>`;
+    // Naming the TRAVEL as well as the orientation, because a person watching a
+    // run sees the travel — and `axis: horizontal` sweeping upward reads as a
+    // contradiction until both are said.
+    const ax = (st.params.axis || 'vertical') === 'vertical'
+      ? 'head upright, travels →' : 'head flat, travels ↑';
+    n.innerHTML = `<span class="cap">${i===stages.length-1?'FINAL — ':''}${st.id} · ${readsFrom} · ${ax}</span>`;
     const f = document.createElement('div'); f.className='frame';
     const c = document.createElement('canvas');
     c.width = OUT_W; c.height = OUT_H;   // CSS scales it; one internal size for all
