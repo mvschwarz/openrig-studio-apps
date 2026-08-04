@@ -1,0 +1,96 @@
+{
+  "_": "A hand-moved bed recorded straight, then read ACROSS by a perpendicular head as edges through the ember ramp. Structure kept, tone discarded.",
+  "scan": {
+    "duration": "30s"
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "bed": {
+        "x": {
+          "hand": {
+            "range": [
+              -330,
+              330
+            ],
+            "pace": 0.5,
+            "hesitation": 0.45,
+            "overshoot": 0.3,
+            "seed": 11
+          }
+        },
+        "y": {
+          "hand": {
+            "range": [
+              -90,
+              90
+            ],
+            "pace": 0.35,
+            "hesitation": 0.6,
+            "overshoot": 0.3,
+            "seed": 29
+          }
+        },
+        "rotate": {
+          "hand": {
+            "range": [
+              -13,
+              13
+            ],
+            "pace": 0.28,
+            "hesitation": 0.5,
+            "overshoot": 0.3,
+            "seed": 47
+          }
+        }
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 3,
+        "angle": 4
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 3
+      }
+    },
+    {
+      "id": "b",
+      "source": {
+        "from": "a"
+      },
+      "startAt": "34%",
+      "head": {
+        "axis": "horizontal",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 3
+      },
+      "response": {
+        "read": "edge",
+        "gain": 0.85
+      },
+      "write": {
+        "mode": "palette",
+        "palette": "ember",
+        "advance": 0
+      }
+    }
+  ]
+}

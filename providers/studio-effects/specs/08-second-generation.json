@@ -1,0 +1,78 @@
+{
+  "_": "Dubbing. Two stages on the SAME axis, so each pass compounds the previous one's warp - tape to tape, generation loss.",
+  "scan": {
+    "duration": "26s"
+  },
+  "clocks": {
+    "drift": {
+      "rate": 1.11
+    }
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "bed": {
+        "clock": "drift",
+        "x": {
+          "hand": {
+            "range": [
+              -240,
+              240
+            ],
+            "pace": 0.45,
+            "hesitation": 0.5,
+            "overshoot": 0.3,
+            "seed": 61
+          }
+        }
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 5
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 3
+      }
+    },
+    {
+      "id": "b",
+      "source": {
+        "from": "a"
+      },
+      "startAt": "36%",
+      "bed": {
+        "clock": "drift"
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 5
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 0
+      }
+    }
+  ]
+}

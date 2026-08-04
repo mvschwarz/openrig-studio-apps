@@ -567,8 +567,20 @@ async function refreshSpecList() {
   try {
     const r = await (await fetch('/api/scanner/specs')).json();
     const sel = $('#specpick');
-    sel.innerHTML = '<option value="">— saved spec —</option>';
-    for (const n of r.specs || []) { const o=document.createElement('option'); o.value=o.textContent=n; sel.appendChild(o); }
+    sel.innerHTML = '<option value="">— pick a spec —</option>';
+    // Examples first, because a fresh install has nothing else and a blank
+    // canvas is the worst thing to hand somebody. They name no clip, so they run
+    // on whatever source is selected.
+    const group = (label, names) => {
+      if (!names || !names.length) return;
+      const g = document.createElement('optgroup'); g.label = label;
+      for (const n of names) { const o=document.createElement('option');
+        o.value = n; o.textContent = n.replace(/\.json$/,'').replace(/^\d+-/,'').replace(/-/g,' ');
+        g.appendChild(o); }
+      sel.appendChild(g);
+    };
+    group('examples — bring your own footage', r.examples);
+    group('yours', r.specs);
   } catch (e) {}
 }
 
@@ -644,7 +656,7 @@ async function boot() {
       if (!r.ok) return fail(r.error || `could not load ${n}`);
       $('#spec').value = JSON.stringify(r.spec, null, 2);
       await loadSpec(r.spec);
-      say(`loaded ${n} — press run`);
+      say(r.spec && r.spec._ ? r.spec._ : `loaded ${n} — press run`);
     };
     $('#specsave').onclick = async () => {
       const n = prompt('save this spec as:', 'my-scan');

@@ -1,0 +1,85 @@
+{
+  "_": "The CLOCK's rate comes from the clip's own envelope, so time itself accelerates with the music rather than a transport merely moving faster. Needs a clip with audio.",
+  "scan": {
+    "duration": "20s"
+  },
+  "clocks": {
+    "pulse": {
+      "rate": {
+        "from-audio": {
+          "mode": "envelope",
+          "range": [
+            0.25,
+            2.6
+          ]
+        }
+      }
+    }
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "bed": {
+        "clock": "pulse",
+        "x": {
+          "hand": {
+            "range": [
+              -300,
+              300
+            ],
+            "pace": 0.4,
+            "hesitation": 0.5,
+            "overshoot": 0.3,
+            "seed": 13
+          }
+        }
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 4
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 3
+      }
+    },
+    {
+      "id": "b",
+      "source": {
+        "from": "a"
+      },
+      "startAt": "36%",
+      "head": {
+        "axis": "horizontal",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 4
+      },
+      "response": {
+        "read": "edge",
+        "gain": 1.0
+      },
+      "write": {
+        "mode": "palette",
+        "palette": "cold",
+        "advance": 0
+      }
+    }
+  ]
+}

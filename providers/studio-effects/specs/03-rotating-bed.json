@@ -1,0 +1,64 @@
+{
+  "_": "Turning the picture while the head crosses it makes straight edges CURVE, because each strip was taken at a different angle. The signature artifact of this instrument.",
+  "scan": {
+    "duration": "24s"
+  },
+  "clocks": {
+    "turn": {
+      "rate": 0.4
+    }
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "bed": {
+        "clock": "turn",
+        "rotate": {
+          "hand": {
+            "range": [
+              -14,
+              14
+            ],
+            "pace": 0.25,
+            "hesitation": 0.55,
+            "overshoot": 0.3,
+            "seed": 47
+          }
+        },
+        "x": {
+          "hand": {
+            "range": [
+              -200,
+              200
+            ],
+            "pace": 0.4,
+            "hesitation": 0.5,
+            "overshoot": 0.3,
+            "seed": 5
+          }
+        }
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 3,
+        "angle": 5
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 0
+      }
+    }
+  ]
+}

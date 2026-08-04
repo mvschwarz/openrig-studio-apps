@@ -37,19 +37,30 @@ read the rate before believing it — the first run of a new configuration can
 take many seconds to get going, and it says `warming up` until it has enough
 samples to mean anything.
 
-## The shipped specs, and what each one is for
+## The examples, and what each one is for
 
-They live in `<media>/specs/`. `save as…` writes new ones there.
+Eight examples ship with the provider and appear in the picker under
+**examples — bring your own footage**. **None of them names a clip**, deliberately:
+a spec that hardcodes a filename only works on the machine that has it. Point the
+source picker at your own video or still, pick an example, press run.
 
-| spec | what it demonstrates |
-|---|---|
-| `01-the-hand` | three independent hands on the bed under a mechanical head, read as ember contours |
-| `02-placed-not-waved` | the same with low `pace` and high `hesitation` — someone *placing* a photo rather than waving it |
-| `03-both-axes-are-time` | two stages on perpendicular axes; the final has no spatial axis left |
-| `04-time-runs-on-the-beat` | a clock whose *rate* comes from the clip's envelope, so time accelerates with the music |
-| `05-motion-bends-the-tape` | one stage, `motion` → `displace`: movement bends the recording rather than colouring it |
-| `06-no-frontier` | upstream at `advance: 3` wraps and stays fresh; downstream waits via `startAt` |
-| `07-both-axes-no-frontier` | the same remedy on the two-axis chain |
+Anything you save with `save as…` lands in `<media>/specs/` and appears under
+**yours**. A saved spec of the same name wins over the shipped one, so an example
+can be adapted and kept without renaming it.
+
+| example | demonstrates | wants |
+|---|---|---|
+| `flatbed warp` | the original — a hand drags while a mechanical head sweeps | anything |
+| `slit scan` | head held still; the x-axis *becomes* time | a moving clip |
+| `rotating bed` | turning during the sweep makes straight edges **curve** | anything |
+| `motion bends the tape` | `motion` → `displace`; movement drags the recording out of shape | a moving clip |
+| `both axes are time` | two stages, perpendicular; no spatial axis left in the result | anything |
+| `ember contours` | hand-moved bed, then read across as edges through a ramp | anything |
+| `time runs on the beat` | a **clock's rate** from the clip's envelope — time accelerates | a clip with audio |
+| `second generation` | dubbing: same axis twice, each pass compounding the last | anything |
+
+Each carries a one-line `_` note that the surface shows in the status line when
+you load it, so the picker explains itself.
 
 ## The five techniques, and the settings that produce them
 

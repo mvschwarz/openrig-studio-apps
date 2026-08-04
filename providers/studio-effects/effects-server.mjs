@@ -287,23 +287,30 @@ http.createServer(async (req, res) => {
     // the media root beside the footage rather than in a text box somebody has to
     // keep. Pick one, run it, get the same thing back every time.
     if (url.pathname === "/api/scanner/specs") {
+      // EXAMPLES SHIP WITH THE PROVIDER. A fresh install should not open on a
+      // blank canvas -- point it at your own footage, pick an example, run. They
+      // deliberately name NO clip, because a spec that hardcodes a filename only
+      // works on the machine that has it.
+      const shipped = path.join(HERE, "specs");
       const dir = MEDIA ? path.join(MEDIA, "specs") : null;
-      if (!dir) return json(res, 400, { ok: false, error: "no media root is bound, so specs have nowhere to live" });
 
       // BOTH HALVES, per the rule this repo has already paid for once: sanitise
       // the name to a single segment AND validate the RESOLVED path. Input-only
       // is one careless join away from a traversal; output-only accepts junk.
-      const resolveSpec = (name, { create = false } = {}) => {
-        if (create) fs.mkdirSync(dir, { recursive: true });
+      const resolveIn = (base, name, { create = false } = {}) => {
+        if (!base) return null;
+        if (create) fs.mkdirSync(base, { recursive: true });
         let root;
-        try { root = fs.realpathSync(dir); } catch { return null; }
-        const base = String(name || "").replace(/[^A-Za-z0-9._ -]/g, "").slice(0, 80);
-        if (!base || base === "." || base === "..") return null;
-        const full = path.resolve(root, base.endsWith(".json") ? base : `${base}.json`);
+        try { root = fs.realpathSync(base); } catch { return null; }
+        const clean = String(name || "").replace(/[^A-Za-z0-9._ -]/g, "").slice(0, 80);
+        if (!clean || clean === "." || clean === "..") return null;
+        const full = path.resolve(root, clean.endsWith(".json") ? clean : `${clean}.json`);
         return full.startsWith(root + path.sep) ? full : null;
       };
+      const resolveSpec = (name, opts) => resolveIn(dir, name, opts);
 
       if (req.method === "POST") {
+        if (!dir) return json(res, 400, { ok: false, error: "no media root is bound, so specs have nowhere to be saved" });
         const b = JSON.parse((await readBody(req)) || "{}");
         const file = resolveSpec(b.name, { create: true });
         if (!file) return json(res, 400, { ok: false, error: `not a usable spec name: ${b.name}` });
@@ -313,14 +320,19 @@ http.createServer(async (req, res) => {
 
       const want = url.searchParams.get("name");
       if (want) {
-        const file = resolveSpec(want);
-        if (!file || !fs.existsSync(file)) return json(res, 404, { ok: false, error: `no such spec: ${want}` });
-        try { return json(res, 200, { ok: true, name: path.basename(file), spec: JSON.parse(fs.readFileSync(file, "utf8")) }); }
-        catch (e) { return json(res, 200, { ok: false, error: `${path.basename(file)} is not valid JSON: ${e.message}` }); }
+        // A user spec of the same name WINS over a shipped example, so an example
+        // can be adapted and kept without renaming it.
+        const candidates = [resolveSpec(want), resolveIn(shipped, want)].filter(Boolean);
+        const file = candidates.find((f) => fs.existsSync(f));
+        if (!file) return json(res, 404, { ok: false, error: `no such spec: ${want}` });
+        try {
+          const spec = JSON.parse(fs.readFileSync(file, "utf8"));
+          return json(res, 200, { ok: true, name: path.basename(file), spec,
+                                  example: file.startsWith(shipped) });
+        } catch (e) { return json(res, 200, { ok: false, error: `${path.basename(file)} is not valid JSON: ${e.message}` }); }
       }
-      let names = [];
-      try { names = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort(); } catch {}
-      return json(res, 200, { ok: true, specs: names, dir });
+      const list = (d) => { try { return fs.readdirSync(d).filter((f) => f.endsWith(".json")).sort(); } catch { return []; } };
+      return json(res, 200, { ok: true, examples: list(shipped), specs: dir ? list(dir) : [], dir });
     }
 
     if (url.pathname === "/api/scanner/shader") {

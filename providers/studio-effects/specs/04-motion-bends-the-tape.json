@@ -1,0 +1,47 @@
+{
+  "_": "read:motion with write:displace - movement pushes where the strip was sampled from, so the recording is physically dragged out of shape wherever the picture moved.",
+  "scan": {
+    "duration": "20s"
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "bed": {
+        "x": {
+          "hand": {
+            "range": [
+              -200,
+              200
+            ],
+            "pace": 0.45,
+            "hesitation": 0.4,
+            "overshoot": 0.3,
+            "seed": 3
+          }
+        }
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 5
+      },
+      "response": {
+        "read": "motion",
+        "gain": 2.2
+      },
+      "write": {
+        "mode": "displace",
+        "displace": 110,
+        "advance": 0
+      }
+    }
+  ]
+}

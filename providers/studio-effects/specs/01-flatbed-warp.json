@@ -1,0 +1,57 @@
+{
+  "_": "The original scanner. A hand drags the picture while a mechanical head sweeps, so straight edges shatter into offset ribbons. Pick any clip or still.",
+  "scan": {
+    "duration": "20s"
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "bed": {
+        "x": {
+          "hand": {
+            "range": [
+              -320,
+              320
+            ],
+            "pace": 0.5,
+            "hesitation": 0.45,
+            "overshoot": 0.3,
+            "seed": 11
+          }
+        },
+        "y": {
+          "hand": {
+            "range": [
+              -90,
+              90
+            ],
+            "pace": 0.35,
+            "hesitation": 0.6,
+            "overshoot": 0.3,
+            "seed": 29
+          }
+        }
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 4
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 0
+      }
+    }
+  ]
+}

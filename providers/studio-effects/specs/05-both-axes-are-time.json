@@ -1,0 +1,69 @@
+{
+  "_": "Two stages on PERPENDICULAR axes. Stage a makes x time; stage b makes y time. The final picture has no spatial axis left. startAt lets a get ahead so b is not reading a tape that does not exist yet.",
+  "scan": {
+    "duration": "28s"
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "bed": {
+        "x": {
+          "hand": {
+            "range": [
+              -260,
+              260
+            ],
+            "pace": 0.4,
+            "hesitation": 0.5,
+            "overshoot": 0.3,
+            "seed": 23
+          }
+        }
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 4
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 3
+      }
+    },
+    {
+      "id": "b",
+      "source": {
+        "from": "a"
+      },
+      "startAt": "36%",
+      "head": {
+        "axis": "horizontal",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 4
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 0
+      }
+    }
+  ]
+}
