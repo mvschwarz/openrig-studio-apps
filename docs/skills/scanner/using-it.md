@@ -3,15 +3,17 @@
 ## Getting a picture in ninety seconds
 
 1. Open the SCANNER surface.
-2. Pick a clip from **`— source —`**.
-3. Pick **`01-the-hand.json`** from **`— saved spec —`**.
+2. Pick your video or still from **`— source —`**.
+3. Pick **`ember contours`** (or any example) from **`— pick a spec —`**.
 4. Press **`▶ run`**.
+
+The examples name no clip, so they run on whatever you selected in step 2.
 
 `run` clears the tapes first, so a run always starts at the beginning and the
 same spec gives the same result every time. Generators are seeded.
 
 The transport is at the top and sticky. Left to right: run/pause, clear, save
-final, saved-spec picker, built-in chain picker, source picker.
+final, spec picker, built-in chain picker, source picker.
 
 ## Reading the panels
 
@@ -118,11 +120,11 @@ is someone waving it around.
 The reverse channel is `POST /api/effects/drive` with a `scanner` key:
 
 ```json
-{ "scanner": { "specFile": "06-no-frontier.json", "clear": true, "record": true,
+{ "scanner": { "specFile": "06-ember-contours.json", "clear": true, "record": true,
                "say": "what the person should look for" } }
 ```
 
-`specFile` names a saved spec, so "play this file" is one instruction. `spec`
+`specFile` names a shipped example or a saved spec, so "play this file" is one instruction. `spec`
 takes a spec inline. `params` applies to a named `stage`. `say` writes the status
 line, which is how you narrate a change to someone watching rather than letting
 controls twitch silently.
