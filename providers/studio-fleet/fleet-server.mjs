@@ -29,7 +29,7 @@ import { promisify } from "node:util";
 const execFileP = promisify(execFile);
 import path from "node:path";
 import { probeBox } from "./probe.mjs";
-import { appendSample, readSamples, buildView } from "./fleet-state.mjs";
+import { appendSample, readSamples, buildView, updateAccountOverride } from "./fleet-state.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i > -1 && argv[i + 1] ? argv[i + 1] : d; };
@@ -46,15 +46,21 @@ const json = (res, code, obj) => { res.writeHead(code, { "content-type": "applic
 // be wrong out loud; a discovered one is wrong quietly.
 function loadConfig() {
   if (!fs.existsSync(CONFIG)) return {
-    boxes: [], labels: {},
+    boxes: [], labels: {}, boxLabels: {},
     // Say what is missing AND the shape that fixes it. "No config" alone sends
     // the reader looking for a file whose contents they then have to guess.
     error: `no fleet config at ${CONFIG} — create it as {"boxes":["<ssh-host>"],"labels":{"<org-id>":"<your name for it>"}}`,
   };
   try {
     const c = JSON.parse(fs.readFileSync(CONFIG, "utf8"));
-    return { boxes: Array.isArray(c.boxes) ? c.boxes : [], labels: c.labels || {}, operator: c.operator || null, error: null };
-  } catch (e) { return { boxes: [], labels: {}, error: `fleet config unreadable: ${e.message}` }; }
+    return {
+      boxes: Array.isArray(c.boxes) ? c.boxes : [],
+      labels: c.labels || {},
+      boxLabels: c.boxLabels || {},
+      operator: c.operator || null,
+      error: null,
+    };
+  } catch (e) { return { boxes: [], labels: {}, boxLabels: {}, error: `fleet config unreadable: ${e.message}` }; }
 }
 
 
@@ -77,7 +83,8 @@ const readBody = (req) => new Promise((resolve) => {
 function viewNow() {
   const cfg = loadConfig();
   const ov = loadOverrides();
-  return { ...buildView({ samples: readSamples(STORE), boxes: cfg.boxes, labels: cfg.labels, overrides: ov }),
+  return { ...buildView({ samples: readSamples(STORE), boxes: cfg.boxes, labels: cfg.labels,
+                         boxLabels: cfg.boxLabels, overrides: ov }),
            configError: cfg.error };
 }
 
@@ -128,17 +135,8 @@ http.createServer(async (req, res) => {
       const id = String(body.account || "").trim();
       if (!id) return json(res, 400, { ok: false, error: "account id is required" });
       const ov = loadOverrides();
-      const cur = ov.accounts[id] || {};
-      if (body.label !== undefined) cur.label = String(body.label).trim() || undefined;
-      if (body.capacityLeft !== undefined) {
-        const n = body.capacityLeft === null || body.capacityLeft === "" ? null : Number(body.capacityLeft);
-        if (n !== null && (!Number.isFinite(n) || n < 0 || n > 100)) {
-          return json(res, 400, { ok: false, error: "capacityLeft must be 0-100, or null to clear it" });
-        }
-        cur.capacityLeft = n;
-        cur.capacitySetAt = n === null ? undefined : new Date().toISOString();
-      }
-      ov.accounts[id] = cur;
+      try { ov.accounts[id] = updateAccountOverride(ov.accounts[id] || {}, body); }
+      catch (e) { return json(res, 400, { ok: false, error: String(e.message || e) }); }
       saveOverrides(ov);
       return json(res, 200, { ok: true, ...viewNow() });
     }

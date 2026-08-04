@@ -61,6 +61,7 @@
     tbody tr:last-child td { border-bottom: 0; }
     tbody tr:hover td { background: rgba(255,255,255,.018); }
     .name { color: var(--text); font-weight: 650; white-space: nowrap; }
+    .machine-key { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; font-weight: 500; }
     .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .muted { color: var(--muted); }
     /* Editable cells look editable but stay quiet — this is a reference table
@@ -209,13 +210,16 @@
       // "what is each machine on, how much has it got, and when does it refill" —
       // so both providers sit side by side on one row and nothing has to be joined
       // in the reader's head.
-      const byId = new Map(accounts.map(a => [a.account, a]));
-      const opts = (sel) => ['<option value="">— none —</option>'].concat(
-        accounts.map(a => `<option value="${esc(a.account)}"${a.account === sel ? ' selected' : ''}>${
+      const byId = new Map(accounts.map(a => [`${a.provider}:${a.account}`, a]));
+      const boxNameByHost = new Map(boxes.map(b => [b.host, b.displayName || b.host]));
+      const boxName = (host) => boxNameByHost.get(host) || host;
+      const opts = (sel, provider) => ['<option value="">— none —</option>'].concat(
+        accounts.filter(a => a.provider === provider)
+          .map(a => `<option value="${esc(a.account)}"${a.account === sel ? ' selected' : ''}>${
           esc(a.label || a.account)}</option>`)
       ).join('');
-      const cells = (id) => {
-        const a = byId.get(id);
+      const cells = (id, provider) => {
+        const a = byId.get(`${provider}:${id}`);
         if (!a) return '<td class="numeric muted">—</td><td class="muted">—</td>';
         return `<td class="numeric">${left(a.capacityLeft)}</td>
                 <td>${slot(a.nextResetAt)}</td>`;
@@ -228,13 +232,13 @@
           <th>Codex account</th><th class="numeric">left</th><th>resets</th>
         </tr></thead><tbody>
         ${boxes.length ? boxes.map(b => `<tr>
-          <td class="name">${esc(b.host)}</td>
-          <td class="pick"><select data-host="${esc(b.host)}" data-provider="claude">${opts(b.claudeAccount)}</select>
+          <td class="name">${esc(b.displayName || b.host)}<span class="machine-key">${esc(b.host)}</span></td>
+          <td class="pick"><select data-host="${esc(b.host)}" data-provider="claude">${opts(b.claudeAccount, 'claude')}</select>
               <button class="switch" data-host="${esc(b.host)}" data-provider="claude" title="switch this machine to the selected account">⇄</button></td>
-          ${cells(b.claudeAccount)}
-          <td class="pick"><select data-host="${esc(b.host)}" data-provider="codex">${opts(b.codexAccount)}</select>
+          ${cells(b.claudeAccount, 'claude')}
+          <td class="pick"><select data-host="${esc(b.host)}" data-provider="codex">${opts(b.codexAccount, 'codex')}</select>
               <button class="switch" data-host="${esc(b.host)}" data-provider="codex" title="switch this machine to the selected account">⇄</button></td>
-          ${cells(b.codexAccount)}
+          ${cells(b.codexAccount, 'codex')}
         </tr>`).join('') : `<tr><td colspan="7" class="muted">No machines declared.</td></tr>`}
         </tbody></table></div></section>`);
 
@@ -265,10 +269,13 @@
               value="${a.capacityLeft === null || a.capacityLeft === undefined ? '' : esc(a.capacityLeft)}"
               placeholder="—"> %</td>
           <td class="muted">${esc(a.capacitySource === 'none' ? '—' : a.capacitySource || '')}</td>
-          <td>${slot(a.nextResetAt)}</td>
+          <td>${a.provider === 'codex'
+                ? `<input class="edit" data-account="${esc(a.account)}" data-field="resetsWeeklyAt"
+                    value="${esc(a.resetObservedAt || '')}" placeholder="2026-08-09T04:09:00Z">`
+                : slot(a.nextResetAt)}</td>
           <td>${a.nextResetAt ? when(a.nextResetAt) : '<span class="muted">—</span>'}</td>
-          <td>${a.onBox ? esc(a.onBox)
-                : a.lastSeenOnHost ? `<span class="muted">last on ${esc(a.lastSeenOnHost)}</span>`
+          <td>${a.onBox ? esc(boxName(a.onBox))
+                : a.lastSeenOnHost ? `<span class="muted">last on ${esc(boxName(a.lastSeenOnHost))}</span>`
                 : '<span class="muted">parked</span>'}</td>
         </tr>`).join('') : `<tr><td colspan="6" class="muted">None seen yet.</td></tr>`}
         </tbody></table></div></section>`;

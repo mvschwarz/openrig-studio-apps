@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseProbe } from "../providers/studio-fleet/probe.mjs";
-import { buildView, projectWeeklyReset, weeklySlot } from "../providers/studio-fleet/fleet-state.mjs";
+import { buildView, projectWeeklyReset, weeklySlot, updateAccountOverride } from "../providers/studio-fleet/fleet-state.mjs";
 import fs from "node:fs";
 
 const probe = (o) => JSON.stringify({ ok: true, status: "200", org: "org-a", ...o });
@@ -394,4 +394,106 @@ test("the source column always says where the number came from", () => {
   }).accounts[0];
   assert.equal(typed.capacityLeft, 90, "a newer typed value wins");
   assert.equal(typed.capacitySource, "typed", "and says so");
+});
+
+test("an operator can add a parked codex account with its weekly reset", () => {
+  const v = buildView({
+    samples: [],
+    boxes: ["build-vm"],
+    now: Date.parse("2026-08-03T23:00:00Z"),
+    overrides: {
+      accounts: {
+        "operator@fixture.invalid": {
+          provider: "codex",
+          label: "operator@fixture.invalid",
+          capacityLeft: 100,
+          capacitySetAt: "2026-08-03T23:00:00Z",
+          resetsWeeklyAt: "2026-08-09T04:09:00Z",
+        },
+      },
+    },
+  });
+
+  const account = v.accounts.find((a) => a.account === "operator@fixture.invalid");
+  assert.ok(account, "an override-only codex account must appear before its first host sample");
+  assert.equal(account.provider, "codex");
+  assert.equal(account.capacityLeft, 100);
+  assert.equal(account.resetsWeeklyAt, "Sundays 04:09 UTC");
+  assert.equal(account.nextResetAt, "2026-08-09T04:09:00.000Z");
+});
+
+test("the account editor persists a provider and UTC weekly reset anchor", () => {
+  const updated = updateAccountOverride({}, {
+    provider: "codex",
+    label: "operator@fixture.invalid",
+    capacityLeft: 100,
+    resetsWeeklyAt: "2026-08-09T04:09:00Z",
+  }, "2026-08-03T23:00:00.000Z");
+
+  assert.deepEqual(updated, {
+    provider: "codex",
+    label: "operator@fixture.invalid",
+    capacityLeft: 100,
+    capacitySetAt: "2026-08-03T23:00:00.000Z",
+    resetsWeeklyAt: "2026-08-09T04:09:00.000Z",
+  });
+  assert.throws(() => updateAccountOverride({}, { resetsWeeklyAt: "next Sunday" }), /ISO timestamp/);
+});
+
+test("the provider manager exposes an editable codex reset field", () => {
+  const html = fs.readFileSync(new URL("../apps/provider-manager/app/provider-manager.html", import.meta.url), "utf8");
+  assert.match(html, /data-field="resetsWeeklyAt"/, "the reset column must be editable rather than display-only");
+});
+
+test("an override-only Claude account remains visible while parked", () => {
+  const v = buildView({
+    samples: [],
+    boxes: ["build-vm"],
+    labels: { "org-fixture": "operator@fixture.invalid" },
+    overrides: {
+      accounts: {
+        "org-fixture": {
+          provider: "claude",
+          label: "operator@fixture.invalid",
+          capacityLeft: 100,
+          capacitySetAt: "2026-08-03T23:00:00.000Z",
+          resetsWeeklyAt: "2026-08-10T23:12:00.000Z",
+        },
+      },
+    },
+    now: Date.parse("2026-08-04T00:00:00.000Z"),
+  });
+
+  const account = v.accounts.find((a) => a.account === "org-fixture");
+  assert.ok(account, "a known Claude account must not disappear when no machine currently exposes it");
+  assert.equal(account.provider, "claude");
+  assert.equal(account.label, "operator@fixture.invalid");
+  assert.equal(account.capacityLeft, 100);
+  assert.deepEqual(account.machines, []);
+  assert.equal(account.readyToSwitchTo, true);
+});
+
+test("machine display names do not replace operational host aliases", () => {
+  const v = buildView({
+    samples: [],
+    boxes: ["vps-fixture-01"],
+    boxLabels: { "vps-fixture-01": "Demo Box" },
+  });
+
+  assert.equal(v.boxes[0].host, "vps-fixture-01", "routing keeps the canonical operational alias");
+  assert.equal(v.boxes[0].displayName, "Demo Box", "the human-facing inventory gets a stable name");
+});
+
+test("the provider manager renders a machine label and retains its host key", () => {
+  const html = fs.readFileSync(new URL("../apps/provider-manager/app/provider-manager.html", import.meta.url), "utf8");
+  assert.match(html, /b\.displayName/, "the visible machine name should come from the inventory label");
+  assert.match(html, /machine-key/, "the operational alias should remain visible for debugging and routing");
+});
+
+test("machine account selectors cannot mix Claude and Codex accounts", () => {
+  const html = fs.readFileSync(new URL("../apps/provider-manager/app/provider-manager.html", import.meta.url), "utf8");
+  assert.match(html, /accounts\.filter\(a => a\.provider === provider\)/,
+    "each selector must contain only accounts from the provider it changes");
+  assert.match(html, /opts\(b\.claudeAccount, 'claude'\)/);
+  assert.match(html, /opts\(b\.codexAccount, 'codex'\)/);
 });

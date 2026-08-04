@@ -68,7 +68,33 @@ export function weeklySlot(observedIso) {
   return `${day}s ${hh}:${mm} UTC`;
 }
 
-export function buildView({ samples, boxes, labels = {}, now = Date.now(), overrides = {} }) {
+export function updateAccountOverride(current, body, nowIso = new Date().toISOString()) {
+  const next = { ...current };
+  if (body.provider !== undefined) {
+    if (body.provider !== "claude" && body.provider !== "codex") throw new Error("provider must be claude or codex");
+    next.provider = body.provider;
+  }
+  if (body.label !== undefined) next.label = String(body.label).trim() || undefined;
+  if (body.capacityLeft !== undefined) {
+    const n = body.capacityLeft === null || body.capacityLeft === "" ? null : Number(body.capacityLeft);
+    if (n !== null && (!Number.isFinite(n) || n < 0 || n > 100)) {
+      throw new Error("capacityLeft must be 0-100, or null to clear it");
+    }
+    next.capacityLeft = n;
+    next.capacitySetAt = n === null ? undefined : nowIso;
+  }
+  if (body.resetsWeeklyAt !== undefined) {
+    if (body.resetsWeeklyAt === null || body.resetsWeeklyAt === "") next.resetsWeeklyAt = undefined;
+    else {
+      const t = Date.parse(body.resetsWeeklyAt);
+      if (!Number.isFinite(t)) throw new Error("resetsWeeklyAt must be an ISO timestamp, or null to clear it");
+      next.resetsWeeklyAt = new Date(t).toISOString();
+    }
+  }
+  return next;
+}
+
+export function buildView({ samples, boxes, labels = {}, boxLabels = {}, now = Date.now(), overrides = {} }) {
   // Operator-supplied facts, kept separate from samples all the way through so a
   // typed number is never silently presented as something we measured.
   const ovAccounts = overrides.accounts || {};
@@ -119,6 +145,7 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now(), overr
     const attempt = lastAttemptByBox.get(host) || null;
     return {
       host,
+      displayName: boxLabels[host] || host,
       account: good?.org ?? attempt?.org ?? null,
       label: (good?.org ?? attempt?.org) ? labelFor(labels, good?.org ?? attempt?.org) : null,
       // The reading. Always the last good one; null only if there has never been one.
@@ -169,6 +196,11 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now(), overr
     const c = s2.codex;
     if (c?.email && !codexSeen.has(c.email)) codexSeen.set(c.email, { ...c, host: s2.host, at: s2.at });
   }
+  for (const [account, ov] of Object.entries(ovAccounts)) {
+    if (ov.provider === "codex" && !codexSeen.has(account)) {
+      codexSeen.set(account, { email: account, plan: ov.plan ?? null, host: null, at: ov.capacitySetAt ?? null });
+    }
+  }
   const codexRows = [...codexSeen.values()].map((c) => {
     const ov = ovAccounts[c.email] || {};
     const onBox = boxRows.find((b) => b.codexAccount === c.email)?.host ?? null;
@@ -183,8 +215,9 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now(), overr
       // anything else here would be inventing a measurement.
       capacitySource: cap === null ? "none" : "typed",
       capacitySetAt: ov.capacitySetAt ?? null,
-      resetsWeeklyAt: ov.resetsWeeklyAt ?? null,
-      nextResetAt: null,
+      resetObservedAt: ov.resetsWeeklyAt ?? null,
+      resetsWeeklyAt: weeklySlot(ov.resetsWeeklyAt),
+      nextResetAt: projectWeeklyReset(ov.resetsWeeklyAt, now),
       onBox,
       lastSeenOnHost: onBox ?? c.host ?? null,
       machines: boxRows.filter((b) => b.codexAccount === c.email).map((b) => b.host),
@@ -196,7 +229,22 @@ export function buildView({ samples, boxes, labels = {}, now = Date.now(), overr
       readyToSwitchTo: !onBox && (cap ?? 0) >= 50,
     };
   });
-  const accountRows = [...lastGoodByOrg.values()].map((s) => ({
+  const claudeSeen = new Map(lastGoodByOrg);
+  for (const [account, ov] of Object.entries(ovAccounts)) {
+    if (ov.provider === "claude" && !claudeSeen.has(account)) {
+      claudeSeen.set(account, {
+        org: account,
+        used5h: null,
+        used7d: ov.capacityLeft === undefined || ov.capacityLeft === null
+          ? null
+          : 100 - ov.capacityLeft,
+        resets5h: null,
+        resets7d: ov.resetsWeeklyAt ?? null,
+        at: ov.capacitySetAt ?? null,
+      });
+    }
+  }
+  const accountRows = [...claudeSeen.values()].map((s) => ({
     account: s.org,
     provider: "claude",
     label: labelFor(labels, s.org),
