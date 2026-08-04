@@ -1,0 +1,34 @@
+{
+  "_": "SLICES OF VIDEO, SEAMS BLENDED. Each band holds its own moving second, and softness 0.9 crossfades the boundaries so it does not scream 'stitched' - one picture with vertical themes rather than a row of cuts.",
+  "scan": {
+    "duration": "40s"
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 40,
+        "softness": 0.9
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 8,
+        "frames": 24,
+        "fps": 12
+      }
+    }
+  ]
+}

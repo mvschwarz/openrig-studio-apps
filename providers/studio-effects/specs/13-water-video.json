@@ -1,0 +1,33 @@
+{
+  "_": "THE WATER EFFECT AS VIDEO. One tape, but advance 14 repaints it continuously - the warped picture never settles, it keeps being rewritten with newer footage. No stack, no parade. Watch it live; this is the moving version of the shear.",
+  "scan": {
+    "duration": "90s"
+  },
+  "stages": [
+    {
+      "id": "a",
+      "source": {
+        "rate": 1
+      },
+      "head": {
+        "axis": "vertical",
+        "position": {
+          "ramp": [
+            0,
+            1
+          ]
+        },
+        "width": 6,
+        "softness": 0.5
+      },
+      "response": {
+        "read": "passthrough"
+      },
+      "write": {
+        "mode": "direct",
+        "advance": 14,
+        "frames": 1
+      }
+    }
+  ]
+}

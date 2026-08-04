@@ -219,7 +219,7 @@ function makeStage(def, index) {
     id: def.id, from: def.from, clocks: def.clocks, startAt: def.startAt || 0,
     params: Object.assign({}, defaults(), def.constants || {}),
     tracks: def.tracks || {}, source: def.source || {},
-    writeAt: 0, tapes: [], fbos: [], prevTex: null, prevFbo: null, prevW: 0, prevH: 0,
+    writeAt: 0, lastAt: 0, tapes: [], fbos: [], prevTex: null, prevFbo: null, prevW: 0, prevH: 0,
     canvas: null, ctx: null, index, playHead: 0,
   };
   ensureTapes(st, Math.max(1, Math.floor(st.params.frames || 1)));
@@ -333,6 +333,16 @@ function writeStage(st, P, adv) {
   // sequence of different places.
   const colsPerSec = Math.max(1e-6, adv * 60);
   const delta = wpx / colsPerSec;          // seconds between column arrivals
+
+  // COVER THE WHOLE JUMP. At a high advance the write position moves further in
+  // one step than a single strip is wide, so drawing one strip leaves the rest
+  // of the interval UNWRITTEN -- black gaps that read as hard banding and made
+  // a fast sweep structurally broken rather than merely coarse.
+  let moved = (st.writeAt - st.lastAt) * span;
+  if (moved < 0) moved += span;
+  const passes = Math.max(1, Math.ceil(moved / wpx));
+  st.lastAt = st.writeAt;
+
   for (let k = 0; k < n; k++) {
     const col = Math.round(((( (at - k*wpx) % span) + span) % span));
     if (k > 0) {
@@ -344,8 +354,20 @@ function writeStage(st, P, adv) {
       gl.uniform1f(u('uBedScale'), Q.bedScale ?? 1);
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, st.fbos[k]);
-    if (vertical) gl.scissor(col,0,wpx,OUT_H); else gl.scissor(0,col,OUT_W,wpx);
-    gl.drawArrays(gl.TRIANGLES,0,3);
+    const soft = P.headSoftness || 0;
+    const fpx = soft > 0.001 ? Math.ceil(soft * wpx) : 0;
+    if (fpx) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); }
+    for (let j = 0; j < passes; j++) {
+      const c0 = Math.round(((((col - j*wpx) % span) + span) % span));
+      gl.uniform1f(u('uStripAt'), c0);
+      gl.uniform1f(u('uStripW'), wpx);
+      // Widened by the feather so the fade overlaps its neighbour rather than
+      // fading into black.
+      if (vertical) gl.scissor(c0-fpx, 0, wpx+2*fpx, OUT_H);
+      else          gl.scissor(0, c0-fpx, OUT_W, wpx+2*fpx);
+      gl.drawArrays(gl.TRIANGLES,0,3);
+    }
+    if (fpx) gl.disable(gl.BLEND);
   }
   gl.disable(gl.SCISSOR_TEST);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -371,7 +393,7 @@ function clearAll() {
       gl.disable(gl.SCISSOR_TEST); gl.viewport(0,0,OUT_W,OUT_H);
       gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
     }
-    st.writeAt = 0; st.playHead = 0;
+    st.writeAt = 0; st.lastAt = 0; st.playHead = 0;
   }
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   scanTime = 0; for (const k of Object.keys(clockT)) clockT[k] = 0;

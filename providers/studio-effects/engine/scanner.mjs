@@ -46,7 +46,9 @@ uniform float uWriteAt;      // where in the output this strip lands, 0..1
 uniform float uHeadAt;       // where on the bed the head is reading, 0..1
 uniform float uHeadWidth;
 uniform float uHeadAngle;    // degrees off-axis
-uniform float uSoftness;
+uniform float uSoftness;    // feather, as a fraction of the strip width
+uniform float uStripAt;     // where this strip starts, in output pixels
+uniform float uStripW;      // its core width
 
 // The bed transform -- the thing being scanned, and how it is being moved.
 uniform vec2  uBedPos;
@@ -163,7 +165,23 @@ void main() {
   else if (uWriteMode < 2.5) outc = ramp(value);            // palette
   else                       outc = cur * step(uThreshold + 0.001, value); // matte
 
-  fragColor = vec4(outc * on, 1.0);
+  // FEATHER THE STRIP EDGES so neighbouring slices CROSSFADE rather than butt up
+  // against each other. Without this every column boundary is a hard cut, and a
+  // recording made of slices screams that it is made of slices. With it the
+  // seams dissolve and it reads as one picture that happens to have vertical
+  // themes.
+  //
+  // Alpha rather than a blur: the strips are written with blending on and
+  // overlap by the feather amount, so the fade is a genuine crossfade with what
+  // was already on the tape, not a smear applied afterwards.
+  float a = 1.0;
+  if (uSoftness > 0.001) {
+    float pos = (uAxis < 0.5 ? gl_FragCoord.x : gl_FragCoord.y) - uStripAt;
+    float f = max(1.0, uSoftness * uStripW);
+    a = clamp(min(pos, uStripW - pos) / f, 0.0, 1.0);
+    a = a * a * (3.0 - 2.0 * a);
+  }
+  fragColor = vec4(outc * on, a);
 }`;
 
 // A separate pass, only when persistence is below 1. Kept apart so the common
