@@ -194,9 +194,13 @@
         $('#stackpreset').addEventListener('change', (e) => setStack(stackFamily, e.target.value));
         await useFamily();
         await loadSources();
-        await useSource('');
+        // The restore says its own piece; overwriting it with 'ready' would hide
+        // the one thing a watcher needs to know — that the picture came back on
+        // purpose rather than by luck.
+        const restored = await restoreState();
+        if (!restored) await useSource('');
         pollDrive();
-        say('ready');
+        if (!restored) say('ready');
       } catch (e) { fail(`could not start: ${e.message}`); }
     }
 
@@ -570,7 +574,40 @@
     // arrive while a render is in flight, the newest wins and the intermediate ones
     // are skipped. Applying them all in order would animate through states nobody
     // asked to see, and would let a slow page fall behind and act on stale intent.
-    let driveSeen = 0, driveStop = false;
+    let driveSeen = 0, driveStop = false, driveBoot = null;
+
+    // LIVE RELOAD, AND THE POINT IS THAT IT IS NOT JARRING. The provider hands out
+    // a new id each time it starts, so when the studio restarts with edited code
+    // this page reloads ITSELF. Without it a code change is invisible until the
+    // person watching happens to refresh, which is the opposite of a window you
+    // can sit back and watch.
+    //
+    // The reload keeps its place: source, family, look, every knob, the stack, the
+    // curve, and where the video was and whether it was playing. Restored on the
+    // way back in, so the change appears and the picture carries on rather than
+    // resetting to a test frame. A reload that loses your work is one you learn to
+    // dread; this one should read as a flicker.
+    const KEEP = 'effects.session';
+    function keepState() {
+      try {
+        sessionStorage.setItem(KEEP, JSON.stringify({
+          source: $('#source').value, family: familyId, params,
+          stack: stackFamily ? { family: stackFamily, preset: $('#stackpreset').value } : null,
+          curves: curveSpec,
+          t: isVideo ? vid.currentTime : 0, playing: isVideo && !vid.paused,
+        }));
+      } catch { /* a full quota must not block the reload */ }
+    }
+    async function restoreState() {
+      let st; try { st = JSON.parse(sessionStorage.getItem(KEEP) || 'null'); } catch { st = null; }
+      if (!st) return false;
+      sessionStorage.removeItem(KEEP);
+      await applyDrive({ source: st.source, family: st.family, params: st.params,
+                         stack: st.stack, curves: st.curves });
+      if (st.t && isVideo) { vid.currentTime = st.t; if (st.playing) $('#play').click(); }
+      say('reloaded with new code — picture kept');
+      return true;
+    }
     async function applyDrive(op) {
       // Ordered so each step lands on the state the next one expects: a source
       // before a family (the family re-uploads it), a family before a preset (the
@@ -596,7 +633,16 @@
       while (!driveStop) {
         try {
           const r = await (await fetch('/api/effects/drive')).json();
-          if (r.ok && r.gen > driveSeen && r.op) { driveSeen = r.gen; await applyDrive(r.op); }
+          // A DIFFERENT PROVIDER PROCESS MEANS DIFFERENT CODE IS SERVABLE.
+          if (r.boot) {
+            if (driveBoot === null) driveBoot = r.boot;
+            else if (r.boot !== driveBoot) { keepState(); location.reload(); return; }
+          }
+          if (r.ok && r.gen > driveSeen && r.op) {
+            driveSeen = r.gen;
+            if (r.op.reload) { keepState(); location.reload(); return; }
+            await applyDrive(r.op);
+          }
         } catch { /* the provider going away must not kill the page */ }
         await new Promise((r) => setTimeout(r, 350));
       }

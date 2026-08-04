@@ -49,6 +49,16 @@ const readBody = (req) => new Promise((r) => { let b = ""; req.on("data", (c) =>
 // prevent, one layer up.
 let driveGen = 0, driveOp = null;
 
+// A NEW ID EVERY TIME THIS PROCESS STARTS. The surface watches it and reloads
+// itself when it changes, which is what makes a code change visible without the
+// person watching having to do anything.
+//
+// This is the honest signal available here: the studio COPIES surfaces into its
+// runtime directory at boot, so edited source only reaches the browser after a
+// restart. Watching the file would announce changes the page cannot yet see;
+// watching the restart announces exactly the moment new code became servable.
+const BOOT = Math.random().toString(36).slice(2, 10);
+
 // Only ever inside the declared media root, resolved AFTER the input is
 // incorporated rather than validated as a string beforehand. A validated input is
 // not a validated path.
@@ -83,7 +93,7 @@ http.createServer(async (req, res) => {
         driveOp = { gen: driveGen, at: Date.now(), ...b };
         return json(res, 200, { ok: true, gen: driveGen });
       }
-      return json(res, 200, { ok: true, gen: driveGen, op: driveOp });
+      return json(res, 200, { ok: true, gen: driveGen, op: driveOp, boot: BOOT });
     }
 
     // The shader, served rather than duplicated into the surface. One definition,
