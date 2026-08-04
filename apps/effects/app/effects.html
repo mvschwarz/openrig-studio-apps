@@ -107,6 +107,20 @@
       </div>
 
       <div class="card">
+        <h2>Saved looks</h2>
+        <div class="srcrow">
+          <select id="lookpick"><option value="">— saved looks —</option></select>
+          <button class="ghost" id="lookload" title="apply this saved look">load</button>
+        </div>
+        <div class="srcrow" style="margin-top:6px">
+          <input type="text" id="lookname" placeholder="name this look">
+          <button class="ghost" id="looksave" title="save everything: source, knobs, stack, curves, depth">save</button>
+        </div>
+        <p class="note" id="looknote">A look is a whole configuration, written as JSON you can read,
+          edit and keep beside the footage it was made for.</p>
+      </div>
+
+      <div class="card">
         <h2>Looks</h2>
         <div class="presets" id="presets"></div>
         <div class="presets" style="margin-top:10px">
@@ -170,6 +184,12 @@
       // and the presets use, so there is one way to say "this knob matters".
       highlight: (list, why) => setHighlight(list, why),
       highlighted: () => ({ params: [...highlighted], why: highlightWhy }),
+      // A look is a document an agent can author, save, and hand to a person to
+      // edit — which is the whole point of it being JSON rather than state.
+      look: () => captureLook(),
+      looks: () => listLooks(),
+      save: (name, note) => saveLook(name, note),
+      load: (name) => loadLook(name),
       lastSensitivity: () => sensitivity,
       // THE VALUES ACTUALLY BEING RENDERED, for both stages. `params` is what was
       // AUTHORED — it does not move when a curve drives it, which is correct for a
@@ -236,6 +256,7 @@
         // purpose rather than by luck.
         const restored = await restoreState();
         if (!restored) await useSource('');
+        listLooks();
         pollDrive();
         if (!restored) say('ready');
       } catch (e) { fail(`could not start: ${e.message}`); }
@@ -601,6 +622,8 @@
     $('#depthNum').addEventListener('change', (e) => setDepth(e.target.value));
 
     $('#sens').addEventListener('click', () => measureSensitivity());
+    $('#looksave').addEventListener('click', () => saveLook($('#lookname').value));
+    $('#lookload').addEventListener('click', () => { const n = $('#lookpick').value; if (n) loadLook(n); });
 
     $('#sound').addEventListener('click', async () => {
       const want = vid.muted;
@@ -788,8 +811,10 @@
       if (op.curves !== undefined) { curveSpec = op.curves || null; lastCurve = null; draw(); }
       // An agent can ASK for sound, but only a click can grant it — so this sets
       // the intent and the button reflects reality rather than the request.
+      if (op.loadLook) await loadLook(op.loadLook);
       if (op.highlight !== undefined) setHighlight(op.highlight, op.highlightWhy);
       if (op.measure) await measureSensitivity();
+      if (op.saveLook) await saveLook(op.saveLook, op.lookNote);
       if (op.depth !== undefined) setDepth(op.depth);
       if (op.sound !== undefined && isVideo) setSound(!!op.sound);
       if (op.play !== undefined && isVideo) {
@@ -1356,6 +1381,73 @@
         fail(`sensitivity: ${e.message}`);
         return null;
       }
+    }
+
+    // A LOOK IS THE WHOLE CONFIGURATION, not a preset name. Everything needed to
+    // get back to this picture: what is loaded, which effects, every knob on both
+    // stages, both curves, how hard they push, and what the author thought was
+    // worth pointing at.
+    //
+    // Deliberately a flat DOCUMENT rather than a diff against a preset. A diff is
+    // smaller and breaks the day the preset it was written against changes; a
+    // document still means the same thing in a year.
+    function captureLook() {
+      return {
+        source: $('#source').value,
+        family: familyId,
+        params: { ...params },
+        stack: stackFamily ? { family: stackFamily, preset: $('#stackpreset').value, params: { ...stackParams } } : null,
+        curves: curveSpec,
+        depth,
+        highlight: [...highlighted],
+        highlightWhy,
+      };
+    }
+    async function applyLook(look) {
+      if (!look) return;
+      await applyDrive({
+        source: look.source, family: look.family, params: look.params,
+        stack: look.stack ? { family: look.stack.family, preset: look.stack.preset } : null,
+        curves: look.curves,
+      });
+      // Applied AFTER the stack, because setStack resolves its own params from a
+      // preset and would otherwise overwrite the exact values that were saved.
+      if (look.stack?.params && stackFamily === look.stack.family) stackParams = { ...look.stack.params };
+      if (look.depth !== undefined) setDepth(look.depth);
+      setHighlight(look.highlight || [], look.highlightWhy || '');
+      paramGen++; draw();
+    }
+    async function listLooks() {
+      try {
+        const r = await (await fetch('/api/effects/looks')).json();
+        const sel = $('#lookpick');
+        sel.innerHTML = '<option value="">— saved looks —</option>';
+        for (const l of r.looks || []) {
+          const o = document.createElement('option');
+          o.value = l.name;
+          o.textContent = l.stack ? `${l.name} (${l.family} + ${l.stack})` : `${l.name} (${l.family || '?'})`;
+          sel.appendChild(o);
+        }
+        return r.looks || [];
+      } catch { return []; }
+    }
+    async function saveLook(name, note) {
+      const r = await (await fetch('/api/effects/looks', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, note: note || '', look: captureLook() }),
+      })).json();
+      if (!r.ok) { fail(r.error || 'could not save'); return null; }
+      await listLooks();
+      $('#lookpick').value = r.name;
+      say(`saved "${r.name}" — ${r.path}`);
+      return r;
+    }
+    async function loadLook(name) {
+      const r = await (await fetch(`/api/effects/looks/${encodeURIComponent(name)}`)).json();
+      if (!r.ok) { fail(r.error || 'could not load'); return null; }
+      await applyLook(r.look);
+      say(`loaded "${r.name}"${r.note ? ' — ' + r.note : ''}`);
+      return r;
     }
 
     // HIGHLIGHTS ARE DATA AND THIS IS THE ONLY PLACE THAT KNOWS HOW TO SHOW THEM.

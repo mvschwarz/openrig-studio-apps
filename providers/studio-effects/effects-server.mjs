@@ -202,6 +202,65 @@ http.createServer(async (req, res) => {
       });
     }
 
+    // SAVED LOOKS. A whole configuration — source, family, every knob, the second
+    // stage, both curves, the depth, and which knobs to highlight — as one JSON
+    // file on disk.
+    //
+    // FILES RATHER THAN A DATABASE, and readable ones, because the point is that a
+    // look is a DOCUMENT. An agent writes one, a person opens it and changes a
+    // number, it goes in a repository next to the footage it was made for, it gets
+    // diffed in a review. A look you cannot read is a look you have to re-derive
+    // by moving sliders until it comes back.
+    //
+    // Stored under the bound media root so containment is the one that already
+    // exists rather than a second rule to get wrong. That does mean looks sit
+    // beside footage; the alternative was a new root, and a new root is a new way
+    // for a path to escape.
+    if (url.pathname === "/api/effects/looks" || url.pathname.startsWith("/api/effects/looks/")) {
+      if (!MEDIA) return json(res, 200, { ok: false, error: "no media root bound, so there is nowhere to keep looks" });
+      const dir = path.join(MEDIA, "looks");
+      const nameOf = (n) => String(n || "").trim().replace(/[^A-Za-z0-9 _-]/g, "").slice(0, 60);
+
+      if (req.method === "POST") {
+        const b = JSON.parse((await readBody(req)) || "{}");
+        const name = nameOf(b.name);
+        // A name that sanitises to nothing is a REFUSAL, not a file called
+        // "untitled" the author will never find again.
+        if (!name) return json(res, 400, { ok: false, error: "a look needs a name of letters, numbers, spaces, dashes or underscores" });
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, `${name}.json`);
+        const doc = {
+          name,
+          note: typeof b.note === "string" ? b.note : "",
+          savedAt: new Date().toISOString(),
+          look: b.look || {},
+        };
+        fs.writeFileSync(file, JSON.stringify(doc, null, 2) + "\n");
+        return json(res, 200, { ok: true, name, path: `looks/${name}.json` });
+      }
+
+      const which = decodeURIComponent(url.pathname.replace("/api/effects/looks", "").replace(/^\//, ""));
+      if (!which) {
+        if (!fs.existsSync(dir)) return json(res, 200, { ok: true, looks: [] });
+        const looks = [];
+        for (const f of fs.readdirSync(dir)) {
+          if (!f.endsWith(".json")) continue;
+          try {
+            const d = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+            looks.push({ name: d.name || f.replace(/\.json$/, ""), note: d.note || "", savedAt: d.savedAt || null,
+                         family: d.look?.family || null, stack: d.look?.stack?.family || null });
+          } catch { looks.push({ name: f.replace(/\.json$/, ""), note: "", broken: true }); }
+        }
+        return json(res, 200, { ok: true, looks: looks.sort((a, b) => a.name.localeCompare(b.name)) });
+      }
+
+      const name = nameOf(which.replace(/\.json$/, ""));
+      const file = path.join(dir, `${name}.json`);
+      if (!name || !fs.existsSync(file)) return json(res, 404, { ok: false, error: `no look called ${which}` });
+      try { return json(res, 200, { ok: true, ...JSON.parse(fs.readFileSync(file, "utf8")) }); }
+      catch (e) { return json(res, 200, { ok: false, error: `${name} is not readable JSON: ${e.message}` }); }
+    }
+
     // The shader, served rather than duplicated into the surface. One definition,
     // two consumers.
     if (url.pathname === "/api/effects/shader") {
