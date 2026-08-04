@@ -300,23 +300,45 @@ http.createServer(async (req, res) => {
       try { spec = JSON.parse((await readBody(req)) || "{}"); }
       catch (e) { return json(res, 400, { ok: false, error: `spec is not valid JSON: ${e.message}` }); }
       const out = compileSpec(spec);
-      // from-audio / from-video lanes need the clip, so they are resolved here
-      // rather than in the compiler, which has no filesystem.
-      for (const d of out.derived) {
-        const want = d.spec["from-audio"];
-        if (!want) { out.problems.push(`${d.param}: from-video lanes are not wired yet`); continue; }
-        const file = insideMedia(spec?.source?.clip || "");
-        if (!file) { out.problems.push(`${d.param}: no such clip in the media root`); continue; }
+      // from-audio lanes need the clip, which the compiler has no access to.
+      // Resolved here for BOTH stage parameters and CLOCK RATES -- a clock whose
+      // rate is a lane is the thing that makes time itself accelerate, so it
+      // would be a poor joke to leave that one unresolved.
+      const clipOf = (stageIndex) => {
+        const st = spec?.stages?.[stageIndex] || spec;
+        return st?.source?.clip || spec?.stages?.[0]?.source?.clip || spec?.source?.clip || "";
+      };
+      const track = (want, file) => {
         const a = pcm(file);
-        if (!a.ok) { out.problems.push(`${d.param}: ${a.error}`); continue; }
+        if (!a.ok) return { error: a.error };
         const env = envelope(a.samples, a.rate, 30);
         const [min, max] = want.range || [0, 1];
-        out.tracks[d.param] = want.mode === "envelope"
+        return { ok: want.mode === "envelope"
           ? envelopeTrack(env, { min, max, gamma: want.gamma || 1 })
           : onsetTrack(onsets(env, { sensitivity: want.sensitivity || 1.6 }),
-                       { min, max, decay: want.decay || 0.22 });
+                       { min, max, decay: want.decay || 0.22 }) };
+      };
+      for (const [name, c] of Object.entries(out.clocks)) {
+        if (!c.derive) continue;
+        const want = c.derive["from-audio"];
+        const file = insideMedia(clipOf(0));
+        if (!want || !file) { out.problems.push(`clock ${name}: needs a from-audio lane and a clip in the media root`); out.clocks[name] = { rate: 1 }; continue; }
+        const t = track(want, file);
+        if (t.error) { out.problems.push(`clock ${name}: ${t.error}`); out.clocks[name] = { rate: 1 }; continue; }
+        out.clocks[name] = { rateTrack: t.ok };
       }
-      delete out.derived;
+      out.stages.forEach((st, i) => {
+        for (const d of st.derived || []) {
+          const want = d.spec["from-audio"];
+          const file = insideMedia(clipOf(i));
+          if (!want) { out.problems.push(`stage ${st.id}: from-video lanes are not wired yet`); continue; }
+          if (!file) { out.problems.push(`stage ${st.id}: no such clip in the media root`); continue; }
+          const t = track(want, file);
+          if (t.error) { out.problems.push(`stage ${st.id}: ${t.error}`); continue; }
+          st.tracks[d.param] = t.ok;
+        }
+        delete st.derived;
+      });
       return json(res, 200, { ok: true, ...out });
     }
 

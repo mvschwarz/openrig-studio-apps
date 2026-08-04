@@ -238,12 +238,73 @@ export const SCANNER_PARAMS = {
                  says: "clip time per unit of master clock; 0 freezes the frame and 1 is normal playback" },
 };
 
+// PRESETS ARE CHAIN SPECS NOW, not flat parameter sets — because the thing
+// worth naming is a whole signal path, and a preset that could not express a
+// second stage would be a preset for a tool we no longer have.
 export const SCANNER_PRESETS = {
-  "flatbed":      { axis: "vertical", headPosition: 0, advance: 0, sourceRate: 0, read: "passthrough", headWidth: 6 },
-  "slit-scan":    { axis: "vertical", headPosition: 0.5, advance: 0, sourceRate: 1, read: "passthrough", headWidth: 4 },
-  "motion tape":  { axis: "vertical", headPosition: 0.5, advance: 0, sourceRate: 1, read: "motion", writeMode: "intensity", gain: 2.2, headWidth: 4 },
-  "drift":        { axis: "vertical", headPosition: 0.5, advance: 0, sourceRate: 1, bedRate: 1.07, headRate: 1, read: "passthrough" },
+  "flatbed": {
+    scan: { duration: "12s" },
+    stages: [{ id: "a", source: { rate: 0 },
+      head: { axis: "vertical", position: { ramp: [0, 1] }, width: 6 },
+      response: { read: "passthrough" }, write: { mode: "direct", advance: 0 } }],
+  },
+  "slit-scan": {
+    scan: { duration: "14s" },
+    stages: [{ id: "a", source: { rate: 1 },
+      head: { axis: "vertical", position: 0.5, width: 4 },
+      response: { read: "passthrough" }, write: { mode: "direct", advance: 0 } }],
+  },
+  "motion tape": {
+    scan: { duration: "14s" },
+    stages: [{ id: "a", source: { rate: 1 },
+      head: { axis: "vertical", position: { ramp: [0, 1] }, width: 5 },
+      response: { read: "motion", gain: 2.2 },
+      write: { mode: "displace", displace: 110, advance: 0 } }],
+  },
+  // The one the chain exists for: stage a turns X into time, stage b turns Y
+  // into time as well, so the final picture has no spatial axis left.
+  "both axes are time": {
+    scan: { duration: "18s" },
+    stages: [
+      { id: "a", source: { rate: 1 },
+        head: { axis: "vertical", position: { ramp: [0, 1] }, width: 4 },
+        response: { read: "passthrough" }, write: { mode: "direct", advance: 0 } },
+      { id: "b", source: { from: "a" },
+        head: { axis: "horizontal", position: { ramp: [0, 1] }, width: 4 },
+        response: { read: "passthrough" }, write: { mode: "direct", advance: 0 } },
+    ],
+  },
+  // Dubbing: the same axis scanned twice, so each pass compounds the last one's
+  // warp. Tape to tape, generation loss.
+  "second generation": {
+    scan: { duration: "18s" },
+    clocks: { drift: { rate: 1.11 } },
+    stages: [
+      { id: "a", source: { rate: 1 }, bed: { clock: "drift" },
+        head: { axis: "vertical", position: { ramp: [0, 1] }, width: 5 },
+        response: { read: "passthrough" }, write: { mode: "direct", advance: 0 } },
+      { id: "b", source: { from: "a" }, bed: { clock: "drift" },
+        head: { axis: "vertical", position: { ramp: [0, 1] }, width: 5 },
+        response: { read: "passthrough" }, write: { mode: "direct", advance: 0 } },
+    ],
+  },
+  // Time itself speeds up with the music: the clock's RATE is a lane, so the
+  // bed does not move to the beat -- its clock accelerates on it.
+  "time runs on the beat": {
+    scan: { duration: "16s" },
+    clocks: { pulse: { rate: { "from-audio": { mode: "envelope", range: [0.25, 2.6] } } } },
+    stages: [
+      { id: "a", source: { rate: 1 }, bed: { clock: "pulse", x: { ramp: [0, -320] } },
+        head: { axis: "vertical", position: { ramp: [0, 1] }, width: 4 },
+        response: { read: "passthrough" }, write: { mode: "direct", advance: 0 } },
+      { id: "b", source: { from: "a" },
+        head: { axis: "horizontal", position: { ramp: [0, 1] }, width: 4 },
+        response: { read: "edge", gain: 1.0 },
+        write: { mode: "palette", palette: "cold", advance: 0 } },
+    ],
+  },
 };
+
 
 // ---- THE SPEC ------------------------------------------------------------
 //
@@ -304,63 +365,154 @@ export function compileLane(value, duration) {
   return null;
 }
 
-// The whole spec -> a track set the existing curve engine can evaluate, plus the
-// constants that are not lanes. Returns what could NOT be compiled rather than
-// throwing, because a spec with one bad lane should still show you the rest.
-export function compileSpec(spec) {
-  const duration = SECONDS(spec?.scan?.duration ?? 8, 8);
-  const tracks = {};
-  const derived = [];
-  const constants = {};
-  const problems = [];
+// ---- CLOCKS --------------------------------------------------------------
+//
+// A clock is a named function from the master clock to a transport's own time.
+// Naming them rather than giving each transport a bare rate is what makes a
+// CHAIN tractable: two stages have six transports, and six independent rate
+// numbers is noise, while three named clocks that six transports REFERENCE is a
+// structure you can reason about.
+//
+//   clocks:
+//     drift: { rate: 1.07 }                                  # runs slightly fast
+//     slow:  { rate: 0.4 }
+//     pulse: { from-audio: { mode: envelope, range: [0.2, 3] } }   # TIME ITSELF
+//                                                                  # speeds up
+//                                                                  # with the music
+//
+// The last one is the reason this is worth the indirection. A rate that is
+// itself a lane means the clock ACCELERATES — the transport is not moving to
+// the music, time is. That is unreachable with a scalar rate per transport.
+//
+// `master` always exists and is the identity. Anything referencing an undefined
+// clock falls back to master and SAYS SO in problems, rather than silently
+// running at a rate nobody chose.
+export const CLOCK_MASTER = "master";
 
-  const GROUPS = {
-    bed:      ["x", "y", "rotate", "scale", "rate"],
-    head:     ["position", "width", "angle", "softness", "rate"],
-    response: ["gain", "bias", "threshold"],
-    write:    ["advance", "persistence"],
-    source:   ["rate"],
-  };
-  const PREFIX = { bed: "bed", head: "head", response: "", write: "", source: "source" };
-  const nameOf = (group, key) => {
-    const p = PREFIX[group];
-    return p ? p + key[0].toUpperCase() + key.slice(1) : key;
-  };
+// ---- STAGES --------------------------------------------------------------
+//
+// A stage is one complete scanner: a source, a bed, a head, a response, a write
+// target. `source.from` names an EARLIER stage instead of a clip, and that is
+// the whole chaining mechanism.
+//
+// WHY CHAINING IS NOT JUST "TWO EFFECTS": a scanner turns one SPATIAL axis into
+// TIME. Stage one with a vertical head makes its output's x-axis time. Stage two
+// reading that with a HORIZONTAL head makes y time as well -- so the final image
+// has no spatial axis left, both are time at different orders. Chain them on the
+// SAME axis instead and each pass compounds the last one's warp, which is
+// dubbing: generation loss, tape to tape.
+//
+// It also retires a limit recorded in the original research: true slit-scan
+// "needs each row from a different input frame, i.e. a ring buffer of 1080
+// frames -- not viable". A chained stage gets that buffer for free, because the
+// upstream tape IS the materialised time history.
 
-  for (const [group, keys] of Object.entries(GROUPS)) {
-    const block = spec?.[group];
+const laneGroups = {
+  bed:      ["x", "y", "rotate", "scale"],
+  head:     ["position", "width", "angle", "softness"],
+  response: ["gain", "bias", "threshold"],
+  write:    ["advance", "persistence"],
+};
+const passthroughKeys = [
+  ["response", "read", "read"], ["response", "invert", "invert"],
+  ["response", "targetColor", "targetColor"],
+  ["write", "mode", "writeMode"], ["write", "palette", "palette"],
+  ["write", "displace", "displace"], ["write", "direction", "direction"],
+  ["head", "axis", "axis"],
+];
+const nameOf = (group, key) =>
+  group === "bed" || group === "head"
+    ? group + key[0].toUpperCase() + key.slice(1)
+    : key;
+
+function compileStage(st, duration, problems, index) {
+  const tracks = {}, constants = {}, derived = [];
+  for (const [group, keys] of Object.entries(laneGroups)) {
+    const block = st?.[group];
     if (!block) continue;
     for (const key of keys) {
       if (!(key in block)) continue;
       const name = nameOf(group, key);
       const lane = compileLane(block[key], duration);
-      if (lane === null) { problems.push(`${group}.${key} is not a form the lane grammar accepts`); continue; }
+      if (lane === null) { problems.push(`stage ${index}: ${group}.${key} is not a form the lane grammar accepts`); continue; }
       if (Array.isArray(lane)) {
         if (lane.length === 1 && lane[0].t === 0) constants[name] = lane[0].v;
         else tracks[name] = lane;
-      } else {
-        derived.push({ param: name, spec: lane.derive });
+      } else derived.push({ param: name, spec: lane.derive });
+    }
+  }
+  for (const [group, key, out] of passthroughKeys) {
+    if (st?.[group] && key in st[group]) constants[out] = st[group][key];
+  }
+  return {
+    id: st?.id || `stage${index}`,
+    // WHICH CLOCK EACH TRANSPORT FOLLOWS. Declared per transport, defaulting to
+    // master, so the locked case needs no ceremony and a drift is always visible
+    // in the spec rather than implied by a number.
+    clocks: {
+      bed:    st?.bed?.clock    || CLOCK_MASTER,
+      head:   st?.head?.clock   || CLOCK_MASTER,
+      write:  st?.write?.clock  || CLOCK_MASTER,
+      source: st?.source?.clock || CLOCK_MASTER,
+    },
+    source: st?.source || {},
+    from: st?.source?.from || null,
+    constants, tracks, derived,
+  };
+}
+
+// The whole spec -> a track set the existing curve engine can evaluate, plus the
+// constants that are not lanes. Returns what could NOT be compiled rather than
+// throwing, because a spec with one bad lane should still show you the rest.
+export function compileSpec(spec) {
+  const duration = SECONDS(spec?.scan?.duration ?? 8, 8);
+  const problems = [];
+
+  // CLOCKS FIRST, because stages reference them by name.
+  const clocks = { [CLOCK_MASTER]: { rate: 1 } };
+  for (const [name, def] of Object.entries(spec?.clocks || {})) {
+    if (name === CLOCK_MASTER) { problems.push("clock 'master' is built in and cannot be redefined"); continue; }
+    const lane = compileLane(def?.rate ?? def, duration);
+    if (lane === null) { problems.push(`clock ${name}: rate is not a form the lane grammar accepts`); continue; }
+    if (Array.isArray(lane)) {
+      clocks[name] = lane.length === 1 && lane[0].t === 0
+        ? { rate: lane[0].v }
+        : { rateTrack: lane };
+    } else {
+      clocks[name] = { derive: lane.derive };
+    }
+  }
+
+  // STAGES. A bare (stage-less) spec is treated as a one-stage chain so the
+  // simple case stays simple and there is still only ONE code path.
+  const rawStages = Array.isArray(spec?.stages) && spec.stages.length
+    ? spec.stages
+    : [{ id: "a", source: spec?.source, bed: spec?.bed, head: spec?.head,
+         response: spec?.response, write: spec?.write }];
+  const stages = rawStages.map((st, i) => compileStage(st, duration, problems, i));
+
+  // Validate the graph: a stage may only read a stage BEFORE it, or a clip.
+  // Refusing forward and self references is what keeps the chain a chain --
+  // feedback is a real and interesting thing, but it needs its own deliberate
+  // mechanism rather than arriving as an ordering accident.
+  const seen = new Set();
+  for (const st of stages) {
+    if (st.from) {
+      if (st.from === st.id) problems.push(`stage ${st.id} reads itself; feedback is not expressible yet`);
+      else if (!seen.has(st.from)) problems.push(`stage ${st.id} reads ${st.from}, which is not an earlier stage`);
+    }
+    seen.add(st.id);
+    for (const [transport, clock] of Object.entries(st.clocks)) {
+      if (!clocks[clock]) {
+        problems.push(`stage ${st.id}: ${transport} names clock '${clock}', which is not defined -- using master`);
+        st.clocks[transport] = CLOCK_MASTER;
       }
     }
   }
 
-  // Enums and non-lane settings pass through untouched.
-  for (const [group, key, out] of [
-    ["response", "read", "read"], ["response", "invert", "invert"],
-    ["write", "mode", "writeMode"], ["write", "direction", "direction"],
-    ["head", "axis", "axis"],
-  ]) {
-    if (spec?.[group] && key in spec[group]) constants[out] = spec[group][key];
-  }
-
   return {
-    duration,
-    unit: "seconds",
-    source: spec?.source || {},
+    duration, unit: "seconds",
     output: spec?.output || {},
-    constants,
-    tracks,
-    derived,
-    problems,
+    clocks, stages, problems,
   };
 }
