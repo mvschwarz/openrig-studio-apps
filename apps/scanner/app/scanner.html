@@ -124,12 +124,13 @@ vid.muted = true; vid.loop = true; vid.playsInline = true; vid.crossOrigin = 'an
 let srcEl = null, isVideo = false, srcTex = null, srcW = 0, srcH = 0, lastStamp = NaN;
 let writeProg = null, blitProg = null, fadeProg = null;
 let recording = false, scanTime = 0, lastWall = 0, rafId = null, duration = 12;
-let stepCount = 0, wallStart = 0, showAll = false;
+let stepCount = 0, wallStart = 0, showAll = false, playAccum = 0;
 
 // clocks: name -> {rate} | {rateTrack}. clockT accumulates each clock's OWN
 // time, which is the integral of its rate — so a rate that is itself a lane
 // makes time ACCELERATE rather than merely run fast.
 let clocks = { master: { rate: 1 } }, clockT = { master: 0 };
+let lastPlay = 0;
 let stages = [];
 
 // ---- lanes ---------------------------------------------------------------
@@ -213,14 +214,36 @@ function makeStage(def, index) {
     id: def.id, from: def.from, clocks: def.clocks, startAt: def.startAt || 0,
     params: Object.assign({}, defaults(), def.constants || {}),
     tracks: def.tracks || {}, source: def.source || {},
-    writeAt: 0, tex: null, fbo: null, prevTex: null, prevFbo: null, prevW: 0, prevH: 0,
-    canvas: null, ctx: null, index,
+    writeAt: 0, tapes: [], fbos: [], prevTex: null, prevFbo: null, prevW: 0, prevH: 0,
+    canvas: null, ctx: null, index, playHead: 0,
   };
-  st.tex = mkTex(UNIT_TAPE, OUT_W, OUT_H);
-  st.fbo = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, st.fbo);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, st.tex, 0);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  ensureTapes(st, Math.max(1, Math.floor(st.params.frames || 1)));
+  return st;
+}
+
+// A STACK OF TAPES, one per instant in a column's window.
+//
+// Tape k is the SAME scan with every column sampled k steps later. So each step
+// writes k strips -- tape 0 at the write position, tape 1 one column behind,
+// tape k at k behind -- and tape k ends up holding, for every column, the frame
+// from k steps after the head arrived there.
+//
+// Play the stack in order and every column advances through its own window AT
+// ONCE. One continuous movement in the source becomes a row of bands, each
+// animating a different fragment of it, all alive simultaneously.
+//
+// frames:1 allocates exactly one tape and behaves identically to a still, so the
+// whole feature costs nothing when it is not asked for.
+function ensureTapes(st, n) {
+  while (st.tapes.length > n) { st.tapes.pop(); st.fbos.pop(); }
+  while (st.tapes.length < n) {
+    const t = mkTex(UNIT_TAPE, OUT_W, OUT_H);
+    const f = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    st.tapes.push(t); st.fbos.push(f);
+  }
   return st;
 }
 function defaults() {
@@ -232,7 +255,7 @@ function defaults() {
 function sourceFor(st) {
   if (!st.from) return { tex: srcTex, w: srcW, h: srcH };
   const up = stages.find((s) => s.id === st.from);
-  return up ? { tex: up.tex, w: OUT_W, h: OUT_H } : { tex: srcTex, w: srcW, h: srcH };
+  return up && up.tapes.length ? { tex: up.tapes[0], w: OUT_W, h: OUT_H } : { tex: srcTex, w: srcW, h: srcH };
 }
 // The one-step history this stage's motion/difference reads. Kept per stage,
 // because an upstream tape changes on its own schedule and the clip on another.
@@ -260,11 +283,11 @@ function writeStage(st, P) {
   const wpx = Math.max(1, Math.round(P.headWidth||6));
   const span = vertical ? OUT_W : OUT_H;
   const at = Math.round(((st.writeAt % 1 + 1) % 1) * span);
+  const n = Math.max(1, Math.floor(P.frames || 1));
+  if (st.tapes.length !== n) ensureTapes(st, n);
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, st.fbo);
   gl.viewport(0,0,OUT_W,OUT_H);
   gl.enable(gl.SCISSOR_TEST);
-  if (vertical) gl.scissor(at,0,wpx,OUT_H); else gl.scissor(0,at,OUT_W,wpx);
   gl.useProgram(writeProg);
   const u = (n) => gl.getUniformLocation(writeProg, n);
   gl.activeTexture(gl.TEXTURE0+UNIT_SRC);  gl.bindTexture(gl.TEXTURE_2D, src.tex);
@@ -291,18 +314,27 @@ function writeStage(st, P) {
   gl.uniform3f(u('uTarget'), parseInt(tc.slice(1,3),16)/255, parseInt(tc.slice(3,5),16)/255, parseInt(tc.slice(5,7),16)/255);
   gl.uniform1f(u('uPalette'), Math.max(0,(PARAMS.palette?.values||[]).indexOf(P.palette ?? 'ember')));
   gl.uniform1f(u('uDisplace'), P.displace ?? 40);
-  gl.drawArrays(gl.TRIANGLES,0,3);
+
+  // One draw per tape. Each is a strip, so N tapes cost N strips and not N
+  // frames -- which is why a 24-instant window is affordable at all.
+  for (let k = 0; k < n; k++) {
+    const back = Math.round(((( (at - k*wpx) % span) + span) % span));
+    gl.bindFramebuffer(gl.FRAMEBUFFER, st.fbos[k]);
+    if (vertical) gl.scissor(back,0,wpx,OUT_H); else gl.scissor(0,back,OUT_W,wpx);
+    gl.drawArrays(gl.TRIANGLES,0,3);
+  }
   gl.disable(gl.SCISSOR_TEST);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
 
-function blitTo(st) {
-  if (!blitProg || !st.ctx) return;
+function blitTo(st, which) {
+  if (!blitProg || !st.ctx || !st.tapes.length) return;
+  const tex = st.tapes[Math.min(st.tapes.length-1, Math.max(0, which ?? 0))];
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.disable(gl.SCISSOR_TEST);
   gl.viewport(0,0,OUT_W,OUT_H);
   gl.useProgram(blitProg);
-  gl.activeTexture(gl.TEXTURE0+UNIT_TAPE); gl.bindTexture(gl.TEXTURE_2D, st.tex);
+  gl.activeTexture(gl.TEXTURE0+UNIT_TAPE); gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.uniform1i(gl.getUniformLocation(blitProg,'t'), UNIT_TAPE);
   gl.uniform2f(gl.getUniformLocation(blitProg,'r'), OUT_W, OUT_H);
   gl.drawArrays(gl.TRIANGLES,0,3);
@@ -310,10 +342,12 @@ function blitTo(st) {
 }
 function clearAll() {
   for (const st of stages) {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, st.fbo);
-    gl.disable(gl.SCISSOR_TEST); gl.viewport(0,0,OUT_W,OUT_H);
-    gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
-    st.writeAt = 0;
+    for (const f of st.fbos) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.disable(gl.SCISSOR_TEST); gl.viewport(0,0,OUT_W,OUT_H);
+      gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    st.writeAt = 0; st.playHead = 0;
   }
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   scanTime = 0; for (const k of Object.keys(clockT)) clockT[k] = 0;
@@ -350,7 +384,28 @@ function tick(now) {
   rafId = requestAnimationFrame(tick);
   uploadSource();
   if (stages[0]) drawBed(effectiveFor(stages[0]));
-  if (!recording) { lastWall = 0; stepCount = 0; wallStart = 0; return; }
+  if (!recording) {
+    // NOT RECORDING = PLAYING. A stack of one is a still and holds; a stack of
+    // many cycles, which is the whole point of the feature.
+    const dtp = lastPlay ? Math.min(0.25, (now-lastPlay)/1000) : 0;
+    lastPlay = now;
+    playAccum += dtp;
+    let advanced = false;
+    for (const st of stages) {
+      if (st.tapes.length < 2) continue;
+      const fps = Math.max(1, Math.floor(st.params.fps || 12));
+      const step = 1/fps;
+      while (playAccum >= step) { playAccum -= step; advanced = true; }
+      if (advanced) st.playHead = (st.playHead + 1) % st.tapes.length;
+      blitTo(st, st.playHead);
+    }
+    if (!advanced) playAccum = Math.min(playAccum, 1);
+    lastWall = 0; stepCount = 0; wallStart = 0;
+    const withStack = stages.filter((s)=>s.tapes.length>1);
+    if (withStack.length) metaEl.textContent =
+      `playing · ` + withStack.map((s)=>`${s.id} frame ${s.playHead+1}/${s.tapes.length} @ ${s.params.fps||12}fps`).join(' · ');
+    return;
+  }
 
   const dt = lastWall ? Math.min(0.1, (now-lastWall)/1000) : 0;
   lastWall = now;
@@ -379,7 +434,7 @@ function tick(now) {
     if (st.writeAt >= 1) st.writeAt -= 1;
     if (st.writeAt < 0) st.writeAt += 1;
     writeStage(st, P);
-    blitTo(st);
+    blitTo(st, 0);
   }
   if (isVideo) lastStamp = vid.currentTime;
 
@@ -391,6 +446,7 @@ function tick(now) {
   metaEl.textContent =
     `scanTime ${scanTime.toFixed(2)}s / ${duration}s · ${stages.length} stage${stages.length===1?'':'s'} · ` +
     `final write ${((last?.writeAt||0)*100).toFixed(1)}% · ` +
+    (last && last.tapes.length>1 ? `window ${last.tapes.length} · ` : '') +
     stages.filter((s)=>scanTime < (s.startAt||0)).map((s)=>`${s.id} waits ${(s.startAt-scanTime).toFixed(1)}s`).join(' · ') +
     (stages.some((s)=>scanTime < (s.startAt||0)) ? ' · ' : '') +
     Object.keys(clocks).map((c)=>`${c} ${(clockT[c]||0).toFixed(1)}s`).join(' · ') +
@@ -688,6 +744,7 @@ window.scanner = {
   record: (on) => setRecording(on),
   clear: () => clearAll(),
   scanTime: () => scanTime,
+  playback: () => stages.map((s)=>({ id:s.id, frames:s.tapes.length, playHead:s.playHead, fps:s.params.fps })),
   params: () => PARAMS,
 };
 boot();

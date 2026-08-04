@@ -233,6 +233,10 @@ export const SCANNER_PARAMS = {
                  says: "how far the response bends the strip when writeMode is displace, in pixels" },
   advance:     { type: "float", min: -4, max: 4, default: 0, group: "output",
                  says: "output columns per head step. 0 FITS the recording to the scan duration, which is what you want unless you are deliberately mismatching; 1 is one column per step, and every other value is a deliberate disagreement with the sweep" },
+  frames:      { type: "int", min: 1, max: 48, default: 1, group: "output",
+                 says: "how many instants each column holds. 1 is a still — every column is a single moment. Above 1 the column becomes a WINDOW, and the stack plays back with every column advancing through its own window at once, so one continuous movement in the source becomes a row of bands each animating a different fragment of it" },
+  fps:         { type: "int", min: 4, max: 30, default: 12, group: "output", pairsWith: ["frames"],
+                 says: "playback rate of the frame stack; only means anything when frames is above 1" },
   persistence: { type: "float", min: 0.9, max: 1, default: 1, group: "output",
                  says: "1 means the tape retains, which is what a tape does; below 1 the recording fades as it is laid down" },
   sourceRate:  { type: "float", min: -4, max: 4, default: 1, group: "output",
@@ -489,6 +493,7 @@ const passthroughKeys = [
   ["response", "targetColor", "targetColor"],
   ["write", "mode", "writeMode"], ["write", "palette", "palette"],
   ["write", "displace", "displace"], ["write", "direction", "direction"],
+  ["write", "frames", "frames"], ["write", "fps", "fps"],
   ["head", "axis", "axis"],
 ];
 const nameOf = (group, key) =>
