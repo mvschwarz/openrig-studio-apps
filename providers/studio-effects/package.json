@@ -5,5 +5,9 @@
   "type": "module",
   "license": "Apache-2.0",
   "description": "Frame effects for the studio: a scanner-glass warp, with an analog-video and a tile-mosaic family to follow. Parameters are named for what a person perceives, so an agent can drive them from a description.",
-  "main": "effects-server.mjs"
+  "main": "effects-server.mjs",
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0"
+  },
+  "_dependencies_note": "ffmpeg-static is used for ONE thing: remuxing a recorded clip to mp4. MediaRecorder writes WebM with no duration header, so the file is not seekable and is a poor source for a second scan - which is the whole reason for saving it. The transcode is optional at runtime: if the binary is absent the clip is kept as webm and the surface SAYS SO rather than pretending it succeeded."
 }

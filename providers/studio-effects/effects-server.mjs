@@ -319,8 +319,40 @@ http.createServer(async (req, res) => {
       const boundary = text.slice(0, text.indexOf("\r\n"));
       const end = text.indexOf(boundary, bodyStart) - 2;
       fs.writeFileSync(full, buf.subarray(bodyStart, end > bodyStart ? end : buf.length));
-      return json(res, 200, { ok: true, name: path.basename(full), path: full,
-                              bytes: fs.statSync(full).size });
+
+      // TRANSCODE TO MP4 IF WE CAN. MediaRecorder writes WebM with NO DURATION
+      // in the header, so video.duration is Infinity, seeking does not work, and
+      // the file is a poor citizen anywhere else -- including as a SOURCE for
+      // another scan, which is the whole point of saving it here. ffmpeg is
+      // already shipped for other providers; remux and the file becomes ordinary.
+      let out = full, note = "webm as recorded (no duration header)";
+      try {
+        const { execFileSync } = await import("node:child_process");
+        // Declared as a dependency of this provider. Until an install has run it
+        // will not resolve, so a sibling provider's copy is accepted as a
+        // fallback rather than failing the save -- and either way the surface is
+        // told which happened.
+        let ff = null;
+        try { ff = (await import("ffmpeg-static")).default; } catch {}
+        if (!ff) {
+          for (const sib of ["studio-cutdown", "studio-video"]) {
+            const guess = path.join(HERE, "..", sib, "node_modules", "ffmpeg-static", "ffmpeg");
+            if (fs.existsSync(guess)) { ff = guess; break; }
+          }
+        }
+        if (ff && fs.existsSync(ff)) {
+          const mp4 = full.replace(/\.webm$/, ".mp4");
+          execFileSync(ff, ["-y", "-fflags", "+genpts", "-i", full,
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
+                            "-movflags", "+faststart", mp4], { stdio: "ignore", timeout: 120000 });
+          if (fs.existsSync(mp4) && fs.statSync(mp4).size > 0) {
+            fs.unlinkSync(full); out = mp4; note = "transcoded to mp4 — seekable, with a real duration";
+          }
+        }
+      } catch (e) { note = `kept as webm (${e.message.slice(0, 60)})`; }
+
+      return json(res, 200, { ok: true, name: path.basename(out), path: out,
+                              bytes: fs.statSync(out).size, note });
     }
 
     if (url.pathname === "/api/scanner/specs") {

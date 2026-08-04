@@ -564,8 +564,11 @@ function startRecorder() {
       // Native controls, and its own duration reported — so "did this work" is
       // answerable by looking rather than by trusting that a button appeared.
       v.onloadedmetadata = () => {
+        // MediaRecorder omits the duration header, so this is routinely
+        // Infinity. Printing it would be a number that is not one.
+        const dur = Number.isFinite(v.duration) ? `${v.duration.toFixed(1)}s · ` : '';
         $('#clipcap').textContent =
-          `Clip — ${v.duration.toFixed(1)}s · ${(recBlob.size/1e6).toFixed(1)}MB · press play below or use the controls`;
+          `Clip — ${dur}${(recBlob.size/1e6).toFixed(1)}MB · use the controls, or save it to get a seekable mp4`;
       };
       say(`clip ready — ${(recBlob.size/1e6).toFixed(1)}MB. Play it below, or save it into the media root.`);
       v.play().catch(()=>{ say('clip ready — press play (the browser blocked autoplay)'); });
@@ -834,7 +837,8 @@ async function boot() {
       if (!r.ok) return fail(r.error || 'could not save the clip');
       say(`saved — it is now in the source picker`);
       $('#paths').innerHTML =
-        `<b>clip saved to</b> ${r.path || (mediaRoot + '/' + r.name)}<br>` + pathLines();
+        `<b>clip saved to</b> ${r.path || (mediaRoot + '/' + r.name)}` +
+        (r.note ? ` <span style="opacity:.7">(${r.note})</span>` : '') + `<br>` + pathLines();
       const sel = $('#source'); const o=document.createElement('option');
       o.value=o.textContent=r.name; sel.appendChild(o);
     };
