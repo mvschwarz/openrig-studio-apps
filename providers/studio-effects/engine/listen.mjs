@@ -101,12 +101,31 @@ export function envelopeTrack(env, { min, max, lowPct = 5, highPct = 95, gamma =
 
 // An onset becomes a HIT: jump to the top, fall back. Three keyframes each, so
 // the shape is legible in the data rather than hidden in an evaluator.
-export function onsetTrack(hits, { min, max, decay = 0.22 } = {}) {
+export function onsetTrack(hits, { min, max, decay = 0.22, dynamics = 1 } = {}) {
+  // EACH HIT CARRIES ITS OWN WEIGHT. The first version sent every onset to the
+  // same peak, so a soft tom and a hard snare rendered identically — the detector
+  // had already measured the difference and the track threw it away. Found by the
+  // founder listening: the effect rolled with the toms via the loudness envelope
+  // on another parameter, while the onset track sat flat, and the two together
+  // read as though the whole thing were dynamic.
+  //
+  // Normalised by PERCENTILE across the hits, for the third time in this engine
+  // and the same reason each time: one unusually hard hit would otherwise define
+  // the top and flatten every other hit into the floor.
+  const ss = hits.map((h) => h.strength).sort((a, b) => a - b);
+  const at = (p) => (ss.length ? ss[Math.min(ss.length - 1, Math.max(0, Math.round((p / 100) * (ss.length - 1))))] : 1);
+  const lo = at(10), hi = at(90), span = hi - lo;
+
   const pts = [{ t: 0, v: min }];
   for (const h of hits) {
     const t = +h.t.toFixed(3);
+    const u = span > 1e-9 ? Math.min(1, Math.max(0, (h.strength - lo) / span)) : 1;
+    // dynamics 0 reproduces the old flat behaviour, 1 gives the hits their full
+    // spread. Kept as a knob because a uniform hit is right for a metronome and
+    // wrong for a drum kit, and only the author knows which they are scoring.
+    const peak = min + (max - min) * (1 - dynamics + dynamics * u);
     pts.push({ t: Math.max(0, +(t - 0.012).toFixed(3)), v: min, ease: "snap" });
-    pts.push({ t, v: max, ease: "snap" });
+    pts.push({ t, v: +peak.toFixed(4), ease: "snap" });
     pts.push({ t: +(t + decay).toFixed(3), v: min, ease: "smooth" });
   }
   return pts.sort((a, b) => a.t - b.t);
