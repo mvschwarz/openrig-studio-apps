@@ -516,6 +516,13 @@ function compileStage(st, duration, problems, index) {
   }
   return {
     id: st?.id || `stage${index}`,
+    // WHEN THIS STAGE STARTS WRITING. A chained stage can only record what its
+    // upstream has already laid down, so running both from t=0 leaves a causal
+    // frontier -- a diagonal edge where the downstream head outran the tape it
+    // was reading. Letting the upstream get ahead is the whole remedy, and it is
+    // a property of the SPEC rather than a knob, because it is about the shape
+    // of the run and not about the look.
+    startAt: SECONDS(st?.startAt ?? 0, duration),
     // WHICH CLOCK EACH TRANSPORT FOLLOWS. Declared per transport, defaulting to
     // master, so the locked case needs no ceremony and a drift is always visible
     // in the spec rather than implied by a number.

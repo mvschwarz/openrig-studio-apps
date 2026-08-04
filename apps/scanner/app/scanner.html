@@ -161,7 +161,10 @@ function effectiveFor(st) {
     const which = k.startsWith('bed') ? st.clocks.bed
                 : k.startsWith('head') ? st.clocks.head
                 : st.clocks.write;
-    const v = evalTrack(kfs, clockT[which] ?? scanTime);
+    // Measured from when THIS stage started, so a delayed stage still gets its
+    // whole ramp rather than arriving mid-sweep.
+    const base = (clockT[which] ?? scanTime) - (st.startAt || 0);
+    const v = evalTrack(kfs, Math.max(0, base));
     if (v !== null) P[k] = v;
   }
   return P;
@@ -207,7 +210,7 @@ function uploadSource() {
 // ---- a stage -------------------------------------------------------------
 function makeStage(def, index) {
   const st = {
-    id: def.id, from: def.from, clocks: def.clocks,
+    id: def.id, from: def.from, clocks: def.clocks, startAt: def.startAt || 0,
     params: Object.assign({}, defaults(), def.constants || {}),
     tracks: def.tracks || {}, source: def.source || {},
     writeAt: 0, tex: null, fbo: null, prevTex: null, prevFbo: null, prevW: 0, prevH: 0,
@@ -359,6 +362,10 @@ function tick(now) {
   // STAGES IN ORDER, because a later stage reads an earlier one's tape and must
   // see this frame's version of it, not last frame's.
   for (const st of stages) {
+    // A stage that has not started yet writes nothing and does not advance its
+    // own transport, so when it does begin it starts at the top of its tape
+    // rather than partway through a run it sat out.
+    if (scanTime < (st.startAt || 0)) continue;
     const P = effectiveFor(st);
     const src = sourceFor(st);
     // Roll this stage's history only when its source actually changed — for the
@@ -384,6 +391,8 @@ function tick(now) {
   metaEl.textContent =
     `scanTime ${scanTime.toFixed(2)}s / ${duration}s · ${stages.length} stage${stages.length===1?'':'s'} · ` +
     `final write ${((last?.writeAt||0)*100).toFixed(1)}% · ` +
+    stages.filter((s)=>scanTime < (s.startAt||0)).map((s)=>`${s.id} waits ${(s.startAt-scanTime).toFixed(1)}s`).join(' · ') +
+    (stages.some((s)=>scanTime < (s.startAt||0)) ? ' · ' : '') +
     Object.keys(clocks).map((c)=>`${c} ${(clockT[c]||0).toFixed(1)}s`).join(' · ') +
     (fps ? ` · ${fps.toFixed(1)} steps/s` : ' · warming up');
   if (duration && scanTime >= duration) setRecording(false, 'reached the spec duration');
