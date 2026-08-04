@@ -1,5 +1,5 @@
 {
-  "_": "WATER. Hard edges undulate like a picture seen through moving water. Adjacent columns are sampled at different MOMENTS OF THE FOOTAGE, so the clip's own frame rate becomes the thing being interpolated across the tape — the bed never moves. The knob is headWidth*source.rate/(advance*60) = 8*2/240 = 0.067 source-seconds between columns, which is about one and a half frames: enough to ripple, not enough to smear. WANTS A CONTINUOUS SHOT. One wrap of the tape spends 8 seconds of footage, so a clip that cuts inside that window gives you a collage of different shots instead of one undulating picture. Too subtle: raise source.rate toward 3-4. Too violent, or it stops looking like a picture: drop it toward 1.5.",
+  "_": "WATER, AS A MOVING PICTURE. Hard edges undulate like a picture seen through moving water. Adjacent columns are sampled at different MOMENTS OF THE FOOTAGE, so the clip's own frame rate is what ripples — the bed never moves. The shear knob is headWidth*source.rate/(advance*60) = 8*2/240 = 0.067 source-seconds between columns, about a frame and a half: enough to ripple, not enough to smear. FRAMES 16 IS WHAT MAKES IT A VIDEO RATHER THAN A WIPE: every column holds 16 instants and playback advances all of them at once, so the picture moves with the head standing still. At frames 1 there is no stack, nothing to play, and the only recordable thing is the sweep laying the tape down — which is a recording of the process, not of the result. WANTS A CONTINUOUS SHOT: one wrap spends 8 seconds of footage, so a clip that cuts inside that window gives a collage of different shots instead of one undulating picture. Too subtle: raise source.rate toward 3-4. Too violent: drop it toward 1.5. Costs 16 strip draws per step — on a software renderer that is slow.",
   "scan": {
     "duration": "10s"
   },
@@ -26,7 +26,8 @@
       "write": {
         "mode": "direct",
         "advance": 4,
-        "frames": 1
+        "frames": 16,
+        "fps": 12
       }
     }
   ]

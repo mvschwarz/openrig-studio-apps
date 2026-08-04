@@ -142,6 +142,10 @@ let srcEl = null, isVideo = false, srcTex = null, srcW = 0, srcH = 0, lastStamp 
 let writeProg = null, blitProg = null, fadeProg = null;
 let recording = false, scanTime = 0, lastWall = 0, rafId = null, duration = 12;
 let stepCount = 0, wallStart = 0, showAll = false, playAccum = 0, playing = true;
+// THE STACK PASS. When a stage holds a stack, the artifact is the STACK PLAYED
+// BACK, not the sweep that laid it down -- so the recorder waits for the run to
+// finish and then captures exactly one cycle. See recordArtifact() below.
+let stackUntil = 0;
 
 // clocks: name -> {rate} | {rateTrack}. clockT accumulates each clock's OWN
 // time, which is the integral of its rate — so a rate that is itself a lane
@@ -459,6 +463,9 @@ function tick(now) {
       blitTo(st, st.playHead);
     }
     if (!advanced) playAccum = Math.min(playAccum, 1);
+    // ONE CYCLE, then the clip is closed. Checked here rather than on a timer so
+    // it is measured against the same frames the recorder is sampling.
+    if (stackUntil && now >= stackUntil) { stackUntil = 0; stopRecorder(); }
     lastWall = 0; stepCount = 0; wallStart = 0;
     const withStack = stages.filter((s)=>s.tapes.length>1);
     $('#playbar').hidden = !withStack.length;
@@ -512,10 +519,65 @@ function tick(now) {
     (stages.some((s)=>scanTime < (s.startAt||0)) ? ' · ' : '') +
     Object.keys(clocks).map((c)=>`${c} ${(clockT[c]||0).toFixed(1)}s`).join(' · ') +
     (fps ? ` · ${fps.toFixed(1)} steps/s` : ' · warming up');
-  if (duration && scanTime >= duration) setRecording(false, 'reached the spec duration');
+  if (duration && scanTime >= duration) finishRun();
+}
+
+// THE END OF A RUN IS NOT THE END OF PRODUCING THE ARTIFACT.
+//
+// With a stack, the sweep was only the WRITE. What the person came for is the
+// stack played back: every column advancing through its own window at once, the
+// head standing still, the picture moving. So the run stops, the transport
+// switches to playback from frame 1, and the recorder captures EXACTLY ONE CYCLE
+// -- one cycle rather than several because the result is a loop, and a whole
+// number of cycles is what makes it loop without a seam.
+function finishRun() {
+  const last = stages[stages.length-1];
+  const n = last?.tapes?.length || 1;
+  if (n < 2) return setRecording(false, 'reached the spec duration');
+
+  recording = false;
+  $('#rec').textContent = '▶ run'; $('#rec').classList.remove('on');
+  if (isVideo) vid.pause();          // the stack is already written; the clip is not needed
+  playing = true; playAccum = 0;
+  for (const st of stages) st.playHead = 0;
+  $('#play').textContent = '❚❚ pause'; $('#play').classList.add('on');
+
+  const fps = Math.max(1, Math.floor(effectiveFor(last).fps || 12));
+  const cycle = n / fps;
+  startRecorder();
+  stackUntil = performance.now() + cycle*1000;
+  say(`scan done — now recording one cycle of the ${n}-frame stack (${cycle.toFixed(1)}s). ` +
+      `THIS is the artifact; the sweep was only how it got written.`);
+}
+// HOW MANY INSTANTS THE LAST STAGE HOLDS. Asked of the compiled parameters
+// rather than of st.tapes, because at the moment a run STARTS the tapes are
+// still whatever the previous run left behind.
+function stackSize() {
+  const last = stages[stages.length-1];
+  if (!last) return 1;
+  return Math.max(1, Math.floor(effectiveFor(last).frames || 1));
 }
 function setRecording(on, why) {
-  if (on && !recording) { $('#clipwrap').hidden = true; $('#playback').pause(); startRecorder(); }
+  // WHAT THE ARTIFACT IS DEPENDS ON WHAT THE SPEC MADE, and getting this wrong
+  // is invisible: both cases produce a playable file of about the right length.
+  //
+  //   frames: 1  -> one tape. There is nothing to play back, so the only video
+  //                 available is the SWEEP ITSELF -- a wipe. Record the run.
+  //   frames: N  -> a stack. Every column holds N instants and playback advances
+  //                 all of them at once, so the picture MOVES with the head
+  //                 standing still. THAT is the artifact. Recording the run
+  //                 instead captures the wipe that laid it down, which is a
+  //                 recording of the process rather than of the result.
+  //
+  // Until now the recorder only ever ran during the sweep, so a stack could be
+  // watched on the surface and never exported. The stack pass below closes that.
+  if (on && !recording) {
+    $('#clipwrap').hidden = true; $('#playback').pause();
+    // A run started on top of a stack pass abandons that clip rather than
+    // splicing the new sweep onto the end of it.
+    if (stackUntil) { stopRecorder(); stackUntil = 0; }
+    if (stackSize() < 2) startRecorder();
+  }
   if (!on && recording) stopRecorder();
   recording = on;
   $('#rec').textContent = on ? '❚❚ pause' : '▶ run';
