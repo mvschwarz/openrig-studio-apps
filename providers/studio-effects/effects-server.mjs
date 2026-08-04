@@ -19,6 +19,7 @@ import { SCAN_FRAGMENT, SCAN_VERTEX, buildPath } from "./engine/scan.mjs";
 import { TILE_FAMILIES, PALETTES } from "./engine/tile.mjs";
 import { ANALOG_FRAGMENT, ANALOG_VERTEX } from "./engine/analog.mjs";
 import { evalCurves, pulses, ramp, EASING_NAMES } from "./engine/curves.mjs";
+import { pcm, envelope, onsets, envelopeTrack, onsetTrack } from "./engine/listen.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const arg = (flag, fallback) => {
@@ -94,6 +95,53 @@ http.createServer(async (req, res) => {
         return json(res, 200, { ok: true, gen: driveGen });
       }
       return json(res, 200, { ok: true, gen: driveGen, op: driveOp, boot: BOOT });
+    }
+
+    // A CURVE DERIVED FROM THE CLIP'S OWN AUDIO. Everything else here turns an
+    // author's intent into keyframes; this turns the material into them.
+    //
+    // It returns KEYFRAMES, deliberately, rather than a "reactive mode" the
+    // renderer would evaluate live. Three reasons, and they are the same reasons
+    // the curve engine was keyframes-only from the start: there stays exactly ONE
+    // evaluation path, so a derived curve animates identically to a hand-written
+    // one; the result is INSPECTABLE, so a person can see what the track heard
+    // before committing to a render; and it is EDITABLE, so an agent can generate
+    // one and then move a single keyframe rather than arguing with a black box.
+    //
+    // Reactivity that only exists inside the renderer is reactivity you cannot
+    // audit, and this tier has already paid for one handle that reported what the
+    // code intended rather than what it did.
+    if (url.pathname === "/api/effects/curve/from-audio" && req.method === "POST") {
+      const b = JSON.parse((await readBody(req)) || "{}");
+      const file = insideMedia(b.source || "");
+      if (!file) return json(res, 400, { ok: false, error: `no such source in the media root: ${b.source}` });
+      const fam = FAMILIES[b.family || "analog"];
+      const spec = fam?.params?.[b.param];
+      if (!spec) return json(res, 400, { ok: false, error: `no parameter ${b.param} on family ${b.family}` });
+
+      const a = pcm(file);
+      // A source with no audio is a NORMAL answer, not a failure of the feature —
+      // said plainly so nobody debugs ffmpeg over it.
+      if (!a.ok) return json(res, 200, { ok: false, error: a.error, hasAudio: false });
+
+      const env = envelope(a.samples, a.rate, Number(b.hz) || 30);
+      const min = b.min !== undefined ? Number(b.min) : (spec.min ?? 0);
+      const max = b.max !== undefined ? Number(b.max) : (spec.max ?? 1);
+      const mode = b.mode === "onsets" ? "onsets" : "envelope";
+      const hits = onsets(env, { sensitivity: Number(b.sensitivity) || 1.6, minGap: Number(b.minGap) || 0.12 });
+      const track = mode === "onsets"
+        ? onsetTrack(hits, { min, max, decay: Number(b.decay) || 0.22 })
+        : envelopeTrack(env, { min, max, gamma: Number(b.gamma) || 1 });
+
+      const gaps = hits.slice(1).map((h, i) => h.t - hits[i].t).sort((x, y) => x - y);
+      const median = gaps.length ? gaps[Math.floor(gaps.length / 2)] : null;
+      return json(res, 200, {
+        ok: true, hasAudio: true, mode, seconds: +a.seconds.toFixed(2),
+        onsets: hits.length, medianGap: median ? +median.toFixed(3) : null,
+        perMinute: median ? +(60 / median).toFixed(1) : null,
+        keyframes: track.length,
+        spec: { unit: "seconds", tracks: { [b.param]: track } },
+      });
     }
 
     // The shader, served rather than duplicated into the surface. One definition,
