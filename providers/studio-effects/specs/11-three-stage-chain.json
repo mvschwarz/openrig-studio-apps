@@ -1,0 +1,19 @@
+{
+  "_": "THREE STAGES. a reads the clip, b re-scans a's tape perpendicular, c re-scans b's and melts it. THE RULE THAT MAKES A DEEP CHAIN WORK, and it took three wrong attempts to find: SIZE EACH advance TO THE TIME THAT STAGE ACTUALLY HAS. advance = wraps * 960 / (60 * seconds_available), and about 1.5 wraps reads as one coherent sweep. A downstream stage that starts at 6s in a 20s run has 14 seconds, not 20 — give it the advance for 20 and it never completes a pass, which is what starves it. WHAT DOES NOT WORK: advance 0 on anything but the first stage (it fits the sweep to the WHOLE run, so a late start can never finish one), and a very high advance anywhere (head.position ramps across the full scan, so a racing write with a barely-moving head just repeats one strip of the bed). startAt lets each source get ahead — the diagonal edges you see are the CAUSAL FRONTIER, a stage cannot record what its source has not written yet, and at this depth they read as deliberate structure rather than damage. Wants a CONTINUOUS source: cuts compound through three passes into noise.",
+  "scan": { "duration": "20s" },
+  "stages": [
+    { "id": "a", "source": { "rate": 1 },
+      "head": { "axis": "vertical", "position": { "ramp": [0, 1] }, "width": 6, "softness": 0.5 },
+      "response": { "read": "passthrough" },
+      "write": { "mode": "direct", "advance": 1.2, "frames": 1 } },
+    { "id": "b", "source": { "from": "a" }, "startAt": "3s",
+      "head": { "axis": "horizontal", "position": { "ramp": [0, 1] }, "width": 8, "softness": 0.5 },
+      "response": { "read": "passthrough" },
+      "write": { "mode": "direct", "advance": 1.41, "frames": 1 } },
+    { "id": "c", "source": { "from": "b" }, "startAt": "6s",
+      "head": { "axis": "vertical", "position": { "ramp": [1, 0] }, "width": 6, "softness": 0.5 },
+      "response": { "read": "passthrough" },
+      "mosh": { "refresh": 0.965, "bloom": 1.0, "strength": 1.4, "sliceLoss": 0.06, "sliceShift": 18 },
+      "write": { "mode": "direct", "advance": 1.71, "frames": 12, "fps": 12 } }
+  ]
+}
