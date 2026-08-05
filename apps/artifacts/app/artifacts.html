@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Artifacts</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg:#121214; --fg:rgba(255,255,255,.95); --body:rgba(255,255,255,.68);
+    --dim:rgba(255,255,255,.52); --faint:rgba(255,255,255,.38);
+    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.16);
+    --card:rgba(255,255,255,.07); --raised:rgba(255,255,255,.12);
+    --coral:#ff6b5a; --indigo:#8b93ff; --sage:#7ea36f;
+    --sans:Helvetica,"Helvetica Neue",Arial,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  html,body { height:100%; margin:0; overflow:hidden; }
+  body {
+    position:relative; color:var(--fg); font-family:var(--sans); font-size:13.5px;
+    background:var(--bg); -webkit-font-smoothing:antialiased;
+  }
+  body::before { content:""; position:fixed; inset:-10%; z-index:-1; pointer-events:none;
+    background:radial-gradient(42% 55% at 18% 22%,rgba(139,147,255,.08),transparent 70%),
+      radial-gradient(48% 60% at 82% 18%,rgba(255,107,90,.05),transparent 70%);
+    filter:blur(56px) saturate(1.2) brightness(.9); transform:scale(1.1); }
+  button,input,textarea { font:inherit; }
+  button { color:inherit; }
+  button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px solid var(--indigo); outline-offset:2px; }
+  .shell { height:100%; display:grid; grid-template-rows:54px minmax(0,1fr); }
+  header { display:flex; align-items:center; gap:14px; padding:0 112px 0 18px; border-bottom:1px solid var(--line); background:rgba(18,18,20,.82); backdrop-filter:blur(14px); }
+  .brand { display:flex; align-items:baseline; gap:10px; min-width:190px; }
+  .brand strong { font-size:12px; letter-spacing:.22em; }
+  .eyebrow,.label { color:var(--faint); text-transform:uppercase; letter-spacing:.14em; font-size:10px; font-weight:700; }
+  .toolbar { display:flex; align-items:center; gap:6px; margin-left:auto; }
+  .tool,.action,.icon-btn {
+    border:1px solid var(--line); background:var(--card); border-radius:2px; min-height:30px;
+    padding:0 11px; cursor:pointer; transition:background .12s,border-color .12s,color .12s;
+    font-size:9px; letter-spacing:.14em; text-transform:uppercase; font-weight:600;
+  }
+  .tool:hover,.action:hover,.icon-btn:hover { background:var(--raised); border-color:var(--line2); }
+  .tool.active { color:#101014; background:var(--fg); border-color:var(--fg); }
+  .action.primary { color:#101014; background:var(--fg); border-color:var(--fg); font-weight:700; }
+  .note-input { width:min(270px,24vw); height:30px; color:var(--fg); background:rgba(0,0,0,.2); border:1px solid var(--line); border-radius:2px; padding:0 9px; }
+  .note-input::placeholder { color:var(--faint); }
+  main { min-height:0; display:grid; grid-template-columns:210px minmax(360px,1fr) 280px; }
+  aside { min-height:0; overflow:auto; background:rgba(18,18,20,.6); }
+  .library { border-right:1px solid var(--line); }
+  .notes { border-left:1px solid var(--line); }
+  .aside-head { position:sticky; top:0; z-index:3; padding:17px 14px 11px; background:#151519; border-bottom:1px solid var(--line); }
+  .aside-head-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; }
+  .aside-head h2 { font-size:15px; margin:0; letter-spacing:-.01em; }
+  .count { color:var(--faint); font-variant-numeric:tabular-nums; }
+  .artifact-list,.annotation-list { padding:8px; display:grid; gap:5px; }
+  .artifact-row { width:100%; text-align:left; border:1px solid transparent; border-radius:2px; background:transparent; color:var(--body); padding:10px; cursor:pointer; }
+  .artifact-row:hover { background:var(--card); color:var(--fg); }
+  .artifact-row.active { border-color:var(--line2); background:var(--card); color:var(--fg); }
+  .artifact-row strong { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .artifact-row span { display:block; color:var(--faint); font-size:11px; margin-top:4px; }
+  .stage { min-width:0; min-height:0; display:grid; grid-template-rows:39px minmax(0,1fr); background:rgba(5,7,12,.4); }
+  .stagebar { display:flex; align-items:center; gap:9px; padding:0 12px; border-bottom:1px solid var(--line); color:var(--faint); }
+  .stagebar .title { color:var(--body); font-weight:600; margin-right:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .status-dot { width:6px; height:6px; border-radius:50%; background:var(--sage); box-shadow:0 0 10px rgba(126,163,111,.7); }
+  .viewport-wrap { min-height:0; padding:20px; display:grid; place-items:center; overflow:auto; }
+  .viewport {
+    position:relative; width:min(100%,1120px); height:min(100%,760px); min-height:420px;
+    background:#fff; border:1px solid rgba(255,255,255,.2); box-shadow:0 18px 70px rgba(0,0,0,.42);
+  }
+  iframe { display:block; width:100%; height:100%; border:0; background:white; }
+  .overlay { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+  .overlay.drawing { pointer-events:auto; cursor:crosshair; }
+  .mark { fill:rgba(255,107,90,.10); stroke:var(--coral); stroke-width:2.5; vector-effect:non-scaling-stroke; }
+  .mark.agent { stroke:var(--indigo); fill:rgba(139,147,255,.10); }
+  .mark.missing { stroke-dasharray:6 5; opacity:.6; }
+  .mark-label { fill:#fff; stroke:#121214; stroke-width:3px; paint-order:stroke; font:700 11px var(--sans); }
+  .annotation {
+    position:relative; border:1px solid var(--line); border-radius:2px; padding:11px 11px 10px 13px;
+    background:var(--card); cursor:pointer;
+  }
+  .annotation::before { content:""; position:absolute; left:-1px; top:-1px; bottom:-1px; width:3px; background:var(--coral); border-radius:2px 0 0 2px; }
+  .annotation.agent::before { background:var(--indigo); }
+  .ann-top { display:flex; align-items:center; gap:6px; color:var(--faint); font-size:10px; text-transform:uppercase; letter-spacing:.09em; }
+  .ann-top .warn { color:#ffb55a; margin-left:auto; }
+  .annotation p { color:var(--fg); margin:8px 0 7px; line-height:1.35; }
+  .anchor { color:var(--dim); font-family:var(--sans); font-size:10.5px; line-height:1.45; word-break:break-word; }
+  .empty { color:var(--faint); line-height:1.55; padding:20px 14px; }
+  .empty strong { color:var(--body); display:block; margin-bottom:5px; }
+  .welcome { display:grid; place-items:center; height:100%; text-align:center; padding:30px; color:var(--body); }
+  .welcome-inner { max-width:420px; }
+  .welcome .glyph { font-size:50px; font-weight:200; color:var(--fg); line-height:1; margin-bottom:18px; }
+  .welcome h1 { margin:0 0 10px; color:var(--fg); font-size:25px; letter-spacing:-.035em; }
+  .welcome p { margin:0 auto 20px; line-height:1.55; }
+  dialog { color:var(--fg); width:min(780px,calc(100vw - 40px)); border:1px solid var(--line2); border-radius:3px; padding:0; background:#19191e; box-shadow:0 30px 100px rgba(0,0,0,.65); }
+  dialog::backdrop { background:rgba(0,0,0,.66); backdrop-filter:blur(3px); }
+  .dialog-head { display:flex; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); }
+  .dialog-head h2 { margin:0; font-size:16px; }
+  .dialog-head button { margin-left:auto; }
+  .form { padding:16px; display:grid; gap:12px; }
+  .field { display:grid; gap:6px; }
+  .field input,.field textarea { color:var(--fg); background:#101014; border:1px solid var(--line2); border-radius:2px; padding:9px; }
+  .field textarea { min-height:360px; resize:vertical; font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; tab-size:2; }
+  .dialog-actions { display:flex; justify-content:flex-end; gap:7px; padding:0 16px 16px; }
+  .toast { position:fixed; left:50%; bottom:24px; z-index:20; transform:translate(-50%,12px); opacity:0; pointer-events:none; color:#111; background:var(--fg); padding:9px 13px; border-radius:2px; font-weight:700; transition:.18s; }
+  .toast.show { transform:translate(-50%,0); opacity:1; }
+  @media (max-width:1050px) { .note-input { display:none; } }
+  @media (max-width:850px) { header { padding-right:100px; } main { grid-template-columns:170px minmax(320px,1fr); } .notes { position:fixed; right:0; top:54px; bottom:0; width:280px; z-index:8; box-shadow:-20px 0 50px rgba(0,0,0,.45); } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="brand"><strong>ARTIFACTS</strong><span class="eyebrow">shared markup</span></div>
+    <div class="toolbar">
+      <input id="noteInput" class="note-input" placeholder="What should change?">
+      <button class="tool draw-tool" data-shape="circle" title="Circle an element">○ Circle</button>
+      <button class="tool draw-tool" data-shape="rect" title="Box an element">□ Box</button>
+      <button id="editBtn" class="tool">Edit HTML</button>
+      <button id="captureBtn" class="tool">Save view</button>
+    </div>
+  </header>
+  <main>
+    <aside class="library">
+      <div class="aside-head">
+        <span class="label">Library</span>
+        <div class="aside-head-row"><h2>Pages</h2><button id="newBtn" class="icon-btn">＋ New</button></div>
+      </div>
+      <div id="artifactList" class="artifact-list"></div>
+    </aside>
+    <section class="stage">
+      <div class="stagebar"><span class="status-dot"></span><span id="stageTitle" class="title">No artifact open</span><span id="modeText">Browse</span></div>
+      <div id="viewportWrap" class="viewport-wrap">
+        <div id="welcome" class="welcome"><div class="welcome-inner"><div class="glyph">✎</div><h1>Draw where the work is.</h1><p>Open a page, circle what matters, and leave a note. Agents read the same structured marks you see.</p><button id="exampleBtn" class="action primary">Make an example page</button></div></div>
+        <div id="viewport" class="viewport" hidden>
+          <iframe id="artifactFrame" title="Artifact preview"></iframe>
+          <svg id="overlay" class="overlay" aria-label="Annotation layer"></svg>
+        </div>
+      </div>
+    </section>
+    <aside class="notes">
+      <div class="aside-head"><span class="label">Thread</span><div class="aside-head-row"><h2>Annotations</h2><span id="annotationCount" class="count">0</span></div></div>
+      <div id="annotationList" class="annotation-list"><div class="empty"><strong>No marks yet.</strong>Circle or box an element to start a shared thread.</div></div>
+    </aside>
+  </main>
+</div>
+
+<dialog id="editorDialog">
+  <div class="dialog-head"><h2 id="editorTitle">New artifact</h2><button class="icon-btn" data-close>×</button></div>
+  <form id="editorForm" class="form">
+    <div class="field"><label class="label" for="artifactName">Name</label><input id="artifactName" required maxlength="120"></div>
+    <div id="idField" class="field"><label class="label" for="artifactId">ID</label><input id="artifactId" required pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="launch-page"></div>
+    <div class="field"><label class="label" for="artifactHtml">HTML</label><textarea id="artifactHtml" spellcheck="false" required></textarea></div>
+  </form>
+  <div class="dialog-actions"><button class="action" data-close>Cancel</button><button id="saveEditor" class="action primary">Save page</button></div>
+</dialog>
+<div id="toast" class="toast"></div>
+
+<script>
+(() => {
+  const $ = (selector) => document.querySelector(selector);
+  const state = { artifacts: [], current: null, annotations: [], drawShape: null, draft: null };
+  const els = {
+    list: $("#artifactList"), frame: $("#artifactFrame"), overlay: $("#overlay"), viewport: $("#viewport"),
+    welcome: $("#welcome"), stageTitle: $("#stageTitle"), mode: $("#modeText"), notes: $("#annotationList"),
+    count: $("#annotationCount"), note: $("#noteInput"), dialog: $("#editorDialog"), form: $("#editorForm"),
+    name: $("#artifactName"), id: $("#artifactId"), html: $("#artifactHtml"), idField: $("#idField"),
+  };
+  const sampleHtml = `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3efe7;color:#171719;font:16px/1.45 Helvetica,Arial,sans-serif}.page{min-height:100vh;padding:7vw}.kicker{text-transform:uppercase;letter-spacing:.15em;font-size:11px;font-weight:700;color:#705d50}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:5vw;align-items:end;padding:8vh 0;border-bottom:1px solid #bdb3a5}h1{font-size:clamp(48px,8vw,104px);line-height:.88;letter-spacing:-.07em;margin:0}.lede{font-size:20px;color:#5d554f}.actions{display:flex;gap:10px;margin-top:28px}button{border:1px solid #171719;background:transparent;padding:13px 18px;font-weight:700;cursor:pointer}#publish{background:#171719;color:white}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding-top:24px}.card{min-height:120px;border:1px solid #bdb3a5;padding:18px}.card strong{display:block;font-size:22px;margin-bottom:7px}@media(max-width:700px){.hero{grid-template-columns:1fr}.grid{grid-template-columns:1fr}}
+</style></head><body><main class="page"><div class="kicker">OpenRig / Launch note</div><section class="hero"><div><h1>Make the work visible.</h1></div><div><p class="lede">A small page for choosing what ships next.</p><div class="actions"><button id="preview">Preview</button><button id="publish">Publish</button></div></div></section><section class="grid"><article class="card"><strong>01</strong>Build the smallest useful thing.</article><article class="card"><strong>02</strong>Look at the real pixels.</article><article class="card"><strong>03</strong>Change your mind quickly.</article></section></main></body></html>`;
+
+  const api = async (url, options = {}) => {
+    const response = await fetch(url, options);
+    const type = response.headers.get("content-type") || "";
+    const payload = type.includes("json") ? await response.json() : await response.text();
+    if (!response.ok) throw new Error(payload.error || payload || `HTTP ${response.status}`);
+    return payload;
+  };
+  const send = (url, value) => api(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
+  const toast = (message) => {
+    const node = $("#toast"); node.textContent = message; node.classList.add("show");
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => node.classList.remove("show"), 1900);
+  };
+  const slug = (value) => String(value || "artifact").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64) || "artifact";
+  const esc = (value) => String(value ?? "").replace(/[&<>\"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const selectorFor = (element) => {
+    if (!element || element === element.ownerDocument.documentElement || element === element.ownerDocument.body) return element?.tagName?.toLowerCase() || "body";
+    if (element.id) return `#${CSS.escape(element.id)}`;
+    const explicit = element.getAttribute("data-annotate-id");
+    if (explicit) return `[data-annotate-id="${CSS.escape(explicit)}"]`;
+    const parts = [];
+    let node = element;
+    while (node && node !== node.ownerDocument.body && parts.length < 4) {
+      const tag = node.tagName.toLowerCase();
+      const siblings = [...node.parentElement.children].filter((child) => child.tagName === node.tagName);
+      parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${siblings.indexOf(node) + 1})` : tag);
+      node = node.parentElement;
+    }
+    return parts.join(" > ");
+  };
+  const descriptor = (annotation) => {
+    if (!annotation.selector) return `unanchored ${annotation.shape}`;
+    const text = annotation.text ? ` (\"${annotation.text}\")` : "";
+    return `${annotation.shape} on ${annotation.selector}${text}`;
+  };
+  const relativeBox = (rect, doc) => ({
+    x: rect.left / doc.documentElement.clientWidth,
+    y: rect.top / doc.documentElement.clientHeight,
+    width: rect.width / doc.documentElement.clientWidth,
+    height: rect.height / doc.documentElement.clientHeight,
+  });
+  const resolveElement = (selector) => {
+    try { return els.frame.contentDocument?.querySelector(selector); } catch { return null; }
+  };
+  const hydrate = async () => {
+    if (!state.current) return;
+    for (const annotation of state.annotations) {
+      if (!annotation.selector) continue;
+      const element = resolveElement(annotation.selector);
+      const next = element ? {
+        ...annotation, tag: element.tagName.toLowerCase(), text: element.innerText?.trim().replace(/\s+/g," ").slice(0,240) || null,
+        anchor: relativeBox(element.getBoundingClientRect(), els.frame.contentDocument), status: "anchored",
+      } : { ...annotation, status: "missing" };
+      const changed = JSON.stringify([annotation.tag,annotation.text,annotation.anchor,annotation.status]) !== JSON.stringify([next.tag,next.text,next.anchor,next.status]);
+      if (changed) {
+        const saved = await send(`/api/artifacts/annotations?artifact=${encodeURIComponent(state.current.id)}`, next);
+        Object.assign(annotation, saved.annotation);
+      }
+    }
+    renderAnnotations();
+  };
+  const renderAnnotations = () => {
+    const w = els.frame.clientWidth || 1, h = els.frame.clientHeight || 1;
+    els.overlay.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    els.overlay.innerHTML = state.annotations.map((ann, index) => {
+      if (!ann.anchor) return "";
+      const x = ann.anchor.x * w, y = ann.anchor.y * h, width = ann.anchor.width * w, height = ann.anchor.height * h;
+      const cls = `mark ${ann.source === "agent" ? "agent" : ""} ${ann.status === "missing" ? "missing" : ""}`;
+      const shape = ann.shape === "circle"
+        ? `<ellipse class="${cls}" cx="${x + width/2}" cy="${y + height/2}" rx="${Math.max(8,width/2+6)}" ry="${Math.max(8,height/2+6)}"/>`
+        : `<rect class="${cls}" x="${x-5}" y="${y-5}" width="${width+10}" height="${height+10}" rx="2"/>`;
+      return `${shape}<text class="mark-label" x="${Math.max(8,x-1)}" y="${Math.max(14,y-10)}">${index+1}</text>`;
+    }).join("");
+    els.count.textContent = String(state.annotations.length);
+    els.notes.innerHTML = state.annotations.length ? state.annotations.map((ann, index) => `
+      <article class="annotation ${ann.source === "agent" ? "agent" : ""}" data-ann="${esc(ann.id)}">
+        <div class="ann-top"><span>${index+1}</span><span>${esc(ann.source)}</span><span>${esc(ann.shape)}</span>${ann.status === "missing" ? '<span class="warn">anchor missing</span>' : ""}</div>
+        <p>${esc(ann.note || "No note")}</p>
+        <div class="anchor">${esc(descriptor(ann))}</div>
+      </article>`).join("") : '<div class="empty"><strong>No marks yet.</strong>Circle or box an element to start a shared thread.</div>';
+  };
+  const loadArtifacts = async () => {
+    state.artifacts = (await api("/api/artifacts")).artifacts;
+    els.list.innerHTML = state.artifacts.length ? state.artifacts.map((item) => `
+      <button class="artifact-row ${state.current?.id === item.id ? "active" : ""}" data-id="${esc(item.id)}"><strong>${esc(item.name)}</strong><span>${esc(item.id)}</span></button>`).join("")
+      : '<div class="empty">No pages yet.</div>';
+  };
+  const openArtifact = async (id) => {
+    const payload = await api(`/api/artifacts/item?id=${encodeURIComponent(id)}`);
+    state.current = payload.artifact;
+    state.current.html = payload.html;
+    state.annotations = (await api(`/api/artifacts/annotations?artifact=${encodeURIComponent(id)}`)).annotations;
+    els.welcome.hidden = true; els.viewport.hidden = false; els.stageTitle.textContent = state.current.name;
+    els.frame.src = `/artifacts/${encodeURIComponent(id)}/artifact.html?at=${Date.now()}`;
+    await loadArtifacts();
+    renderAnnotations();
+  };
+  const createArtifact = async ({ id, name, html }) => {
+    const payload = await send("/api/artifacts", { id, name, html });
+    await loadArtifacts(); await openArtifact(payload.artifact.id); return payload.artifact;
+  };
+  const updateArtifact = async ({ id = state.current?.id, name, html }) => {
+    const payload = await send(`/api/artifacts/item?id=${encodeURIComponent(id)}`, { name, html });
+    if (state.current?.id === id) await openArtifact(id);
+    return payload.artifact;
+  };
+  const addAnnotation = async ({ artifact = state.current?.id, selector = null, shape = "circle", note = "", source = "agent", anchor = null, tag = null, text = null }) => {
+    if (!artifact) throw new Error("open an artifact first or pass artifact");
+    const payload = await send(`/api/artifacts/annotations?artifact=${encodeURIComponent(artifact)}`, { selector, shape, note, source, anchor, tag, text, status: selector ? "missing" : "spatial" });
+    if (state.current?.id === artifact) { state.annotations.push(payload.annotation); await hydrate(); }
+    return payload.annotation;
+  };
+  const beginDraw = (shape) => {
+    if (!state.current) return toast("Open a page first");
+    state.drawShape = state.drawShape === shape ? null : shape;
+    document.querySelectorAll(".draw-tool").forEach((button) => button.classList.toggle("active", button.dataset.shape === state.drawShape));
+    els.overlay.classList.toggle("drawing", Boolean(state.drawShape));
+    els.mode.textContent = state.drawShape ? `${shape === "circle" ? "Circle" : "Box"} mode · drag on the page` : "Browse";
+  };
+  const saveScreenshot = async () => {
+    if (!state.current) return toast("Open a page first");
+    await hydrate();
+    const doc = els.frame.contentDocument;
+    if (!doc) throw new Error("artifact is not loaded");
+    const width = els.frame.clientWidth, height = els.frame.clientHeight;
+    const clone = doc.documentElement.cloneNode(true);
+    clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+    const serialized = new XMLSerializer().serializeToString(clone);
+    const marks = els.overlay.innerHTML;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%">${serialized}</foreignObject><svg width="100%" height="100%" viewBox="0 0 ${width} ${height}"><style>.mark{fill:rgba(255,107,90,.10);stroke:#ff6b5a;stroke-width:2.5}.mark.agent{stroke:#8b93ff;fill:rgba(139,147,255,.10)}.mark.missing{stroke-dasharray:6 5}.mark-label{fill:#fff;stroke:#121214;stroke-width:3px;paint-order:stroke;font:bold 11px Helvetica}</style>${marks}</svg></svg>`;
+    await send(`/api/artifacts/screenshot?artifact=${encodeURIComponent(state.current.id)}`, { svg });
+    toast("Rendered view saved");
+    return `/api/artifacts/screenshot?artifact=${encodeURIComponent(state.current.id)}`;
+  };
+
+  els.frame.addEventListener("load", () => requestAnimationFrame(() => hydrate().catch((error) => toast(error.message))));
+  window.addEventListener("resize", renderAnnotations);
+  els.list.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-id]"); if (row) openArtifact(row.dataset.id).catch((error) => toast(error.message));
+  });
+  document.querySelectorAll(".draw-tool").forEach((button) => button.addEventListener("click", () => beginDraw(button.dataset.shape)));
+  els.overlay.addEventListener("pointerdown", (event) => {
+    if (!state.drawShape) return;
+    const rect = els.overlay.getBoundingClientRect();
+    state.draft = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    els.overlay.setPointerCapture(event.pointerId);
+  });
+  els.overlay.addEventListener("pointerup", async (event) => {
+    if (!state.draft || !state.drawShape) return;
+    const rect = els.overlay.getBoundingClientRect();
+    const end = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const mid = { x: (state.draft.x + end.x)/2, y: (state.draft.y + end.y)/2 };
+    const doc = els.frame.contentDocument;
+    const element = doc?.elementFromPoint(mid.x, mid.y);
+    const drawn = { x: Math.min(state.draft.x,end.x)/rect.width, y: Math.min(state.draft.y,end.y)/rect.height, width: Math.max(10,Math.abs(end.x-state.draft.x))/rect.width, height: Math.max(10,Math.abs(end.y-state.draft.y))/rect.height };
+    const note = els.note.value.trim() || "Review this";
+    await addAnnotation({
+      shape: state.drawShape, note, source: "human", anchor: drawn,
+      selector: element ? selectorFor(element) : null,
+      tag: element?.tagName?.toLowerCase() || null,
+      text: element?.innerText?.trim().replace(/\s+/g," ").slice(0,240) || null,
+    });
+    els.note.value = ""; state.draft = null; beginDraw(state.drawShape); toast("Annotation shared");
+  });
+  els.notes.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-ann]");
+    const index = state.annotations.findIndex((item) => item.id === card?.dataset.ann);
+    const mark = els.overlay.children[index * 2];
+    mark?.animate([{opacity:1},{opacity:.2},{opacity:1}], {duration:500});
+  });
+  $("#newBtn").addEventListener("click", () => {
+    $("#editorTitle").textContent = "New artifact"; els.form.dataset.mode = "new"; els.idField.hidden = false;
+    els.name.value = ""; els.id.value = ""; els.html.value = sampleHtml; els.dialog.showModal(); els.name.focus();
+  });
+  $("#exampleBtn").addEventListener("click", async () => {
+    try { await createArtifact({ id: `launch-page-${Date.now().toString().slice(-5)}`, name: "Launch page", html: sampleHtml }); toast("Example page created"); }
+    catch (error) { toast(error.message); }
+  });
+  $("#editBtn").addEventListener("click", () => {
+    if (!state.current) return toast("Open a page first");
+    $("#editorTitle").textContent = "Edit artifact"; els.form.dataset.mode = "edit"; els.idField.hidden = true;
+    els.name.value = state.current.name; els.id.value = state.current.id; els.html.value = state.current.html; els.dialog.showModal();
+  });
+  $("#saveEditor").addEventListener("click", async () => {
+    if (!els.form.reportValidity()) return;
+    try {
+      if (els.form.dataset.mode === "new") await createArtifact({ id: slug(els.id.value || els.name.value), name: els.name.value, html: els.html.value });
+      else await updateArtifact({ id: state.current.id, name: els.name.value, html: els.html.value });
+      els.dialog.close(); toast("Page saved");
+    } catch (error) { toast(error.message); }
+  });
+  els.name.addEventListener("input", () => { if (els.form.dataset.mode === "new" && !els.id.dataset.touched) els.id.value = slug(els.name.value); });
+  els.id.addEventListener("input", () => { els.id.dataset.touched = "true"; });
+  document.querySelectorAll("[data-close]").forEach((button) => button.addEventListener("click", () => els.dialog.close()));
+  $("#captureBtn").addEventListener("click", () => saveScreenshot().catch((error) => toast(error.message)));
+
+  window.artifacts = Object.freeze({
+    ready: loadArtifacts().then(() => state.artifacts.length && openArtifact(state.artifacts[0].id)),
+    list: async () => (await api("/api/artifacts")).artifacts,
+    open: openArtifact,
+    create: createArtifact,
+    update: updateArtifact,
+    annotate: addAnnotation,
+    annotations: async (artifact = state.current?.id) => (await api(`/api/artifacts/annotations?artifact=${encodeURIComponent(artifact)}`)).annotations,
+    screenshot: saveScreenshot,
+    state: () => ({ current: state.current?.id || null, annotations: state.annotations.map((annotation) => ({ ...annotation })) }),
+  });
+})();
+</script>
+</body>
+</html>

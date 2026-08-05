@@ -1,0 +1,10 @@
+{
+  "_": "SLIT-SCAN CINEMA — one COMPLETE SWEEP becomes ONE FRAME. This cannot run in real time and that is intrinsic rather than a limitation to engineer away: a sweep takes seconds and a frame lasts a twelfth of one. So it is an OFFLINE RENDER — run a short sweep, keep the finished tape as a frame, clear, run the next. The clip keeps playing throughout, so consecutive frames are built from consecutive stretches of footage and the film MOVES: the subject turns, the composition shifts, and every single frame is a whole scan rather than a moment. Keep `duration` short (1-1.5s) — it is the exposure of one frame, and 24 of them at 12fps is two seconds of film for about ninety seconds of rendering. frames MUST be 1: a stack here would be a window inside a frame that is already a whole sweep. The render loop lives outside the surface; this spec is the per-frame exposure.",
+  "scan": { "duration": "1.2s" },
+  "stages": [
+    { "id": "a", "source": { "rate": 1 },
+      "head": { "axis": "vertical", "position": { "ramp": [0, 1] }, "width": 6, "softness": 0.4 },
+      "response": { "read": "passthrough" },
+      "write": { "mode": "direct", "advance": 0, "frames": 1 } }
+  ]
+}
