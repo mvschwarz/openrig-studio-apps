@@ -82,6 +82,14 @@
       <select id="specpick"><option value="">— saved spec —</option></select>
       <select id="preset"><option value="">— built-in chain —</option></select>
       <select id="source"><option value="">— source —</option></select>
+      <button id="wsedit">workspace…</button>
+    </div>
+    <div class="transport" id="wsbar" hidden>
+      <input id="wspath" type="text" placeholder="~/OpenRig Studio"
+             style="font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:3px;
+                    border:1px solid var(--line);background:var(--panel2);color:var(--ink);min-width:420px">
+      <button id="wsgo">use this folder</button>
+      <button id="wscancel">cancel</button>
     </div>
     <div class="status" id="status">ready</div>
     <div class="err" id="error"></div>
@@ -95,6 +103,7 @@
     <div class="transport" id="playbar" hidden>
       <button id="play" class="run">❚❚ pause</button>
       <button id="saveclip" hidden>save clip to media</button>
+      <button id="toshelf" hidden>save to shelf</button>
       <span class="meta" id="meta"></span>
     </div>
     <div class="meta" id="metaidle"></div>
@@ -794,6 +803,7 @@ function startRecorder() {
       $('#clipwrap').hidden = false;
       $('#playbar').hidden = false;
       $('#saveclip').hidden = false;
+      $('#toshelf').hidden = false;
       // Native controls, and its own duration reported — so "did this work" is
       // answerable by looking rather than by trusting that a button appeared.
       v.onloadedmetadata = () => {
@@ -1091,6 +1101,95 @@ async function boot() {
       playing = !playing;
       $('#play').textContent = playing ? '❚❚ pause' : '▶ play';
       $('#play').classList.toggle('on', playing); };
+    // SAVE TO SHELF — one press instead of four, because the four-step version is
+    // the one nobody does. It writes the clip, writes the spec, and writes the
+    // _card that TIES THEM TOGETHER: the title, the footage this was made from,
+    // and the file that came out. That card is the whole reason the shelf can
+    // show you what an effect looks like instead of just naming it.
+    //
+    // Both artifacts share one slug, so the pair stays obvious in a folder that
+    // will eventually hold hundreds.
+    // THE WORKSPACE IS A STUDIO-LEVEL IDEA, not a shelf feature, so the control
+    // belongs anywhere work is produced rather than only where it is browsed.
+    // Same route, same persistence — this is a second view of one setting, which
+    // is why it re-reads after binding instead of assuming it took.
+    async function showWorkspace() {
+      try {
+        const r = await (await fetch('/api/workspace/root')).json();
+        mediaRoot = r.media; specsDir = r.specs;
+        $('#paths').innerHTML = pathLines();
+        return r;
+      } catch { return {}; }
+    }
+    $('#wsedit').onclick = async () => {
+      const bar = $('#wsbar');
+      bar.hidden = !bar.hidden;
+      if (!bar.hidden) { const r = await showWorkspace(); $('#wspath').value = r.media || ''; $('#wspath').focus(); }
+    };
+    $('#wscancel').onclick = () => { $('#wsbar').hidden = true; };
+    $('#wsgo').onclick = async () => {
+      const want = $('#wspath').value.trim();
+      if (!want) return fail('type a folder path first');
+      try {
+        const r = await (await fetch('/api/workspace/root', {
+          method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ path: want }) })).json();
+        if (!r.ok) return fail(`could not use that folder: ${r.error}`);
+        $('#wsbar').hidden = true;
+        await showWorkspace();
+        await refreshSpecList();
+        // The SOURCE LIST comes from the workspace too, so it has to be rebuilt
+        // or the picker keeps offering footage from the old root.
+        const s = await (await fetch('/api/effects/sources')).json();
+        const sel = $('#source'); sel.length = 1;
+        for (const fn of s.sources || []) { const o=document.createElement('option'); o.value=o.textContent=fn; sel.appendChild(o); }
+        say(`workspace is now ${r.media} — remembered, so it survives a restart`);
+      } catch (e) { fail(`could not change it: ${e.message}`); }
+    };
+    $('#wspath').onkeydown = (e) => { if (e.key === 'Enter') $('#wsgo').click(); };
+
+    $('#toshelf').onclick = async () => {
+      const suggested = ($('#specpick').value || 'effect').replace(/\.json$/, '');
+      const title = prompt('Name this effect for the shelf', suggested);
+      if (title === null) return;
+      const slug = title.trim().replace(/[^A-Za-z0-9._ -]/g, '').replace(/\s+/g, '-').toLowerCase().slice(0, 60);
+      if (!slug) return fail('that name has nothing usable in it');
+      say('saving to the shelf…');
+      try {
+        // 1. the clip, if this run made one.
+        let preview = null;
+        const v = $('#playback');
+        if (v && v.src) {
+          const blob = await (await fetch(v.src)).blob();
+          const fd = new FormData();
+          fd.append('name', `clip-${slug}`);
+          fd.append('seconds', String(recSeconds || 0));
+          fd.append('clip', blob, 'clip.webm');
+          const c = await (await fetch('/api/scanner/clip', { method: 'POST', body: fd })).json();
+          if (c.ok) preview = c.name;
+          else fail(`the clip did not save: ${c.error} — saving the spec anyway`);
+        }
+        // 2. the spec, carrying the card. Built from the CURRENT spec text so
+        //    what gets filed is what is actually loaded, not what was typed
+        //    before the last compile.
+        let spec;
+        try { spec = JSON.parse($('#spec').value); }
+        catch (e) { return fail(`the spec box is not valid JSON: ${e.message}`); }
+        spec._card = {
+          title: title.trim(),
+          tags: ['scanner'],
+          source: $('#source').value || null,
+          preview,
+        };
+        const r = await (await fetch('/api/scanner/specs', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: slug, spec }) })).json();
+        if (!r.ok) return fail(`the spec did not save: ${r.error}`);
+        await refreshSpecList();
+        say(preview
+          ? `on the shelf as "${title.trim()}" — spec ${r.name}, preview ${preview}`
+          : `spec saved as ${r.name}, but with NO PREVIEW — run it, then save again so the shelf can show it`);
+      } catch (e) { fail(`could not save to the shelf: ${e.message}`); }
+    };
     $('#saveclip').onclick = async () => {
       if (!recBlob) return;
       const name = prompt('save this clip into the media root as:', `scan-${Date.now()}`);

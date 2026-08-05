@@ -75,10 +75,16 @@
     <div class="bar">
       <input id="q" type="search" placeholder="filter by name or note…" autocomplete="off">
       <span id="tagbar" class="bar"></span>
-      <button id="reload">reload workspace</button>
+      <button id="reload">reload</button>
+      <button id="editroot">change workspace…</button>
       <select id="swap"><option value="">— run on its own footage —</option></select>
     </div>
     <div class="status" id="status">reading the workspace…</div>
+    <div class="bar" id="rootbar" hidden>
+      <input id="rootpath" type="text" placeholder="/Users/you/Desktop/studio-workspace" style="min-width:420px">
+      <button id="rootgo">use this folder</button>
+      <button id="rootcancel">cancel</button>
+    </div>
     <div class="paths" id="paths"></div>
   </header>
   <div class="grid" id="grid"></div>
@@ -86,7 +92,7 @@
 <script type="module">
 const $ = (s) => document.querySelector(s);
 const say = (m) => { $('#status').textContent = m; };
-let CARDS = [], TAG = null;
+let CARDS = [], TAG = null, ROOT = {};
 
 // PLAY WHAT IS ON SCREEN, PAUSE WHAT IS NOT. A shelf of a hundred effects is the
 // whole point of this app, and a hundred decoding videos is not something a
@@ -104,9 +110,12 @@ async function load() {
     const r = await (await fetch('/api/gallery/cards')).json();
     if (!r.ok) return say(r.error || 'the workspace could not be read');
     CARDS = r.cards || [];
-    $('#paths').innerHTML = r.workspace
-      ? `<b>workspace</b> ${r.workspace}<br><b>media</b> ${r.mediaRoot}`
-      : '<b>no media root is bound</b> — there is no workspace to read';
+    ROOT = await (await fetch('/api/workspace/root')).json();
+    $('#paths').innerHTML = ROOT.media
+      ? `<b>workspace</b> ${ROOT.media}<br><b>specs</b> ${ROOT.specs}` +
+        `<br><b>remembered in</b> ${ROOT.config}` +
+        (ROOT.remembered ? '' : ' <span style="opacity:.7">(not set yet — still the boot default)</span>')
+      : '<b>no workspace is bound</b> — nothing to read';
     const s = await (await fetch('/api/effects/sources')).json();
     const sel = $('#swap');
     sel.length = 1;
@@ -253,6 +262,31 @@ async function drive(c, source) {
 $('#q').oninput = render;
 $('#reload').onclick = load;
 
+// CHANGING WHERE THE WORK LIVES. The provider rebinds and remembers; this only
+// asks. It reports back the path that was ACTUALLY bound rather than the one
+// typed, because a trailing slash or a symlink means those differ and the one
+// that matters is the resolved one.
+$('#editroot').onclick = () => {
+  const bar = $('#rootbar');
+  bar.hidden = !bar.hidden;
+  if (!bar.hidden) { $('#rootpath').value = ROOT.media || ''; $('#rootpath').focus(); }
+};
+$('#rootcancel').onclick = () => { $('#rootbar').hidden = true; };
+$('#rootgo').onclick = async () => {
+  const want = $('#rootpath').value.trim();
+  if (!want) return say('type a folder path first');
+  say('binding…');
+  try {
+    const r = await (await fetch('/api/workspace/root', {
+      method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ path: want }) })).json();
+    if (!r.ok) return say(`could not use that folder: ${r.error}`);
+    $('#rootbar').hidden = true;
+    await load();
+    say(`workspace is now ${r.media}${r.warning ? ` — ${r.warning}` : ' — remembered, so it survives a restart'}`);
+  } catch (e) { say(`could not change it: ${e.message}`); }
+};
+$('#rootpath').onkeydown = (e) => { if (e.key === 'Enter') $('#rootgo').click(); };
+
 // The agent seam, same shape as SCANNER's: everything the surface can do,
 // callable without a pointer.
 window.gallery = {
@@ -266,6 +300,13 @@ window.gallery = {
   },
   filter: (q, tag) => { $('#q').value = q || ''; TAG = tag || null; buildTags(); render(); return CARDS.filter(matches).length; },
   reload: load,
+  workspace: () => ROOT,
+  setWorkspace: async (p) => {
+    const r = await (await fetch('/api/workspace/root', {
+      method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ path: p }) })).json();
+    if (r.ok) await load();
+    return r;
+  },
 };
 
 load();

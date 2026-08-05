@@ -2,25 +2,39 @@
   "manifest_version": 1,
   "id": "gallery",
   "name": "SHELF",
-  "summary": "Everything you have made, as a shelf you can browse by motion. Each card is one spec: the effect plays as a looping preview, names the footage that produced it, and hands itself back to SCANNER on one click — on its own footage or on somebody else's.",
+  "summary": "Everything you have made, as a shelf you can browse by motion. Each card is one spec: the effect plays as a looping preview, names the footage that produced it, and hands itself back to SCANNER on one click \u2014 on its own footage or on somebody else's.",
   "category": "create",
-  "maker": { "name": "OpenRig", "url": "https://github.com/openrig" },
+  "maker": {
+    "name": "OpenRig",
+    "url": "https://github.com/openrig"
+  },
   "surface": {
     "entry": "app/gallery.html",
     "path": "/surfaces/gallery.html",
-    "glyph": "▦",
+    "glyph": "\u25a6",
     "hint": "browse saved effects as moving previews, then rerun any of them on any clip"
   },
   "roots": {
-    "media": { "required": false }
+    "media": {
+      "required": false
+    }
   },
   "_roots_note": "Optional and honest about it: with nothing bound there is no workspace, and the surface says so rather than showing an empty shelf that looks like you have made nothing.",
   "calls": {
-    "/api/gallery/cards": { "required": true },
-    "/api/effects/sources": { "required": false },
-    "/api/effects/drive": { "required": false }
+    "/api/gallery/cards": {
+      "required": true
+    },
+    "/api/effects/sources": {
+      "required": false
+    },
+    "/api/effects/drive": {
+      "required": false
+    },
+    "/api/workspace/root": {
+      "required": true
+    }
   },
-  "_calls_note": "/api/effects/drive is how a card gets recreated: the shelf does not render anything itself, it hands the spec to SCANNER. Optional because the shelf is still worth reading with no scanner surface open — you can copy the spec instead.",
+  "_calls_note": "/api/effects/drive is how a card gets recreated: the shelf does not render anything itself, it hands the spec to SCANNER. Optional because the shelf is still worth reading with no scanner surface open \u2014 you can copy the spec instead.",
   "provider": {
     "package": "@openrig/studio-effects",
     "required": true,

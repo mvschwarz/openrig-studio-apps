@@ -35,7 +35,71 @@ const arg = (flag, fallback) => {
   return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 };
 const PORT = Number(arg("--port", 8899));
-const MEDIA = (arg("--media", "") || "").replace(/^~/, process.env.HOME || "~");
+// THE WORKSPACE ROOT IS REBINDABLE AT RUNTIME, AND PERSISTED.
+//
+// It used to be a const from argv, which meant "where my work lives" could only
+// be changed by editing a boot config and restarting. That is not a setting; it
+// is a build-time constant wearing a friendly name. Every read below picks the
+// new value up naturally, because they all read this binding rather than caching
+// a copy at startup.
+//
+// Persisted OUTSIDE the workspace on purpose: a pointer stored inside the folder
+// it points at cannot survive being moved, which is the exact operation this
+// exists to support.
+const HOME = process.env.HOME || process.env.USERPROFILE || "/";
+const WORKSPACE_CONFIG = path.join(HOME, ".config", "openrig-studio", "workspace.json");
+function savedWorkspace() {
+  try {
+    const d = JSON.parse(fs.readFileSync(WORKSPACE_CONFIG, "utf8"));
+    return typeof d.media === "string" && d.media ? d.media : null;
+  } catch { return null; }
+}
+// THE DEFAULT, when nothing has been configured and no root was bound.
+//
+// The founder's reasoning, which is the right one: the ONLY thing we know for
+// certain is that OpenRig is installed, so ~/.openrig exists. But a creative
+// workspace hidden in a dotfolder is a workspace nobody opens in a file manager,
+// so a visible folder in the home directory is the better default when there is
+// a home directory to put it in -- which there is on macOS, Linux and Windows
+// alike. The dotfolder is the fallback for the case where there is not.
+//
+// NOT hardcoded to a platform path: process.env.HOME covers macOS and Linux, and
+// USERPROFILE covers Windows, so this is one expression rather than a switch.
+function defaultWorkspace() {
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  if (home) return path.join(home, "OpenRig Studio");
+  return path.join(process.env.OPENRIG_HOME || path.join(home || ".", ".openrig"), "workspace");
+}
+let MEDIA = savedWorkspace() || (arg("--workspace", "") || arg("--media", "") || "").replace(/^~/, HOME) || defaultWorkspace();
+
+// BOTH HALVES ON THE PATH, as everywhere else here, and it matters more than
+// usual: /media/ serves BYTES out of this root, so a root of "/" would publish
+// the filesystem to any page on localhost. Confined to the home folder, and
+// checked AFTER realpath so a symlink cannot walk out of it.
+function bindWorkspace(raw, { persist = true } = {}) {
+  const want = path.resolve(String(raw || "").replace(/^~/, HOME));
+  let real, home;
+  try { home = fs.realpathSync(HOME); } catch { return { ok: false, error: "no home folder" }; }
+  try { real = fs.realpathSync(want); }
+  catch { return { ok: false, error: `nothing exists at ${want}` }; }
+  let st;
+  try { st = fs.statSync(real); } catch { return { ok: false, error: "that path cannot be read" }; }
+  if (!st.isDirectory()) return { ok: false, error: "that path is a file, not a folder" };
+  if (real !== home && !real.startsWith(home + path.sep)) {
+    return { ok: false, error: "the workspace has to live inside your home folder" };
+  }
+  try { fs.accessSync(real, fs.constants.W_OK); }
+  catch { return { ok: false, error: "that folder is not writable" }; }
+  MEDIA = real;
+  try { fs.mkdirSync(path.join(real, "specs"), { recursive: true }); } catch {}
+  if (persist) {
+    try {
+      fs.mkdirSync(path.dirname(WORKSPACE_CONFIG), { recursive: true });
+      fs.writeFileSync(WORKSPACE_CONFIG, JSON.stringify({ media: real }, null, 2) + "\n");
+    } catch (e) { return { ok: true, media: real, warning: `bound, but not remembered: ${e.message}` }; }
+  }
+  return { ok: true, media: real };
+}
 
 const json = (res, code, body) => {
   res.writeHead(code, { "content-type": "application/json" });
@@ -306,6 +370,27 @@ http.createServer(async (req, res) => {
     //
     // Specs without a card are still listed, untitled, rather than hidden: a
     // spec someone saved by hand is part of their workspace too.
+    if (url.pathname === "/api/workspace/root") {
+      if (req.method === "GET") {
+        let counts = null;
+        if (MEDIA) {
+          const clips = (() => { try { return fs.readdirSync(MEDIA).filter((f) => /\.(mp4|webm|mov|png|jpe?g)$/i.test(f)).length; } catch { return 0; } })();
+          const specs = (() => { try { return fs.readdirSync(path.join(MEDIA, "specs")).filter((f) => f.endsWith(".json")).length; } catch { return 0; } })();
+          counts = { clips, specs };
+        }
+        return json(res, 200, { ok: true, media: MEDIA || null, specs: MEDIA ? path.join(MEDIA, "specs") : null,
+                                config: WORKSPACE_CONFIG, remembered: Boolean(savedWorkspace()), home: HOME, counts });
+      }
+      if (req.method === "POST") {
+        const b = JSON.parse(await readBody(req) || "{}");
+        const r = bindWorkspace(b.path);
+        // The reply carries the ROOT IT ACTUALLY BOUND rather than the string it
+        // was handed, so a surface shows what is true rather than what was asked.
+        return json(res, r.ok ? 200 : 400, r.ok
+          ? { ...r, specs: path.join(r.media, "specs"), config: WORKSPACE_CONFIG }
+          : r);
+      }
+    }
     if (url.pathname === "/api/gallery/cards" && req.method === "GET") {
       if (!MEDIA) return json(res, 200, { ok: true, cards: [], workspace: null,
                                           note: "no media root is bound, so there is no workspace" });
