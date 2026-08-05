@@ -102,20 +102,33 @@ export function resolveInsideRoots(p, roots) {
 }
 
 // ---- read verbs ------------------------------------------------------------
-// SHAPE IS THE CONTRACT. No dir → the root list, which is how the surface
-// populates its ROOTS pane. With a dir → { path, dirs, files }. An earlier
-// hand-rewrite returned { dir, entries } instead; the verb answered 200 with
-// real data and the pane rendered empty, because the field it reads was gone.
+// SHAPE IS THE CONTRACT, AND IT BINDS WHOEVER ANSWERS.
+//
+// /api/files/tree is documented by the SDK's runtime-api.md as returning
+// { path, dirs, files }. A provider MAY implement a documented verb — in a real
+// studio the files ARE served by something that knows about real roots, so
+// substitution is the point rather than a defect — but implementing it means
+// answering in the documented shape.
+//
+// THIS FUNCTION USED TO BREAK THAT, and only in the zero-argument case: with no
+// dir it returned { roots: [...] } instead. The shapes with a dir agreed exactly;
+// what diverged was arity of roots. The runtime pins ONE root, so no-arg
+// unambiguously means "that root's contents". This provider binds N, so no-arg
+// had no single answer and it invented a different question to answer instead.
+//
+// That question already had a verb: /api/files/roots. Answering it from here too
+// meant one property computed in two places, and the caller could not tell which
+// shape it was about to get. Zero-arg now returns the FIRST BOUND ROOT's
+// contents, in the documented shape, always.
+//
+// "FIRST" IS ONLY ACCEPTABLE BECAUSE THE ANSWER DISCLOSES ITSELF: the response
+// carries `path`, so a caller can SEE which root it got rather than assume. An
+// arbitrary choice the caller can inspect is a documented answer; the same
+// choice made silently is a coin flip.
 export function filesTree(dirPath, roots) {
-  if (!dirPath) {
-    return {
-      roots: roots.map((p) => ({
-        path: p,
-        name: path.basename(path.dirname(p)) + "/" + path.basename(p),
-      })),
-    };
-  }
-  const r = resolveInsideRoots(dirPath, roots);
+  const target = dirPath || roots[0];
+  if (!target) return null;                 // no roots bound: nothing to answer with
+  const r = resolveInsideRoots(target, roots);
   if (!r) return null;
   const dirs = [], files = [];
   for (const name of fs.readdirSync(r).sort()) {

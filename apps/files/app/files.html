@@ -128,8 +128,15 @@
 
   // ---- rail: lazy tree ----
   async function renderRoots() {
-    const d = await api("/api/files/tree");
-    $("tree").innerHTML = "<h3>roots</h3>" + (d.roots || []).map((r) =>
+    // ASK THE ROOTS QUESTION OF THE ROOTS VERB. This used to read the root list
+    // out of a no-dir /api/files/tree, which made the tree verb answer two
+    // different questions depending on its arguments — and tree is a DOCUMENTED
+    // shape, so that put the provider out of conformance with the SDK.
+    const d = await api("/api/files/roots");
+    const rootRows = (d.roots || []).map((p) => ({
+      path: p, name: p.split("/").slice(-2).join("/"),
+    }));
+    $("tree").innerHTML = "<h3>roots</h3>" + rootRows.map((r) =>
       `<div class="node dir" data-dir="${esc(r.path)}"><span class="tri">▸</span><span class="ic">▦</span>${esc(r.name)}</div>`).join("")
       + `<div class="node" id="addRoot" style="color:var(--faint)"><span class="tri"></span><span class="ic">+</span>add a root…</div>`;
     $("addRoot").onclick = async () => {
@@ -164,10 +171,10 @@
   }
 
   async function renderTags() {
-    const roots = (await api("/api/files/tree")).roots || [];
-    const ws = roots.find((r) => /workspace/.test(r.path)) || roots[0];
+    const roots = (await api("/api/files/roots")).roots || [];
+    const ws = roots.find((p) => /workspace/.test(p)) || roots[0];
     if (!ws) return;
-    const d = await api("/api/files/tags?root=" + encodeURIComponent(ws.path));
+    const d = await api("/api/files/tags?root=" + encodeURIComponent(ws));
     const base = d.tagsPath ? d.tagsPath.replace(/tags\.jsonl$/, "") : ws.path + "/";
     $("tree").innerHTML = "<h3>tags</h3>" + (Object.keys(d.tags || {}).length
       ? Object.entries(d.tags).map(([tag, assets]) => `
