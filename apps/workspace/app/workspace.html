@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workspace</title>
+  <style>
+    /* ─────────────────────────────────────────────────────────────────────
+       WORKSPACE — the reference app.
+       ─────────────────────────────────────────────────────────────────────
+       This file is meant to be READ AND FORKED, so the choices are written
+       down next to the code that makes them rather than in a doc that drifts.
+
+       WHAT IT IS: a launchpad over the three things you have — the AGENTS on
+       this host, the APPS installed in this studio, and the FILES in your
+       workspace. Each pane is a shallow read that hands off to the specialist
+       app rather than reimplementing it.
+
+       THE FOUR RULES IT DEMONSTRATES
+
+       1. NO PROVIDER. Every pane is built from verbs the SDK already serves:
+          /api/factory/state, /surfaces.json, /api/files/tree, /api/contract.
+          A platform app that needs a provider is a signal the SDK is missing a
+          verb — so name the verb before reaching for the provider. This app
+          needed none, which is the useful result: it proves the runtime's own
+          surface is sufficient for a real app and not just for a demo page.
+
+       2. READ SHALLOW, LINK DEEP. The agents pane does not become an agent
+          manager and the files pane does not become a file browser. Each shows
+          enough to decide, then opens FILES or the specialist surface. A
+          dashboard that grows a second copy of another app's job is how two
+          apps end up disagreeing about the same state.
+
+       3. SAY WHAT IS NOT TRUE YET. Where the runtime cannot answer something,
+          this says so on the surface instead of rendering a plausible blank.
+          The files root today is a FIXTURE directory, so the workspace pane
+          announces that rather than implying your work is in it. A dashboard
+          that looks healthy while pointing at the wrong thing is the worst
+          failure available to it.
+
+       4. INHERIT THE LOOK. Same tokens as FLOOR, EFFECTS, SCANNER and SHELF.
+          A studio that invents a palette per app stops reading as one product.
+       ───────────────────────────────────────────────────────────────────── */
+    :root {
+      --bg:#0b0f14; --panel:#121a22; --panel2:#0f161d; --line:#1f2a35;
+      --ink:#dbe4ec; --dim:#94a5b6; --faint:#6b7c8d; --accent:#4ade9b; --flag:#d99a2b;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink);
+           font:14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+    header { padding:16px 20px 10px; border-bottom:1px solid var(--line);
+             display:flex; flex-direction:column; gap:8px; }
+    h1 { font-family:var(--mono); font-size:18px; margin:0; letter-spacing:-0.02em; font-weight:600; }
+    .eyebrow { font-family:var(--mono); font-size:10px; letter-spacing:.16em;
+               text-transform:uppercase; color:var(--accent); }
+    .status { font-family:var(--mono); font-size:11px; color:var(--faint); min-height:1.3em; }
+    .bar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    button, input { font-family:var(--mono); font-size:12px; padding:6px 10px; border-radius:3px;
+      border:1px solid var(--line); background:var(--panel); color:var(--dim); cursor:pointer; }
+    input { cursor:text; }
+    button:hover { border-color:var(--accent); color:var(--ink); }
+    button:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+    /* THREE PANES, EQUAL WEIGHT. None of the three is the "main" one — which is
+       what makes this a launchpad rather than a file browser with extras. */
+    .panes { display:grid; gap:14px; padding:16px 20px 40px;
+             grid-template-columns:repeat(auto-fit, minmax(330px, 1fr)); }
+    .pane { background:var(--panel); border:1px solid var(--line); border-radius:5px;
+            padding:13px 14px; display:flex; flex-direction:column; gap:10px; min-width:0; }
+    .pane h2 { font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase;
+               color:var(--accent); margin:0; display:flex; justify-content:space-between; gap:8px; }
+    .pane h2 .sub { color:var(--faint); letter-spacing:.06em; }
+    .rows { display:flex; flex-direction:column; gap:1px; }
+    .row { display:flex; align-items:baseline; gap:8px; padding:4px 0;
+           border-bottom:1px solid #17212b; font-family:var(--mono); font-size:11.5px; }
+    .row:last-child { border-bottom:0; }
+    .row .k { color:var(--ink); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .row .v { color:var(--faint); font-variant-numeric:tabular-nums; }
+    a.row { text-decoration:none; }
+    a.row:hover .k { color:var(--accent); }
+
+    /* STATE IN FORM, NOT ONLY IN WORDS — a dot you can scan beats a word you
+       have to read, on a surface whose whole job is "is anything wrong". */
+    .dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:var(--faint); }
+    .dot.work { background:var(--accent); }
+    .dot.blocked { background:var(--flag); }
+    .dot.idle { background:#3a4a5a; }
+    .note { font-size:12px; color:var(--dim); line-height:1.45; }
+    .warn { font-size:12px; color:var(--flag); line-height:1.45; }
+    .paths { font-family:var(--mono); font-size:10.5px; color:var(--faint);
+             user-select:all; word-break:break-all; line-height:1.5; }
+    .paths b { color:var(--dim); font-weight:500; }
+    .empty { font-family:var(--mono); font-size:11px; color:var(--faint); }
+    [hidden] { display:none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="eyebrow">Studio</div>
+      <h1>Workspace</h1>
+    </div>
+    <div class="status" id="status">reading the studio…</div>
+    <div class="bar">
+      <button id="refresh">refresh</button>
+      <button id="openfiles">open FILES</button>
+    </div>
+  </header>
+
+  <div class="panes">
+    <section class="pane">
+      <h2>Agents <span class="sub" id="agentsub"></span></h2>
+      <div class="rows" id="agents"></div>
+      <div class="note" id="agentnote"></div>
+    </section>
+
+    <section class="pane">
+      <h2>Apps <span class="sub" id="appsub"></span></h2>
+      <div class="rows" id="apps"></div>
+      <div class="note" id="appnote"></div>
+    </section>
+
+    <section class="pane">
+      <h2>Workspace <span class="sub" id="wssub"></span></h2>
+      <div class="rows" id="files"></div>
+      <div class="warn" id="wswarn" hidden></div>
+      <div class="paths" id="wspath"></div>
+    </section>
+  </div>
+
+<script type="module">
+const $ = (s) => document.querySelector(s);
+const say = (m) => { $('#status').textContent = m; };
+let STATE = {};
+
+// ONE FETCH HELPER, AND IT NEVER THROWS PAST THE CALLER. A dashboard reads
+// several independent things; one of them being unavailable must degrade THAT
+// PANE, not blank the screen. Returning the failure as data is what lets each
+// pane say "this part is unavailable" honestly.
+async function get(url) {
+  try {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) return { __error: `${url} returned ${r.status}` };
+    return await r.json();
+  } catch (e) { return { __error: `${url}: ${e.message}` }; }
+}
+
+const row = (k, v, cls) => {
+  const d = document.createElement('div'); d.className = 'row';
+  if (cls) { const dot = document.createElement('span'); dot.className = `dot ${cls}`; d.appendChild(dot); }
+  const a = document.createElement('span'); a.className = 'k'; a.textContent = k;
+  const b = document.createElement('span'); b.className = 'v'; b.textContent = v ?? '';
+  d.append(a, b); return d;
+};
+
+function paintAgents(fs) {
+  const host = $('#agents'); host.innerHTML = '';
+  if (fs.__error || !fs.ok) {
+    $('#agentsub').textContent = 'unavailable';
+    $('#agentnote').textContent = fs.__error || 'the runtime did not answer for seats';
+    return;
+  }
+  const seats = fs.seats || [];
+  $('#agentsub').textContent = `${seats.length} seats`;
+
+  // SUMMARISE, DO NOT ENUMERATE. On this box the runtime answers with NINETY-TWO
+  // seats across every rig, and a flat list of 92 is not something anyone reads —
+  // it is the same failure as a shelf of black rectangles, just with words.
+  //
+  // So: rollup by state first, then only the seats that actually want attention.
+  // Rule 2 in action — read shallow, and let rig tooling be the deep view.
+  const by = seats.reduce((m, s) => { m[s.state] = (m[s.state] || 0) + 1; return m; }, {});
+  for (const [state, n] of Object.entries(by).sort((a, b) => b[1] - a[1])) {
+    const cls = state === 'blocked' ? 'blocked' : state === 'working' ? 'work' : 'idle';
+    host.appendChild(row(state, String(n), cls));
+  }
+  if (!seats.length) host.innerHTML = '<div class="empty">no seats reported</div>';
+
+  // BUSY FIRST, AND BOUNDED. A launchpad is scanned for what needs attention;
+  // sorting by name buries the one blocked seat among ninety idle ones.
+  const wants = seats.filter((s) => s.state === 'blocked' || s.pendingWork > 0)
+    .sort((a, b) => (b.pendingWork || 0) - (a.pendingWork || 0));
+  for (const s of wants.slice(0, 6)) {
+    host.appendChild(row(s.seat, s.pendingWork ? `${s.state} · ${s.pendingWork}` : s.state,
+      s.state === 'blocked' ? 'blocked' : 'work'));
+  }
+  const blocked = by.blocked || 0;
+  $('#agentnote').textContent =
+    (wants.length > 6 ? `showing 6 of ${wants.length} seats wanting attention. ` : '') +
+    (blocked ? `${blocked} blocked. ` : '') +
+    'A read of the runtime’s factory state — acting on a seat is not this app’s job.';
+}
+
+function paintApps(reg, contract) {
+  const host = $('#apps'); host.innerHTML = '';
+  if (reg.__error) {
+    $('#appsub').textContent = 'unavailable';
+    $('#appnote').textContent = reg.__error;
+    return;
+  }
+  const rows = reg.surfaces || [];
+  $('#appsub').textContent = `${rows.length} installed`;
+  for (const s of rows) {
+    const a = document.createElement('a');
+    a.className = 'row'; a.href = s.path; a.target = '_blank'; a.rel = 'noopener';
+    const k = document.createElement('span'); k.className = 'k';
+    k.textContent = `${s.glyph ? s.glyph + '  ' : ''}${s.name || s.id}`;
+    const v = document.createElement('span'); v.className = 'v'; v.textContent = s.id;
+    a.append(k, v); host.appendChild(a);
+  }
+  if (!rows.length) host.innerHTML = '<div class="empty">no surfaces registered</div>';
+
+  // THE MANIFEST'S OWN HEALTH, surfaced rather than assumed. Validation is
+  // warn-first, which means a broken row does NOT stop the studio — so nothing
+  // else would ever tell you it was broken.
+  const m = contract.manifest || {};
+  const bits = [];
+  if (m.errors?.length) bits.push(`${m.errors.length} manifest error(s)`);
+  if (m.warnings?.length) bits.push(`${m.warnings.length} warning(s)`);
+  $('#appnote').textContent = bits.length
+    ? `${bits.join(' · ')} — validation is warn-first, so the studio still runs.`
+    : 'Manifest validates clean. Click an app to open it.';
+}
+
+function paintWorkspace(tree, contract) {
+  const host = $('#files'); host.innerHTML = '';
+  if (tree.__error || !tree.ok) {
+    $('#wssub').textContent = 'unavailable';
+    $('#wspath').textContent = tree.__error || 'the runtime did not answer for files';
+    return;
+  }
+  // THE SAME VERB ANSWERS IN TWO SHAPES, and this is a real contract divergence
+  // rather than a quirk to paper over. The SDK runtime answers /api/files/tree
+  // with { path, dirs, files } — one root, its contents. With the FILES app
+  // installed, a PROVIDER answers the same verb with { roots: [...] } — a list
+  // of bound roots and no contents at all.
+  //
+  // An app cannot know in advance which it will get, so it has to handle both.
+  // Written out rather than normalised silently, because the divergence is the
+  // finding: one verb, two response shapes, decided by who happens to serve it.
+  if (Array.isArray(tree.roots)) {
+    $('#wssub').textContent = `${tree.roots.length} root${tree.roots.length === 1 ? '' : 's'}`;
+    for (const r of tree.roots) host.appendChild(row(r.name || r.path, '', 'idle'));
+    $('#wspath').innerHTML = tree.roots.map((r) => `<b>root</b> ${r.path}`).join('<br>');
+    const w = $('#wswarn'); w.hidden = false;
+    w.textContent = 'The provider answering /api/files/tree returns a list of ROOTS, while the '
+      + 'SDK runtime answers the same verb with a folder’s CONTENTS. One verb, two shapes — '
+      + 'so this pane shows roots here and contents on a bare runtime. Open FILES to browse.';
+    return;
+  }
+  const dirs = tree.dirs || [], files = tree.files || [];
+  $('#wssub').textContent = `${dirs.length} folders · ${files.length} files`;
+  for (const d of dirs) host.appendChild(row(`${d.name}/`, '', 'idle'));
+  for (const f of files.slice(0, 8)) host.appendChild(row(f.name, f.kind || ''));
+  if (files.length > 8) host.appendChild(row(`…and ${files.length - 8} more`, ''));
+  if (!dirs.length && !files.length) host.innerHTML = '<div class="empty">the root is empty</div>';
+
+  $('#wspath').innerHTML = `<b>files root</b> ${tree.path || 'unknown'}`;
+
+  // RULE 3, THE IMPORTANT ONE, AND THE REASON THIS PANE EXISTS.
+  //
+  // The runtime's files root is derived from --fixtures and cannot be rebound
+  // while it runs, so out of the box this dashboard is pointed at DEMO DATA. It
+  // would render perfectly: real folders, real files, no error anywhere. A user
+  // would reasonably conclude their workspace was empty.
+  //
+  // So it is said out loud. This is the single strongest entry on this app's
+  // cannot-do list and the argument for making the root rebindable.
+  // AN UNKNOWN ROOT MUST SAY SO. The first version of this checked for the
+  // fixture path and stayed SILENT when the path was missing entirely — which is
+  // precisely the "renders a plausible blank" failure this file has a rule
+  // against, committed three panes below where the rule is written. A dashboard
+  // that cannot name where it is pointed has to admit that, not go quiet.
+  const w = $('#wswarn');
+  if (!tree.path) {
+    w.hidden = false;
+    w.textContent = 'The runtime answered without naming a root, so this pane cannot tell you '
+      + 'WHERE these files are. Treat the list above as unattributed.';
+  } else if (/fixtures[\\/]files-root$/.test(tree.path)) {
+    w.hidden = false;
+    w.textContent = 'This is the SDK’s FIXTURE folder, not your work. The runtime’s files '
+      + 'root is fixed at launch and cannot be rebound yet, so everything above is demo data.';
+  } else {
+    w.hidden = true;
+  }
+}
+
+async function load() {
+  say('reading the studio…');
+  // IN PARALLEL, because they are independent. Four sequential round trips on a
+  // dashboard is a visibly slower page for no reason.
+  const [fs, reg, tree, contract] = await Promise.all([
+    get('/api/factory/state'), get('/surfaces.json'), get('/api/files/tree'), get('/api/contract'),
+  ]);
+  STATE = { factory: fs, registry: reg, tree, contract };
+  paintAgents(fs);
+  paintApps(reg, contract);
+  paintWorkspace(tree, contract);
+  const rt = contract.runtime || {};
+  const down = [fs, reg, tree, contract].filter((x) => x.__error).length;
+  say(down
+    ? `${down} of 4 reads failed — the panes that could not load say so`
+    : `${rt.name || 'runtime'} ${contract.contractVersion || '?'} · flavor ${rt.flavor || '?'} · `
+      + `${(contract.capabilities || []).length} capabilities`);
+}
+
+$('#refresh').onclick = load;
+$('#openfiles').onclick = () => window.open('/surfaces/files.html', '_blank', 'noopener');
+
+// THE AGENT SEAM. Same shape as SCANNER and SHELF: everything the surface knows,
+// callable without a pointer. A dashboard is exactly the thing an agent wants to
+// read before deciding what to do next.
+window.workspace = {
+  state: () => STATE,
+  agents: () => (STATE.factory?.seats) || [],
+  apps: () => (STATE.registry?.surfaces) || [],
+  filesRoot: () => STATE.tree?.path || null,
+  // Named for what it is: the list of things this app CANNOT do on the runtime
+  // it is running against. Kept in the app rather than a doc so it cannot drift
+  // from the code that proves each entry.
+  cannotDo: () => [
+    STATE.tree?.path && /fixtures[\\/]files-root$/.test(STATE.tree.path)
+      ? 'the files root is the SDK fixture folder and cannot be rebound at runtime'
+      : null,
+    Array.isArray(STATE.tree?.roots)
+      ? '/api/files/tree answers in two different shapes — { roots } from a provider, '
+        + '{ path, dirs, files } from the runtime — so an app cannot rely on either'
+      : null,
+    (STATE.factory?.seats?.length ?? 0) > 20
+      ? `factory state returns every seat on the host (${STATE.factory.seats.length}) with no `
+        + 'filter or paging verb, so a dashboard has to summarise rather than list'
+      : null,
+    'an app built only on SDK verbs cannot declare them as required: the manifest '
+      + 'validator resolves `required` against installed PROVIDERS, so a required SDK '
+      + 'verb makes the studio refuse to boot',
+  ].filter(Boolean),
+  reload: load,
+};
+
+load();
+</script>
+</body>
+</html>

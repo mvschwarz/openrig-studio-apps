@@ -1,0 +1,27 @@
+{
+  "manifest_version": 1,
+  "id": "workspace",
+  "name": "WORKSPACE",
+  "summary": "The launchpad. One screen over the three things you have — the agents on this host, the apps installed in this studio, and the files in your workspace. Each pane reads shallow and hands off to the specialist app rather than growing a second copy of its job.",
+  "category": "studio",
+  "maker": { "name": "OpenRig", "url": "https://github.com/openrig" },
+  "surface": {
+    "entry": "app/workspace.html",
+    "path": "/surfaces/workspace.html",
+    "glyph": "◧",
+    "hint": "agents, apps and files at a glance — the reference app, written to be forked"
+  },
+  "roots": {},
+  "_roots_note": "NONE, deliberately. Everything this app reads is served by the runtime itself, so it has no root of its own to bind — which is the point: a launchpad that needed its own data root would be storing something, and it stores nothing.",
+  "calls": {
+    "/api/contract": { "required": false },
+    "/api/factory/state": { "required": false },
+    "/api/files/tree": { "required": false },
+    "/surfaces.json": { "required": false }
+  },
+  "_calls_note": "All four are SDK-OWNED routes answered by the runtime, not by a provider — and that is why every one is declared OPTIONAL even though the app genuinely needs them. The manifest validator resolves `required` against INSTALLED PROVIDERS, so marking an SDK verb as required makes the studio refuse to boot on the grounds that no provider serves it. Recorded here rather than worked around silently: an app built only on the runtime's own verbs currently cannot state that it depends on them.",
+  "provider": {
+    "required": false,
+    "_note": "NO PROVIDER, and that is the result worth having. A platform app needing a provider is a signal the SDK is missing a verb, so the verb gets named before the provider gets built. This one needed none — which is evidence the runtime's own surface is sufficient for a real app rather than only for a demo page."
+  }
+}
