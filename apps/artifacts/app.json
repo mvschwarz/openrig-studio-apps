@@ -20,9 +20,11 @@
     }
   },
   "calls": {
+    "/api/annotations": { "required": true },
     "/api/artifacts": { "required": true },
     "/api/artifacts/item": { "required": true },
     "/api/artifacts/annotations": { "required": true },
+    "/api/artifacts/annotations/migrate": { "required": true },
     "/api/artifacts/assets": { "required": true },
     "/api/artifacts/items": { "required": true },
     "/api/artifacts/screenshot": { "required": true }

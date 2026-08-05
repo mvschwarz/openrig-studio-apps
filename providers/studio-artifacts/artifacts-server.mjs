@@ -47,6 +47,7 @@ const list = () => fs.readdirSync(ROOT, { withFileTypes: true })
   .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 const annotationsFor = (id) => readJson(path.join(artifactDir(id), "annotations.json"), []);
 const itemsFor = (id) => readJson(path.join(artifactDir(id), "items.json"), []);
+const annotationStoreFile = path.join(ROOT, "annotations-scopes.json");
 const htmlEscape = (value) => String(value ?? "").replace(/[&<>\"]/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[char]));
 const canvasHtml = (id) => {
   const canvasItems = itemsFor(id);
@@ -61,6 +62,7 @@ const touchMeta = (id) => {
 };
 const normaliseAnnotation = (input, existing = {}) => ({
   id: String(input.id || existing.id || crypto.randomUUID()),
+  surfaceId: String(input.surfaceId || existing.surfaceId || "artifacts"),
   shape: ["circle", "rect", "arrow", "text", "free"].includes(input.shape) ? input.shape : (existing.shape || "circle"),
   note: String(input.note ?? existing.note ?? "").trim(),
   source: input.source === "agent" ? "agent" : (existing.source || "human"),
@@ -73,18 +75,56 @@ const normaliseAnnotation = (input, existing = {}) => ({
   offset: Object.hasOwn(input, "offset") && input.offset == null
     ? null
     : input.offset && ["x", "y"].every((k) => Number.isFinite(Number(input.offset[k])))
-      ? Object.fromEntries(["x", "y"].map((k) => [k, Number(input.offset[k])]))
+      ? Object.fromEntries(["x", "y", "width", "height"]
+        .filter((k) => Number.isFinite(Number(input.offset[k])))
+        .map((k) => [k, Number(input.offset[k])]))
       : (existing.offset || null),
   points: Array.isArray(input.points) ? input.points.slice(0, 240).map((p) => [Number(p[0]), Number(p[1])]) : (existing.points || null),
   status: input.status === "missing" ? "missing" : (input.status === "anchored" ? "anchored" : (existing.status || (input.selector ? "missing" : "spatial"))),
   createdAt: existing.createdAt || new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 });
+const readAnnotationStore = () => {
+  const value = readJson(annotationStoreFile, {});
+  return {
+    scopes: value.scopes && typeof value.scopes === "object" ? value.scopes : {},
+    artifacts: value.artifacts && typeof value.artifacts === "object" ? value.artifacts : {},
+  };
+};
+const writeAnnotationStore = (store) => writeJson(annotationStoreFile, store);
+const recordsForScope = (store, scope) => Array.isArray(store.scopes[scope]) ? store.scopes[scope] : [];
+const dropArtifactScope = (id) => {
+  const store = readAnnotationStore();
+  const scope = store.artifacts[id];
+  if (!scope) return;
+  delete store.artifacts[id];
+  delete store.scopes[scope];
+  writeAnnotationStore(store);
+};
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://artifacts.local");
   try {
     if (url.pathname === "/") return json(res, 200, { ok: true, provider: "@openrig/studio-artifacts", root: ROOT });
+
+    if (url.pathname === "/api/annotations" && req.method === "GET") {
+      const scope = url.searchParams.get("scope");
+      if (!scope) return json(res, 200, { ok: true, scope: "", records: [] });
+      const store = readAnnotationStore();
+      return json(res, 200, { ok: true, scope, records: recordsForScope(store, scope) });
+    }
+    if (url.pathname === "/api/annotations" && req.method === "POST") {
+      const input = JSON.parse((await readBody(req)) || "{}");
+      const scope = typeof input.scope === "string" ? input.scope : "";
+      if (!scope) return json(res, 400, { ok: false, error: "annotation scope is required" });
+      if (!Array.isArray(input.records)) return json(res, 400, { ok: false, error: "annotation records must be an array" });
+      const store = readAnnotationStore();
+      const prior = new Map(recordsForScope(store, scope).map((record) => [record.id, record]));
+      const records = input.records.map((record) => normaliseAnnotation(record, prior.get(record.id) || {}));
+      store.scopes[scope] = records;
+      writeAnnotationStore(store);
+      return json(res, 200, { ok: true, scope, records });
+    }
 
     if (url.pathname === "/api/artifacts" && req.method === "GET") {
       return json(res, 200, { ok: true, artifacts: list() });
@@ -122,9 +162,24 @@ http.createServer(async (req, res) => {
         return json(res, 200, { ok: true, artifact: meta });
       }
       if (req.method === "DELETE") {
+        dropArtifactScope(id);
         fs.rmSync(artifactDir(id), { recursive: true });
         return json(res, 200, { ok: true, deleted: id });
       }
+    }
+
+    if (url.pathname === "/api/artifacts/annotations/migrate" && req.method === "POST") {
+      const id = safeId(url.searchParams.get("artifact"));
+      if (!id || !metaFor(id)) return json(res, 404, { ok: false, error: "artifact not found" });
+      const input = JSON.parse((await readBody(req)) || "{}");
+      const scope = typeof input.scope === "string" ? input.scope : "";
+      if (!scope) return json(res, 400, { ok: false, error: "annotation scope is required" });
+      const store = readAnnotationStore();
+      const exists = Object.hasOwn(store.scopes, scope);
+      if (!exists) store.scopes[scope] = annotationsFor(id).map((record) => normaliseAnnotation(record));
+      store.artifacts[id] = scope;
+      writeAnnotationStore(store);
+      return json(res, 200, { ok: true, artifact: id, scope, migrated: !exists, records: recordsForScope(store, scope) });
     }
 
     if (url.pathname === "/api/artifacts/annotations") {

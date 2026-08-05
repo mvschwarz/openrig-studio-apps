@@ -13,9 +13,11 @@
     "/artifacts/"
   ],
   "verbs": [
+    "/api/annotations",
     "/api/artifacts",
     "/api/artifacts/item",
     "/api/artifacts/annotations",
+    "/api/artifacts/annotations/migrate",
     "/api/artifacts/assets",
     "/api/artifacts/items",
     "/api/artifacts/screenshot"
