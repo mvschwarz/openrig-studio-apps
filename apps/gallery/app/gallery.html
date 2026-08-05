@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shelf</title>
+  <style>
+    /* THE SAME TOKENS AS FLOOR, EFFECTS AND SCANNER. Not a new palette: a studio
+       that invents a look per app stops reading as one product. */
+    :root {
+      --bg:#0b0f14; --panel:#121a22; --panel2:#0f161d; --line:#1f2a35;
+      --ink:#dbe4ec; --dim:#94a5b6; --faint:#6b7c8d; --accent:#4ade9b; --flag:#d99a2b;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin:0; background:var(--bg); color:var(--ink);
+      font:14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    }
+    header { position:sticky; top:0; z-index:10; background:var(--bg);
+             border-bottom:1px solid var(--line); padding:14px 20px 10px;
+             display:flex; flex-direction:column; gap:10px; }
+    h1 { font-family:var(--mono); font-size:18px; margin:0; letter-spacing:-0.02em; font-weight:600; }
+    .eyebrow { font-family:var(--mono); font-size:10px; letter-spacing:.16em;
+               text-transform:uppercase; color:var(--accent); }
+    .bar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    button, select, input {
+      font-family:var(--mono); font-size:12px; padding:6px 10px; border-radius:3px;
+      border:1px solid var(--line); background:var(--panel); color:var(--dim); cursor:pointer; }
+    input { cursor:text; min-width:190px; }
+    button:hover, select:hover { border-color:var(--accent); color:var(--ink); }
+    button.on, .tag.on { color:var(--accent); border-color:var(--accent); }
+    button:focus-visible, select:focus-visible, input:focus-visible {
+      outline:2px solid var(--accent); outline-offset:2px; }
+    .status { font-family:var(--mono); font-size:11px; color:var(--faint); min-height:1.3em; }
+    .paths { font-family:var(--mono); font-size:10.5px; color:var(--faint);
+             user-select:all; word-break:break-all; }
+    .paths b { color:var(--dim); font-weight:500; }
+
+    /* A SHELF IS BROWSED BY MOTION, so the video is the content and the words are
+       annotation. Cards are wide enough that a 960x400 tape is legible. */
+    .grid { display:grid; gap:14px; padding:16px 20px 40px;
+            grid-template-columns:repeat(auto-fill, minmax(420px, 1fr)); }
+    @media (max-width:520px) { .grid { grid-template-columns:1fr; padding:12px; } }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:5px;
+            overflow:hidden; display:flex; flex-direction:column; }
+    .card:hover { border-color:#2b3947; }
+    .shot { position:relative; background:#000; aspect-ratio:960/400; }
+    .shot video, .shot img { width:100%; height:100%; object-fit:cover; display:block; }
+    .empty { position:absolute; inset:0; display:grid; place-items:center;
+             font-family:var(--mono); font-size:11px; color:var(--faint); text-align:center; padding:12px; }
+    .body { padding:10px 12px 12px; display:flex; flex-direction:column; gap:8px; }
+    .title { font-family:var(--mono); font-size:13px; color:var(--ink); font-weight:600; }
+    .tags { display:flex; flex-wrap:wrap; gap:4px; }
+    .chip { font-family:var(--mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
+            color:var(--faint); border:1px solid var(--line); border-radius:2px; padding:2px 6px; }
+    .chip.src { color:var(--dim); }
+    .chip.warn { color:var(--flag); border-color:#3a3020; }
+    .note { font-size:12px; color:var(--dim); line-height:1.45;
+            display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+    .note.open { -webkit-line-clamp:unset; }
+    .acts { display:flex; flex-wrap:wrap; gap:5px; }
+    pre { margin:0; max-height:260px; overflow:auto; background:var(--panel2);
+          border:1px solid var(--line); border-radius:3px; padding:9px;
+          font-family:var(--mono); font-size:10.5px; line-height:1.5; color:var(--dim); }
+    [hidden] { display:none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="eyebrow">Studio</div>
+      <h1>Shelf</h1>
+    </div>
+    <div class="bar">
+      <input id="q" type="search" placeholder="filter by name or note…" autocomplete="off">
+      <span id="tagbar" class="bar"></span>
+      <button id="reload">reload workspace</button>
+      <select id="swap"><option value="">— run on its own footage —</option></select>
+    </div>
+    <div class="status" id="status">reading the workspace…</div>
+    <div class="paths" id="paths"></div>
+  </header>
+  <div class="grid" id="grid"></div>
+
+<script type="module">
+const $ = (s) => document.querySelector(s);
+const say = (m) => { $('#status').textContent = m; };
+let CARDS = [], TAG = null;
+
+// PLAY WHAT IS ON SCREEN, PAUSE WHAT IS NOT. A shelf of a hundred effects is the
+// whole point of this app, and a hundred decoding videos is not something a
+// laptop survives — so the browser is told which ones actually matter.
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    const v = e.target;
+    if (e.isIntersecting) v.play().catch(()=>{});
+    else v.pause();
+  }
+}, { rootMargin: '200px' });
+
+async function load() {
+  try {
+    const r = await (await fetch('/api/gallery/cards')).json();
+    if (!r.ok) return say(r.error || 'the workspace could not be read');
+    CARDS = r.cards || [];
+    $('#paths').innerHTML = r.workspace
+      ? `<b>workspace</b> ${r.workspace}<br><b>media</b> ${r.mediaRoot}`
+      : '<b>no media root is bound</b> — there is no workspace to read';
+    const s = await (await fetch('/api/effects/sources')).json();
+    const sel = $('#swap');
+    sel.length = 1;
+    for (const fn of s.sources || []) {
+      const o = document.createElement('option'); o.value = o.textContent = fn; sel.appendChild(o);
+    }
+    buildTags(); render();
+    say(`${CARDS.length} in the workspace · ${CARDS.filter(c=>c.preview).length} with a preview`);
+  } catch (e) { say(`could not read the workspace: ${e.message}`); }
+}
+
+function buildTags() {
+  const all = [...new Set(CARDS.flatMap((c) => c.tags || []))].sort();
+  const bar = $('#tagbar'); bar.innerHTML = '';
+  for (const t of all) {
+    const b = document.createElement('button');
+    b.className = 'tag'; b.textContent = t;
+    b.onclick = () => { TAG = (TAG === t ? null : t); buildTags(); render(); };
+    if (TAG === t) b.classList.add('on');
+    bar.appendChild(b);
+  }
+}
+
+const matches = (c) => {
+  const q = $('#q').value.trim().toLowerCase();
+  if (TAG && !(c.tags || []).includes(TAG)) return false;
+  if (!q) return true;
+  return `${c.title} ${c.name} ${c.note}`.toLowerCase().includes(q);
+};
+
+function render() {
+  const grid = $('#grid'); grid.innerHTML = '';
+  // WHAT CAN BE SEEN COMES FIRST. Sorted by name alone, the specs that have
+  // never been run sort to the top and a shelf you browse by MOTION opens on a
+  // wall of black rectangles. Previews lead; the rest keep their order below.
+  const shown = CARDS.filter(matches)
+    .sort((a, b) => (b.preview ? 1 : 0) - (a.preview ? 1 : 0));
+  if (!shown.length) {
+    grid.innerHTML = `<div class="status">nothing matches. Specs live in the workspace folder above —
+      anything saved from SCANNER's <b>save as…</b> shows up here.</div>`;
+    return;
+  }
+  for (const c of shown) grid.appendChild(cardEl(c));
+}
+
+function cardEl(c) {
+  const el = document.createElement('div'); el.className = 'card';
+
+  const shot = document.createElement('div'); shot.className = 'shot';
+  if (c.preview) {
+    const v = document.createElement('video');
+    v.src = `/media/${encodeURIComponent(c.preview)}`;
+    v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'metadata';
+    v.controls = false;
+    v.style.cursor = 'pointer';
+    v.onclick = () => { v.controls = !v.controls; };
+    shot.appendChild(v); io.observe(v);
+  } else {
+    const e = document.createElement('div'); e.className = 'empty';
+    e.textContent = c.previewMissing
+      ? 'the preview file this card names is not in the media root'
+      : 'no preview recorded yet — run it and save the clip';
+    shot.appendChild(e);
+  }
+  el.appendChild(shot);
+
+  const body = document.createElement('div'); body.className = 'body';
+  const t = document.createElement('div'); t.className = 'title'; t.textContent = c.title;
+  body.appendChild(t);
+
+  const tags = document.createElement('div'); tags.className = 'tags';
+  for (const g of c.tags || []) {
+    const s = document.createElement('span'); s.className = 'chip'; s.textContent = g; tags.appendChild(s);
+  }
+  if (c.source) {
+    const s = document.createElement('span'); s.className = 'chip src'; s.textContent = `from ${c.source}`;
+    tags.appendChild(s);
+  }
+  if (c.previewMissing) {
+    const s = document.createElement('span'); s.className = 'chip warn'; s.textContent = 'preview missing';
+    tags.appendChild(s);
+  }
+  body.appendChild(tags);
+
+  if (c.note) {
+    const n = document.createElement('div'); n.className = 'note'; n.textContent = c.note;
+    n.style.cursor = 'pointer';
+    n.onclick = () => n.classList.toggle('open');
+    body.appendChild(n);
+  }
+
+  const acts = document.createElement('div'); acts.className = 'acts';
+  const run = document.createElement('button');
+  run.textContent = '▶ run in scanner';
+  run.onclick = () => drive(c, c.source || undefined);
+  acts.appendChild(run);
+
+  const swap = document.createElement('button');
+  swap.textContent = 'run on chosen footage';
+  swap.onclick = () => {
+    const pick = $('#swap').value;
+    if (!pick) return say('choose footage in the picker at the top first, then press this');
+    drive(c, pick);
+  };
+  acts.appendChild(swap);
+
+  const show = document.createElement('button');
+  show.textContent = 'spec';
+  const pre = document.createElement('pre'); pre.hidden = true;
+  pre.textContent = JSON.stringify(c.spec, null, 2);
+  show.onclick = () => { pre.hidden = !pre.hidden; show.classList.toggle('on', !pre.hidden); };
+  acts.appendChild(show);
+
+  const copy = document.createElement('button');
+  copy.textContent = 'copy spec';
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(JSON.stringify(c.spec, null, 2)); say(`copied ${c.title}`); }
+    catch { say('the browser refused clipboard access — open the spec and copy it by hand'); }
+  };
+  acts.appendChild(copy);
+
+  body.appendChild(acts);
+  body.appendChild(pre);
+  el.appendChild(body);
+  return el;
+}
+
+// RECREATING IS THE POINT. The card holds the spec that made the thing, so the
+// button hands that spec straight to SCANNER rather than a filename it might not
+// still have — and names the footage, so a card is reproducible on its own terms
+// or on someone else's.
+async function drive(c, source) {
+  const op = { scanner: { spec: c.spec, clear: true, record: true,
+                          say: `${c.title} — from the shelf${source ? `, on ${source}` : ''}` } };
+  if (source) op.scanner.source = source;
+  try {
+    const r = await (await fetch('/api/effects/drive', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(op) })).json();
+    say(r.ok ? `sent "${c.title}" to SCANNER${source ? ` on ${source}` : ''} — open that surface to watch it`
+             : `could not send it: ${r.error || 'unknown'}`);
+  } catch (e) { say(`could not send it: ${e.message}`); }
+}
+
+$('#q').oninput = render;
+$('#reload').onclick = load;
+
+// The agent seam, same shape as SCANNER's: everything the surface can do,
+// callable without a pointer.
+window.gallery = {
+  cards: () => CARDS.map(({ spec, ...rest }) => rest),
+  spec: (name) => (CARDS.find((c) => c.name === name || c.title === name) || {}).spec || null,
+  run: (name, source) => {
+    const c = CARDS.find((x) => x.name === name || x.title === name);
+    if (!c) return `no card called ${name}`;
+    drive(c, source || c.source || undefined);
+    return `sent ${c.title}`;
+  },
+  filter: (q, tag) => { $('#q').value = q || ''; TAG = tag || null; buildTags(); render(); return CARDS.filter(matches).length; },
+  reload: load,
+};
+
+load();
+</script>
+</body>
+</html>

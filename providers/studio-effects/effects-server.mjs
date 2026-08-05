@@ -296,6 +296,45 @@ http.createServer(async (req, res) => {
     // thing the scanner produced becomes a thing the scanner can read, so a
     // second pass gets the full bed and head machinery over completed material
     // instead of a tape that is still being written.
+    // THE WORKSPACE, READ AS A SHELF.
+    //
+    // There is no second metadata format on purpose. A spec carries its own
+    // `_card` -- title, tags, the footage it was made from, the file that came
+    // out -- so the thing that RECREATES the effect and the thing that DESCRIBES
+    // it are the same file. A sidecar would drift apart from the spec the first
+    // time either one moved, and then the gallery would be lying.
+    //
+    // Specs without a card are still listed, untitled, rather than hidden: a
+    // spec someone saved by hand is part of their workspace too.
+    if (url.pathname === "/api/gallery/cards" && req.method === "GET") {
+      if (!MEDIA) return json(res, 200, { ok: true, cards: [], workspace: null,
+                                          note: "no media root is bound, so there is no workspace" });
+      const dir = path.join(MEDIA, "specs");
+      let names = [];
+      try { names = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort(); } catch {}
+      const cards = [];
+      for (const name of names) {
+        let spec;
+        try { spec = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")); }
+        catch (e) { cards.push({ name, broken: String(e.message || e) }); continue; }
+        const card = spec._card || {};
+        // WHETHER THE PREVIEW IS ACTUALLY THERE, checked rather than assumed. A
+        // card promising a file that has been deleted should say so, not render
+        // a dead player.
+        const preview = card.preview && fs.existsSync(path.join(MEDIA, card.preview)) ? card.preview : null;
+        cards.push({
+          name,
+          title: card.title || name.replace(/\.json$/, ""),
+          tags: Array.isArray(card.tags) ? card.tags : [],
+          source: card.source || null,
+          preview,
+          previewMissing: Boolean(card.preview && !preview),
+          note: typeof spec._ === "string" ? spec._ : "",
+          spec,
+        });
+      }
+      return json(res, 200, { ok: true, workspace: dir, mediaRoot: MEDIA, cards });
+    }
     if (url.pathname === "/api/scanner/clip" && req.method === "POST") {
       if (!MEDIA) return json(res, 400, { ok: false, error: "no media root is bound" });
       const chunks = [];

@@ -68,6 +68,7 @@ seeded.
 | changing the code, or debugging a render | [architecture.md](architecture.md) |
 | adding a response, write mode, lane form or clock | [extending-it.md](extending-it.md) |
 | driving this for someone who is watching | [collaborating.md](collaborating.md) |
+| saving what you made so it is findable later | [the-workspace.md](the-workspace.md) |
 
 ## The short version of each
 
