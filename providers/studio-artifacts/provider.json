@@ -16,6 +16,8 @@
     "/api/artifacts",
     "/api/artifacts/item",
     "/api/artifacts/annotations",
+    "/api/artifacts/assets",
+    "/api/artifacts/items",
     "/api/artifacts/screenshot"
   ]
 }

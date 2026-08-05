@@ -2,7 +2,7 @@
   "manifest_version": 1,
   "id": "artifacts",
   "name": "ARTIFACTS",
-  "summary": "Pages you and an agent can mark up together. Every drawing stays attached to a named element, so either side can understand it without trading screenshots.",
+  "summary": "Documents and canvases you and an agent can assemble and mark up together. Every drawing stays attached to a named element.",
   "category": "studio",
   "maker": {
     "name": "OpenRig",
@@ -12,7 +12,7 @@
     "entry": "app/artifacts.html",
     "path": "/surfaces/artifacts.html",
     "glyph": "✎",
-    "hint": "open an HTML artifact, draw on it, and hand structured annotations to an agent"
+    "hint": "paste images into a document or canvas, arrange them, and share structured annotations with an agent"
   },
   "roots": {
     "artifacts": {
@@ -23,6 +23,8 @@
     "/api/artifacts": { "required": true },
     "/api/artifacts/item": { "required": true },
     "/api/artifacts/annotations": { "required": true },
+    "/api/artifacts/assets": { "required": true },
+    "/api/artifacts/items": { "required": true },
     "/api/artifacts/screenshot": { "required": true }
   },
   "provider": {
