@@ -1,0 +1,10 @@
+{
+  "_": "SCAN A SCANNER OUTPUT. Point the source picker at any exp-*.mp4 the scanner made and run this. THE FINDING: a second pass turns ORGANIC warping into RECTILINEAR structure — because the source's x-axis is already TIME, and this pass samples it as SPACE. Marbling comes back as hard slabs and blocks; a beat tape comes back fractured into columns of different moments. RUN IT PERPENDICULAR (axis: horizontal) over a marbled tape for the strangest result the tier makes: staircase and ziggurat edges, checkerboard artefacts, nothing like either input. This is generation loss used deliberately — the loop is closed because a saved clip lands in the media pool, so what the scanner made is immediately something the scanner can read.",
+  "scan": { "duration": "10s" },
+  "stages": [
+    { "id": "a", "source": { "rate": 1 },
+      "head": { "axis": "horizontal", "position": { "ramp": [0, 1] }, "width": 6, "softness": 0.5 },
+      "response": { "read": "passthrough" },
+      "write": { "mode": "direct", "advance": 0, "frames": 16, "fps": 12 } }
+  ]
+}
