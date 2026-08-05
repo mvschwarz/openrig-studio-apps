@@ -207,9 +207,21 @@ http.createServer(async (req, res) => {
       const b = JSON.parse((await readBody(req)) || "{}");
       const file = insideMedia(b.source || "");
       if (!file) return json(res, 400, { ok: false, error: `no such source in the media root: ${b.source}` });
+      // A CALLER THAT BRINGS ITS OWN RANGE NEEDS NO FAMILY.
+      //
+      // family+param exists to look up a min and a max. The SCANNER is not one of
+      // the effect families -- its parameters live in SCANNER_PARAMS and its lane
+      // specs carry their own `range` -- so demanding a family made this route
+      // unreachable for it, and a whole lane FORM (`from-audio`, `from-video`)
+      // compiled cleanly and then resolved to nothing. Supplying both bounds is
+      // the same information by a shorter path.
       const fam = FAMILIES[b.family || "analog"];
       const spec = fam?.params?.[b.param];
-      if (!spec) return json(res, 400, { ok: false, error: `no parameter ${b.param} on family ${b.family}` });
+      const bounded = b.min !== undefined && b.max !== undefined;
+      if (!spec && !bounded) {
+        return json(res, 400, { ok: false,
+          error: `no parameter ${b.param} on family ${b.family} — pass min and max to derive without a family` });
+      }
 
       const a = pcm(file);
       // A source with no audio is a NORMAL answer, not a failure of the feature —
@@ -217,8 +229,8 @@ http.createServer(async (req, res) => {
       if (!a.ok) return json(res, 200, { ok: false, error: a.error, hasAudio: false });
 
       const env = envelope(a.samples, a.rate, Number(b.hz) || 30);
-      const min = b.min !== undefined ? Number(b.min) : (spec.min ?? 0);
-      const max = b.max !== undefined ? Number(b.max) : (spec.max ?? 1);
+      const min = b.min !== undefined ? Number(b.min) : (spec?.min ?? 0);
+      const max = b.max !== undefined ? Number(b.max) : (spec?.max ?? 1);
       const mode = b.mode === "onsets" ? "onsets" : "envelope";
       const hits = onsets(env, { sensitivity: Number(b.sensitivity) || 1.6, minGap: Number(b.minGap) || 0.12 });
       const track = mode === "onsets"
@@ -248,8 +260,16 @@ http.createServer(async (req, res) => {
       const b = JSON.parse((await readBody(req)) || "{}");
       const file = insideMedia(b.source || "");
       if (!file) return json(res, 400, { ok: false, error: `no such source in the media root: ${b.source}` });
+      // Same as from-audio: a caller that brings `rest` and `peak` for every track
+      // it wants needs no family, because family+param only ever supplied bounds.
       const fam = FAMILIES[b.family || "analog"];
-      if (!fam) return json(res, 400, { ok: false, error: `no family ${b.family}` });
+      const wantedRaw = Array.isArray(b.tracks) ? b.tracks : [];
+      const allBounded = wantedRaw.length > 0 &&
+        wantedRaw.every((t) => t.rest !== undefined && t.peak !== undefined);
+      if (!fam && !allBounded) {
+        return json(res, 400, { ok: false,
+          error: `no family ${b.family} — give every track a rest and a peak to derive without one` });
+      }
 
       const mode = ["motion", "brightness"].includes(b.mode) ? b.mode : "cuts";
       const wanted = Array.isArray(b.tracks) ? b.tracks : [];
@@ -271,8 +291,11 @@ http.createServer(async (req, res) => {
       }
 
       for (const t of wanted) {
-        const spec = fam.params?.[t.param];
-        if (!spec) { notes.push(`no parameter ${t.param} on family ${b.family || "analog"}`); continue; }
+        const spec = fam?.params?.[t.param];
+        if (!spec && (t.rest === undefined || t.peak === undefined)) {
+          notes.push(`no parameter ${t.param} on family ${b.family || "analog"}, and no rest/peak given`);
+          continue;
+        }
         const min = t.rest === undefined ? (spec.default ?? spec.min ?? 0) : Number(t.rest);
         const max = t.peak === undefined ? (spec.max ?? 1) : Number(t.peak);
         tracks[t.param] = mode === "cuts"
@@ -602,9 +625,40 @@ http.createServer(async (req, res) => {
       // Resolved here for BOTH stage parameters and CLOCK RATES -- a clock whose
       // rate is a lane is the thing that makes time itself accelerate, so it
       // would be a poor joke to leave that one unresolved.
+      // THE CLIP A DERIVED LANE LISTENS TO, and this fallback is the whole fix.
+      //
+      // Resolution has always happened here, correctly. What it never had was a
+      // FILE: the shipped examples deliberately name no clip, because a spec that
+      // hardcodes a filename only works on the machine that has it. So clipOf()
+      // returned "", the derive failed, and the lane collapsed to a flat rate --
+      // 07-time-runs-on-the-beat has been documented as working and time never
+      // accelerated once. Two correct decisions combining into a dead feature.
+      //
+      // The caller's CURRENTLY SELECTED SOURCE is the missing term. It keeps
+      // examples clip-agnostic and still gives the lane something to listen to.
       const clipOf = (stageIndex) => {
         const st = spec?.stages?.[stageIndex] || spec;
-        return st?.source?.clip || spec?.stages?.[0]?.source?.clip || spec?.source?.clip || "";
+        return st?.source?.clip || spec?.stages?.[0]?.source?.clip || spec?.source?.clip
+            || spec?.__source || "";
+      };
+
+      // FROM-VIDEO, which used to answer "not wired yet" and now is. Same
+      // helpers the standalone /api/effects/curve/from-video route uses, so
+      // there is one definition of what a cut is and one of how a series is
+      // normalised into a range.
+      const videoTrack = (want, file) => {
+        const mode = ["motion", "brightness"].includes(want.mode) ? want.mode : "cuts";
+        const [min, max] = want.range || [0, 1];
+        if (mode === "cuts") {
+          const found = cuts(file, { threshold: want.threshold === undefined ? 0.3 : Number(want.threshold) });
+          if (!found.cuts.length) return { error: "no cuts found at this threshold — a continuous shot, or lower it" };
+          return { ok: lockLossTrack(found.cuts, { rest: min, peak: max,
+                     recover: want.recover === undefined ? 0.45 : Number(want.recover) }) };
+        }
+        const f = frames(file, { fps: Number(want.fps) || 15 });
+        if (!f.ok) return { error: f.error };
+        const series = smooth(f.frames, mode, Number(want.smooth) || (mode === "motion" ? 5 : 3));
+        return { ok: envelopeTrack(series, { min, max, gamma: want.gamma || 1 }) };
       };
       const track = (want, file) => {
         const a = pcm(file);
@@ -618,20 +672,20 @@ http.createServer(async (req, res) => {
       };
       for (const [name, c] of Object.entries(out.clocks)) {
         if (!c.derive) continue;
-        const want = c.derive["from-audio"];
+        const audio = c.derive["from-audio"], video = c.derive["from-video"];
         const file = insideMedia(clipOf(0));
-        if (!want || !file) { out.problems.push(`clock ${name}: needs a from-audio lane and a clip in the media root`); out.clocks[name] = { rate: 1 }; continue; }
-        const t = track(want, file);
+        if (!file) { out.problems.push(`clock ${name}: no clip to derive from — pick a source`); out.clocks[name] = { rate: 1 }; continue; }
+        const t = audio ? track(audio, file) : video ? videoTrack(video, file) : { error: "not a derivable lane" };
         if (t.error) { out.problems.push(`clock ${name}: ${t.error}`); out.clocks[name] = { rate: 1 }; continue; }
         out.clocks[name] = { rateTrack: t.ok };
       }
       out.stages.forEach((st, i) => {
         for (const d of st.derived || []) {
-          const want = d.spec["from-audio"];
+          const audio = d.spec["from-audio"], video = d.spec["from-video"];
           const file = insideMedia(clipOf(i));
-          if (!want) { out.problems.push(`stage ${st.id}: from-video lanes are not wired yet`); continue; }
-          if (!file) { out.problems.push(`stage ${st.id}: no such clip in the media root`); continue; }
-          const t = track(want, file);
+          if (!audio && !video) { out.problems.push(`stage ${st.id}: ${d.param} is not a derivable lane`); continue; }
+          if (!file) { out.problems.push(`stage ${st.id}: no clip to derive ${d.param} from — pick a source`); continue; }
+          const t = audio ? track(audio, file) : videoTrack(video, file);
           if (t.error) { out.problems.push(`stage ${st.id}: ${t.error}`); continue; }
           st.tracks[d.param] = t.ok;
         }

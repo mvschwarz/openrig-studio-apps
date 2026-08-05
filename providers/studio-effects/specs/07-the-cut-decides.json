@@ -1,0 +1,12 @@
+{
+  "_": "THE FOOTAGE DRIVES THE EFFECT. A `from-video` lane reads the clip's own CUTS and drives moshRefresh with them, so the tape melts AT the edits and settles between them — the edit becomes the instrument rather than the thing to hide. Swap mode to `motion` to drive a parameter from how much is moving, or `brightness` to drive it from exposure; range is [rest, peak]. WANTS FOOTAGE WITH CUTS. A continuous shot derives an empty curve and says so rather than failing silently.",
+  "scan": { "duration": "10s" },
+  "stages": [
+    { "id": "a", "source": { "rate": 1 },
+      "head": { "axis": "vertical", "position": { "ramp": [0, 1] }, "width": 6, "softness": 0.5 },
+      "response": { "read": "passthrough" },
+      "mosh": { "refresh": { "from-video": { "mode": "cuts", "range": [0.55, 0.99], "recover": 0.5 } },
+                "bloom": 1.0, "strength": 1.7, "sliceLoss": 0.1, "sliceShift": 26 },
+      "write": { "mode": "direct", "advance": 0, "frames": 16, "fps": 12 } }
+  ]
+}

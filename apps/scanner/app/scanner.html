@@ -144,7 +144,7 @@ if (!gl) fail('this browser has no WebGL2 — the recording cannot be drawn');
 
 const UNIT_SRC = 0, UNIT_PREV = 1, UNIT_TAPE = 2, UNIT_FIELD = 3, UNIT_ACC = 4;
 
-let PARAMS = {}, PRESETS = {}, mediaRoot = null, specsDir = null;
+let PARAMS = {}, PRESETS = {}, mediaRoot = null, specsDir = null, lastSpecText = null;
 let vid = document.createElement('video');
 vid.muted = true; vid.loop = true; vid.playsInline = true; vid.crossOrigin = 'anonymous';
 let srcEl = null, isVideo = false, srcTex = null, srcW = 0, srcH = 0, lastStamp = NaN;
@@ -245,6 +245,10 @@ function makeStage(def, index) {
     id: def.id, from: def.from, clocks: def.clocks, startAt: def.startAt || 0,
     params: Object.assign({}, defaults(), def.constants || {}),
     tracks: def.tracks || {}, source: def.source || {},
+    // The compiled definition is kept because DERIVED lanes are resolved after
+    // the stage exists — the provider has to watch or listen to the source
+    // first, and the source is not known until the spec has loaded.
+    def,
     writeAt: 0, lastAt: 0, tapes: [], fbos: [], prevTex: null, prevFbo: null, prevW: 0, prevH: 0,
     canvas: null, ctx: null, index, playHead: 0,
   };
@@ -481,7 +485,8 @@ function writeStage(st, P, adv) {
   const span = vertical ? OUT_W : OUT_H;
   const at = Math.round(((st.writeAt % 1 + 1) % 1) * span);
   const n = Math.max(1, Math.floor(P.frames || 1));
-  if (st.tapes.length !== n) ensureTapes(st, n);
+  if (st.tapes.length !== n) { ensureTapes(st, n); st.stackW = wpx; }
+  if (!st.stackW) st.stackW = wpx;
 
   gl.viewport(0,0,OUT_W,OUT_H);
   gl.enable(gl.SCISSOR_TEST);
@@ -523,8 +528,24 @@ function writeStage(st, P, adv) {
   // So: bed and head come from (now - k*delta); the SOURCE FRAME is the live
   // one. That is what makes a column hold a moving picture instead of a
   // sequence of different places.
+  // THE STACK'S LAG NEEDS A STABLE UNIT, AND headWidth IS NOT ONE.
+  //
+  // Tape k holds the column the head reached k column-times ago, expressed as
+  // `k * headWidth` of offset and `k * delta` of rewound time. That is exact
+  // while the width is constant -- and it silently falls apart the moment a LANE
+  // drives headWidth, because each tape's write position then shifts by k*Δwidth
+  // between steps, scattering its strips and leaving hard BLACK BARS through the
+  // stack. Isolated by the one control that separates the two candidates: the
+  // same lane with frames:1 is perfectly clean, so it was never the coverage
+  // maths and always the stack.
+  //
+  // So the lag is pinned to the width the stack was BUILT with. The head is still
+  // free to change width -- that is the effect -- but every tape agrees on how far
+  // behind it is, and the offset and the time rewind stay derived from ONE number
+  // rather than from two that can disagree.
+  const lagW = st.stackW || wpx;
   const colsPerSec = Math.max(1e-6, adv * 60);
-  const delta = wpx / colsPerSec;          // seconds between column arrivals
+  const delta = lagW / colsPerSec;         // seconds between column arrivals
 
   // COVER THE WHOLE JUMP. At a high advance the write position moves further in
   // one step than a single strip is wide, so drawing one strip leaves the rest
@@ -532,11 +553,25 @@ function writeStage(st, P, adv) {
   // a fast sweep structurally broken rather than merely coarse.
   let moved = (st.writeAt - st.lastAt) * span;
   if (moved < 0) moved += span;
-  const passes = Math.max(1, Math.ceil(moved / wpx));
+  // COVER THE JUMP WITH THE NARROWEST WIDTH THAT APPLIED ACROSS IT.
+  //
+  // This used to size the pass count from the CURRENT head width alone, which is
+  // right only while the width is constant. Put a LANE on headWidth -- motion
+  // driving it from 30 down to 3, say -- and the distance was travelled at the
+  // old width while the coverage is computed at the new one. When the width
+  // drops sharply the count under-shoots and the tape is left with hard BLACK
+  // SHUTTERS between slabs of picture.
+  //
+  // Found by a from-video lane the moment lanes started working, and confirmed
+  // by the one control that separates the two explanations: the same narrow width
+  // held CONSTANT produces no bars at all.
+  const coverW = Math.max(1, Math.min(wpx, st.lastW || wpx));
+  const passes = Math.max(1, Math.ceil(moved / coverW));
   st.lastAt = st.writeAt;
+  st.lastW = wpx;
 
   for (let k = 0; k < n; k++) {
-    const col = Math.round(((( (at - k*wpx) % span) + span) % span));
+    const col = Math.round(((( (at - k*lagW) % span) + span) % span));
     if (k > 0) {
       const Q = effectiveFor(st, k * delta);
       gl.uniform1f(u('uHeadAt'), Q.headPosition ?? 0);
@@ -550,7 +585,7 @@ function writeStage(st, P, adv) {
     const fpx = soft > 0.001 ? Math.ceil(soft * wpx) : 0;
     if (fpx) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); }
     for (let j = 0; j < passes; j++) {
-      const c0 = Math.round(((((col - j*wpx) % span) + span) % span));
+      const c0 = Math.round(((((col - j*coverW) % span) + span) % span));
       gl.uniform1f(u('uStripAt'), c0);
       gl.uniform1f(u('uStripW'), wpx);
       // Widened by the feather so the fade overlaps its neighbour rather than
@@ -944,6 +979,14 @@ async function useSource(rel) {
     srcEl=im; isVideo=false;
   }
   lastStamp = NaN; clearAll(); say(`loaded ${rel}`);
+  // A DERIVED LANE IS RESOLVED AGAINST THE SOURCE, so changing the source has to
+  // recompile — otherwise the curve still describes the previous clip and nothing
+  // says so. Only when the loaded spec actually has one.
+  if (lastSpecText && /"from-(audio|video)"/.test(lastSpecText)) {
+    const keep = lastSpecText;
+    await loadSpec(keep);
+    lastSpecText = keep;
+  }
 }
 
 // ---- spec ----------------------------------------------------------------
@@ -971,8 +1014,15 @@ async function loadSpec(text) {
   let spec;
   try { spec = typeof text === 'string' ? JSON.parse(text) : text; }
   catch (e) { return fail(`spec is not valid JSON: ${e.message}`); }
+  // THE SELECTED SOURCE RIDES ALONG. Derived lanes (`from-audio`, `from-video`)
+  // are resolved server-side against a real file, and the shipped examples name
+  // no clip on purpose — so without this the derive has nothing to listen to and
+  // silently flattens. Sent under a reserved key rather than written into the
+  // spec, because the spec is the artifact and must stay clip-agnostic.
+  lastSpecText = typeof text === 'string' ? text : JSON.stringify(spec);
   const res = await (await fetch('/api/scanner/compile', {
-    method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(spec) })).json();
+    method:'POST', headers:{'content-type':'application/json'},
+    body:JSON.stringify({ ...spec, __source: $('#source').value || undefined }) })).json();
   if (!res.ok) return fail(res.error || 'compile failed');
   duration = res.duration;
   clocks = res.clocks; clockT = {}; for (const k of Object.keys(clocks)) clockT[k]=0;
@@ -986,6 +1036,8 @@ async function loadSpec(text) {
   const clip = spec.stages?.[0]?.source?.clip ?? spec.source?.clip;
   if (clip) { $('#source').value = clip; await useSource(clip); }
 }
+
+
 
 // Where everything lives, in one place, selectable.
 function pathLines() {

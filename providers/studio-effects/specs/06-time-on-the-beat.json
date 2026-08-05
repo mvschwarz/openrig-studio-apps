@@ -1,0 +1,11 @@
+{
+  "_": "TIME RUNS ON THE BEAT — and this one is confirmed by eye, not by a compile. A clock's RATE is a lane read from the clip's own audio, so time itself accelerates: on a hit the sweep races and a whole coherent chunk of a later moment lands intact, then it slows and smears. ONSETS, not envelope: an envelope gives a gentle wobble, onsets give visible JOLTS, which is what running on a beat should look like. Both the head and the write follow `pulse`, so the whole transport pulses rather than one half of it drifting against the other. WANTS A CLIP WITH AUDIO and a legible picture — a mostly-black source makes the rhythm impossible to read. Proof it is live rather than compiling-and-doing-nothing: over a 10s run the pulse clock reaches ~13.5s while master reaches 10.0s. That number can only differ if the rate varied.",
+  "scan": { "duration": "10s" },
+  "clocks": { "pulse": { "rate": { "from-audio": { "mode": "onsets", "range": [0.15, 4.5], "sensitivity": 1.5, "decay": 0.18 } } } },
+  "stages": [
+    { "id": "a", "source": { "rate": 1 },
+      "head": { "axis": "vertical", "position": { "ramp": [0, 1] }, "width": 6, "softness": 0.5, "clock": "pulse" },
+      "response": { "read": "passthrough" },
+      "write": { "mode": "direct", "advance": 0, "frames": 16, "fps": 12, "clock": "pulse" } }
+  ]
+}
