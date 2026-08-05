@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Factory</title>
+<style>
+  :root {
+    --ground:#101217; --panel:#151820; --card:#1b1f29; --raised:#222835;
+    --text:#f3f5f8; --body:#cbd1db; --dim:#929cad; --faint:#697386;
+    --edge:#2c3444; --edge2:#3a4457; --coral:#ff6b5a; --indigo:#8b93ff;
+    --sage:#8fbd82; --amber:#e5b45b; --sans:Helvetica,"Helvetica Neue",Arial,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  html { color-scheme:dark; }
+  body { margin:0; min-height:100vh; background:var(--ground); color:var(--text);
+    font:14px/1.45 var(--sans); -webkit-font-smoothing:antialiased; }
+  button,input,textarea { font:inherit; }
+  button { cursor:pointer; }
+  .wash { position:fixed; inset:0; pointer-events:none; z-index:-1;
+    background:radial-gradient(700px 460px at 8% -8%,rgba(139,147,255,.16),transparent 65%),
+      radial-gradient(680px 480px at 90% 8%,rgba(255,107,90,.09),transparent 68%); }
+  main { width:min(1480px,100%); margin:0 auto; padding:30px 34px 80px; }
+  header.hero { display:flex; align-items:flex-end; justify-content:space-between; gap:28px; margin-bottom:24px; }
+  .eyebrow,.label { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.2em; }
+  h1 { margin:7px 0 4px; font-size:clamp(30px,4.5vw,64px); line-height:.88; letter-spacing:-.055em; }
+  .lede { color:var(--body); max-width:660px; font-size:13px; }
+  .agent-ready { border:1px solid var(--edge); background:rgba(27,31,41,.8); color:var(--dim); padding:8px 11px; font-size:10px; }
+  .agent-ready strong { color:var(--sage); font-weight:600; }
+
+  .panel { background:rgba(21,24,32,.88); border:1px solid var(--edge); box-shadow:0 20px 70px rgba(0,0,0,.2); }
+  .intent { display:grid; grid-template-columns:minmax(0,1.12fr) minmax(340px,.88fr); }
+  .intent > section { padding:22px; min-width:0; }
+  .intent > section + section { border-left:1px solid var(--edge); }
+  .section-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  .section-head b { font-size:12px; font-weight:600; }
+  .hint { color:var(--faint); font-size:10.5px; }
+  input[type=text],textarea { width:100%; color:var(--text); background:#11141a; border:1px solid var(--edge2); outline:none; padding:11px 12px; }
+  input[type=text]:focus,textarea:focus { border-color:var(--indigo); }
+  #title { font-size:21px; font-weight:650; letter-spacing:-.025em; }
+  #intent { min-height:148px; resize:vertical; margin-top:9px; color:var(--body); }
+  #plan { min-height:203px; resize:vertical; color:var(--body); line-height:1.65; }
+  .save-line { display:flex; justify-content:space-between; align-items:center; margin-top:8px; color:var(--faint); font-size:10px; }
+  .ghost,.solid { border:1px solid var(--edge2); padding:8px 11px; color:var(--body); background:transparent; font-size:10px; text-transform:uppercase; letter-spacing:.12em; }
+  .ghost:hover { color:var(--text); border-color:var(--dim); }
+  .solid { color:#11141a; background:var(--text); border-color:var(--text); font-weight:700; }
+
+  .chooser { margin-top:16px; padding:20px 20px 22px; }
+  .machine-grid { display:grid; grid-template-columns:1.1fr .8fr 1.35fr; gap:16px; margin-top:13px; }
+  .choice-group { min-width:0; }
+  .choices { display:grid; gap:7px; margin-top:8px; max-height:342px; overflow:auto; padding-right:2px; }
+  .choice { position:relative; width:100%; min-height:92px; text-align:left; color:var(--body); background:var(--card); border:1px solid var(--edge); padding:11px 12px 10px; overflow:hidden; }
+  .choice:hover { border-color:var(--dim); transform:translateY(-1px); }
+  .choice.selected { border-color:var(--text); background:var(--raised); box-shadow:inset 3px 0 0 var(--indigo); }
+  .choice.selected::after { content:"selected"; position:absolute; top:7px; right:8px; color:var(--text); font-size:8px; letter-spacing:.13em; text-transform:uppercase; }
+  .choice-title { display:flex; align-items:center; gap:8px; color:var(--text); font-size:12px; font-weight:650; padding-right:58px; }
+  .choice-meta { color:var(--faint); font-size:9.5px; margin-top:7px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dot { width:7px; height:7px; border-radius:50%; background:var(--faint); flex:0 0 auto; }
+  .dot.running,.dot.reachable { background:var(--sage); box-shadow:0 0 0 3px rgba(143,189,130,.12); }
+  .dot.partial { background:var(--amber); }
+  .dot.unreachable,.dot.stopped { background:var(--coral); }
+  .rig-picture { display:flex; align-items:center; gap:5px; margin-top:15px; }
+  .rig-node { height:18px; min-width:32px; border:1px solid var(--edge2); background:#11141a; }
+  .rig-node.lead { min-width:42px; border-color:rgba(139,147,255,.75); }
+  .wire { height:1px; width:13px; background:var(--edge2); }
+  .host-picture { margin-top:15px; display:flex; align-items:center; gap:8px; }
+  .host-box { width:45px; height:26px; border:1px solid var(--edge2); position:relative; }
+  .host-box::before,.host-box::after { content:""; position:absolute; left:7px; right:7px; height:1px; background:var(--edge2); }
+  .host-box::before { top:8px; } .host-box::after { top:16px; }
+  .host-line { height:1px; flex:1; background:linear-gradient(90deg,var(--indigo),var(--edge2)); }
+  .workflow-picture { display:grid; grid-template-columns:repeat(4,1fr); align-items:center; gap:5px; margin-top:15px; }
+  .wf-node { position:relative; height:22px; border:1px solid var(--edge2); background:#11141a; }
+  .wf-node::after { content:""; position:absolute; left:100%; top:50%; width:6px; height:1px; background:var(--dim); }
+  .wf-node:last-child::after { display:none; }
+  .choice[data-kind*=gated] .wf-node:nth-child(3) { border-color:var(--amber); }
+  .choice[data-kind*=branched] .workflow-picture { grid-template-columns:1fr 1fr 1fr; }
+  .choice[data-kind*=branched] .wf-node:nth-child(3) { transform:translateY(12px); }
+
+  .launchbar { margin-top:16px; display:grid; grid-template-columns:1fr auto; align-items:center; gap:18px; border:1px solid var(--edge); background:linear-gradient(90deg,rgba(139,147,255,.13),rgba(255,107,90,.06)); padding:16px 18px; }
+  .launch-title { font-size:14px; font-weight:650; }
+  .launch-summary { color:var(--dim); font-size:11px; margin-top:2px; }
+  .launch-actions { display:flex; gap:8px; }
+  #kickoff { padding:12px 22px; }
+
+  .post { display:none; margin-top:16px; grid-template-columns:1.05fr .95fr; gap:16px; }
+  .post.visible { display:grid; }
+  .post > .panel { padding:19px; }
+  .runline { display:flex; align-items:center; gap:7px; margin:22px 0 14px; overflow:hidden; }
+  .runstep { min-width:0; flex:1; border:1px solid var(--edge2); background:var(--card); padding:10px; text-align:center; }
+  .runstep.on { border-color:var(--sage); }
+  .runstep b { display:block; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .runstep small { color:var(--faint); font-size:8.5px; text-transform:uppercase; letter-spacing:.1em; }
+  .arrow { color:var(--faint); }
+  .receipt { display:grid; grid-template-columns:110px 1fr; gap:5px 14px; padding-top:12px; border-top:1px solid var(--edge); font-size:11px; }
+  .receipt dt { color:var(--faint); } .receipt dd { margin:0; color:var(--body); overflow-wrap:anywhere; }
+  .timeline { margin-top:15px; border-left:1px solid var(--edge2); padding-left:15px; }
+  .event { position:relative; margin:0 0 13px; color:var(--body); font-size:11px; }
+  .event::before { content:""; position:absolute; width:7px; height:7px; border-radius:50%; background:var(--indigo); left:-19px; top:5px; }
+  .event time { color:var(--faint); font-size:9px; display:block; }
+
+  .proof-tools { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:12px 0; }
+  .mode-switch { display:flex; border:1px solid var(--edge); }
+  .mode-switch button { border:0; padding:7px 10px; color:var(--dim); background:transparent; font-size:9px; text-transform:uppercase; letter-spacing:.12em; }
+  .mode-switch button.on { background:var(--text); color:#11141a; }
+  .proof-list { display:grid; gap:7px; }
+  .proof-item { display:grid; grid-template-columns:20px 1fr auto; gap:10px; align-items:start; padding:10px 11px; border:1px solid var(--edge); background:var(--card); }
+  .proof-icon { width:17px; height:17px; border:1px solid var(--edge2); border-radius:50%; display:grid; place-items:center; font-size:10px; }
+  .proof-item.delivered .proof-icon { border-color:var(--sage); color:var(--sage); }
+  .proof-item.approved { border-color:rgba(143,189,130,.6); }
+  .proof-item b { display:block; font-size:11px; font-weight:600; }
+  .proof-item small { color:var(--faint); font-size:9px; }
+  .proof-item button { align-self:center; padding:6px 8px; }
+  .blocked { margin-top:10px; padding:10px 11px; color:var(--amber); border:1px solid rgba(229,180,91,.35); background:rgba(229,180,91,.05); font-size:10.5px; }
+  .empty { color:var(--faint); font-size:11px; padding:13px 0; }
+  .error { color:var(--coral); }
+  .toast { position:fixed; right:22px; bottom:22px; max-width:380px; padding:11px 14px; color:var(--text); background:#252c3a; border:1px solid var(--edge2); transform:translateY(20px); opacity:0; pointer-events:none; transition:.18s; }
+  .toast.on { opacity:1; transform:none; }
+  @media (max-width:980px) {
+    main { padding:22px 18px 60px; } .intent { grid-template-columns:1fr; }
+    .intent > section + section { border-left:0; border-top:1px solid var(--edge); }
+    .machine-grid,.post { grid-template-columns:1fr; } .choices { max-height:none; }
+    .launchbar { grid-template-columns:1fr; } .launch-actions { justify-content:stretch; }
+    .launch-actions button { flex:1; }
+  }
+</style>
+</head>
+<body>
+<div class="wash"></div>
+<main>
+  <header class="hero">
+    <div>
+      <div class="eyebrow">OpenRig · software factory</div>
+      <h1>Make the work real.</h1>
+      <div class="lede">Start with intent. Choose the machine as a picture. Kick off once — the rig, agents, workflow and proof all unfold below.</div>
+    </div>
+    <div class="agent-ready"><strong>agent-drivable</strong> · <code>window.factory</code></div>
+  </header>
+
+  <div class="panel intent">
+    <section>
+      <div class="section-head"><div><span class="label">01 · Intent</span><br><b>What should exist?</b></div><span class="hint">human or agent authored</span></div>
+      <input id="title" type="text" placeholder="A short name for the thing">
+      <textarea id="intent" placeholder="Describe the user, the problem, and what done looks like."></textarea>
+      <div class="save-line"><span id="saveState">not saved</span><button class="ghost" id="save">Save intent</button></div>
+    </section>
+    <section>
+      <div class="section-head"><div><span class="label">02 · Planning document</span><br><b>The build shape</b></div><span class="hint">one step per line</span></div>
+      <textarea id="plan" placeholder="Frame the smallest useful slice&#10;Build it on real rails&#10;Look at the result&#10;Close the proof"></textarea>
+      <div class="save-line"><span>The plan travels with the kickoff.</span><button class="ghost" id="askAgent">Ask an agent to shape it</button></div>
+    </section>
+  </div>
+
+  <section class="panel chooser">
+    <div class="section-head"><div><span class="label">03 · The machine</span><br><b>Pick the topology, the ground, and the motion</b></div><span class="hint">sensible defaults are already selected</span></div>
+    <div class="machine-grid">
+      <div class="choice-group"><div class="label">Rig</div><div class="choices" id="rigChoices"><div class="empty">reading rigs…</div></div></div>
+      <div class="choice-group"><div class="label">Host</div><div class="choices" id="hostChoices"><div class="empty">reading hosts…</div></div></div>
+      <div class="choice-group"><div class="label">Workflow</div><div class="choices" id="workflowChoices"><div class="empty">reading workflows…</div></div></div>
+    </div>
+  </section>
+
+  <div class="launchbar">
+    <div><div class="launch-title" id="launchTitle">Ready when the intent is.</div><div class="launch-summary" id="launchSummary">The common path is one click. Remote or stopped rigs show their consequence before launch.</div></div>
+    <div class="launch-actions"><button class="ghost" id="preview">Preview consequence</button><button class="solid" id="kickoff">Kick off build →</button></div>
+  </div>
+
+  <div class="post" id="post">
+    <section class="panel">
+      <div class="section-head"><div><span class="label">04 · Build</span><br><b>The machine is moving</b></div><span class="hint" id="buildTime"></span></div>
+      <div class="runline">
+        <div class="runstep on"><b>Intent</b><small>filed</small></div><span class="arrow">→</span>
+        <div class="runstep on"><b>Scope</b><small>created</small></div><span class="arrow">→</span>
+        <div class="runstep on"><b>Orchestrator</b><small>briefed</small></div><span class="arrow">→</span>
+        <div class="runstep"><b>Work</b><small>live</small></div>
+      </div>
+      <dl class="receipt" id="receipt"></dl>
+      <div class="timeline" id="timeline"></div>
+    </section>
+    <section class="panel">
+      <div class="section-head"><div><span class="label">05 · Proof</span><br><b>What is blocked, and what unblocks it</b></div><span class="hint" id="proofCount"></span></div>
+      <div class="proof-tools">
+        <div class="mode-switch"><button class="on" data-mode="live">Watch live</button><button data-mode="bulk">Bulk review</button></div>
+        <button class="solid" id="approveAll" hidden>Approve delivered</button>
+      </div>
+      <div class="proof-list" id="proofList"><div class="empty">Proof appears here as agents deliver it.</div></div>
+      <div class="blocked" id="blocked">Waiting for the first proof item. Approval here can unblock the next workflow step.</div>
+    </section>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const F = { state:null, rig:"", host:"local", workflow:"linear-build", mode:"live" };
+  let toastTimer;
+  function toast(text, bad=false) { const el=$("toast"); el.textContent=text; el.style.borderColor=bad?"var(--coral)":""; el.classList.add("on"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove("on"),2800); }
+  async function api(path, options={}) { const r=await fetch(path,{...options,headers:{"content-type":"application/json",...(options.headers||{})}}); const d=await r.json(); if(!d.ok) throw new Error(d.error||"request failed"); return d; }
+  const planLines = () => $("plan").value.split("\n").map((x)=>x.replace(/^\s*[-•]\s*/,"").trim()).filter(Boolean);
+  function currentPayload(extra={}) { return { title:$("title").value.trim(), intent:$("intent").value.trim(), plan:planLines(), rig:F.rig, host:F.host, workflow:F.workflow, ...extra }; }
+  function isRunning(rig) { return rig && !["stopped","recoverable"].includes(rig.status); }
+  function pick(id,value) { F[id]=value; document.querySelectorAll(`[data-group="${id}"]`).forEach((el)=>el.classList.toggle("selected",el.dataset.value===value)); updateLaunch(); if(id==="host") loadHostRigs(value); }
+  function rigCard(r) { const count=Math.max(2,Math.min(4,r.nodes||2)); return `<button class="choice" data-group="rig" data-value="${esc(r.id)}"><div class="choice-title"><span class="dot ${esc(r.status)}"></span>${esc(r.id)}</div><div class="rig-picture"><span class="rig-node lead"></span>${Array.from({length:count-1},()=>'<span class="wire"></span><span class="rig-node"></span>').join("")}</div><div class="choice-meta">${r.running}/${r.nodes} seats · ${esc(r.status)}</div></button>`; }
+  function hostCard(h) { return `<button class="choice" data-group="host" data-value="${esc(h.id)}"><div class="choice-title"><span class="dot ${esc(h.status)}"></span>${esc(h.id)}</div><div class="host-picture"><span class="host-box"></span><span class="host-line"></span><span class="dot ${esc(h.status)}"></span></div><div class="choice-meta">${esc(h.transport)} · ${esc(h.notes||h.status)}</div></button>`; }
+  function workflowCard(w) { const nodes=/branched/.test(w.id)?3:/gate|triple/.test(w.id)?4:3; return `<button class="choice" data-kind="${esc(w.id)}" data-group="workflow" data-value="${esc(w.id)}"><div class="choice-title">${esc(w.id)} <span class="hint">v${esc(w.version)}</span></div><div class="workflow-picture">${Array.from({length:nodes},()=>'<span class="wf-node"></span>').join("")}</div><div class="choice-meta">${esc(w.purpose||"declared workflow")}</div></button>`; }
+  function sortFirst(rows,value) { return [...rows].sort((a,b)=>Number((b.id||b.name)===value)-Number((a.id||a.name)===value)); }
+  function bindChoices() { document.querySelectorAll(".choice[data-group]").forEach((el)=>el.onclick=()=>pick(el.dataset.group,el.dataset.value)); document.querySelectorAll(".choice").forEach((el)=>el.classList.toggle("selected",el.dataset.value===F[el.dataset.group])); updateLaunch(); }
+  async function loadHostRigs(host) { try { const d=await api(`/api/software-factory/state?host=${encodeURIComponent(host)}`); F.state.rigs=d.rigs||[]; if(!F.state.rigs.some((r)=>r.id===F.rig)) F.rig=(F.state.rigs.find(isRunning)||F.state.rigs[0]||{}).id||""; $("rigChoices").innerHTML=sortFirst(F.state.rigs,F.rig).filter((r)=>r.id!=="kernel").map(rigCard).join("")||'<div class="empty">No rigs visible on this host.</div>'; bindChoices(); } catch(e) { $("rigChoices").innerHTML=`<div class="empty error">${esc(e.message)}</div>`; } }
+  function updateLaunch() { const rig=(F.state?.rigs||[]).find((x)=>x.id===F.rig); const host=(F.state?.hosts||[]).find((x)=>x.id===F.host); const consequences=[]; if(!isRunning(rig)) consequences.push("stand up the rig"); if(F.host!=="local") consequences.push(`act on ${F.host}`); $("launchTitle").textContent=`${F.rig} · ${F.host} · ${F.workflow}`; $("launchSummary").textContent=consequences.length?`Kickoff will ${consequences.join(" and ")}, then create scope and brief its orchestrator.`:"Rig is already running here. Kickoff creates scope and briefs its orchestrator."; }
+  function renderState(d) {
+    F.state=d; const p=d.project||{}; F.rig=p.selectedRig||F.rig||(d.rigs||[]).find((r)=>r.id!=="kernel"&&isRunning(r))?.id||(d.rigs||[]).find((r)=>r.id!=="kernel")?.id||""; F.host=p.selectedHost||F.host; F.workflow=p.selectedWorkflow||F.workflow;
+    $("title").value=p.title||""; $("intent").value=p.intent||""; $("plan").value=(p.plan||[]).join("\n");
+    $("rigChoices").innerHTML=sortFirst(d.rigs||[],F.rig).filter((r)=>r.id!=="kernel").map(rigCard).join("")||'<div class="empty">No rigs visible.</div>';
+    $("hostChoices").innerHTML=sortFirst(d.hosts||[],F.host).map(hostCard).join("")||'<div class="empty">No hosts visible.</div>';
+    const featured=(d.workflows||[]).filter((w)=>["linear-build","triple-gate","gated-release","branched-remediation","factory-rsi"].includes(w.id));
+    $("workflowChoices").innerHTML=sortFirst(featured.length?featured:d.workflows||[],F.workflow).map(workflowCard).join("")||'<div class="empty">No workflows visible.</div>';
+    bindChoices(); renderLaunch(p.launch,d.events||[]); updateLaunch();
+  }
+  function renderLaunch(l,events) { if(!l) return; $("post").classList.add("visible"); $("buildTime").textContent=new Date(l.ts).toLocaleString(); $("receipt").innerHTML=[["mission",l.mission],["slice",l.slice],["rig",l.rig],["host",l.host],["workflow",l.workflow],["orchestrator",l.lead],["queue",l.qitemId||"created"]].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join(""); $("timeline").innerHTML=events.slice().reverse().map((e)=>`<div class="event"><time>${new Date(e.ts).toLocaleTimeString()}</time>${esc(e.type)}${e.ids?` · ${esc(e.ids.join(", "))}`:""}</div>`).join("")||'<div class="empty">The kickoff is the first event.</div>'; loadProof(); }
+  async function save() { const d=await api("/api/software-factory/intent",{method:"POST",body:JSON.stringify(currentPayload())}); F.state.project=d.project; $("saveState").textContent=`saved ${new Date().toLocaleTimeString()}`; toast("Intent and plan saved"); return d.project; }
+  async function preview() { await save(); const d=await api("/api/software-factory/kickoff",{method:"POST",body:JSON.stringify(currentPayload({dryRun:true}))}); const lines=d.commands.map((cmd)=>cmd.join(" ")); toast(lines.join("  →  ")); return d; }
+  async function kickoff(options={}) { if(!$("title").value.trim()||!$("intent").value.trim()) { toast("Title and intent are required",true); return; } $("kickoff").disabled=true; $("kickoff").textContent="Launching…"; try { await save(); const d=await api("/api/software-factory/kickoff",{method:"POST",body:JSON.stringify(currentPayload(options))}); toast(`Building on ${d.launch.rig}`); await refresh(); return d; } catch(e) { toast(e.message,true); throw e; } finally { $("kickoff").disabled=false; $("kickoff").textContent="Kick off build →"; } }
+  async function loadProof() { try { const d=await api("/api/software-factory/proof"); const items=d.items||[]; const done=items.filter((x)=>x.delivered).length, approved=items.filter((x)=>x.approved).length; $("proofCount").textContent=`${approved} approved · ${done}/${items.length} delivered`; $("approveAll").hidden=F.mode!=="bulk"||!items.some((x)=>x.delivered&&!x.approved); $("proofList").innerHTML=items.length?items.map((item)=>`<div class="proof-item ${item.delivered?"delivered":""} ${item.approved?"approved":""}"><span class="proof-icon">${item.approved?"✓":item.delivered?"•":""}</span><div><b>${esc(item.text)}</b><small>${esc(item.source)} · ${item.approved?"approved":item.delivered?"ready for review":"waiting on evidence"}</small></div>${F.mode==="live"&&item.delivered&&!item.approved?`<button class="ghost" data-approve="${esc(item.id)}">Approve</button>`:""}</div>`).join(""):'<div class="empty">No proof items yet. The scope exists; agents have not delivered evidence.</div>'; $("blocked").textContent=items.some((x)=>x.delivered&&!x.approved)?"Delivered proof is waiting for your approval. Approving it can unblock the next step.":items.some((x)=>!x.delivered)?"Work is waiting on evidence. This screen will show the exact item when it lands.":items.length?"Nothing is blocked on proof review.":"Waiting for the first proof item."; document.querySelectorAll("[data-approve]").forEach((b)=>b.onclick=()=>approve(b.dataset.approve)); return items; } catch(e) { $("proofList").innerHTML=`<div class="empty error">${esc(e.message)}</div>`; } }
+  async function approve(id) { const d=await api("/api/software-factory/proof",{method:"POST",body:JSON.stringify({op:"approve",id})}); toast("Proof approved; orchestrator notified"); await refresh(); return d; }
+  async function approveAll() { const d=await api("/api/software-factory/proof",{method:"POST",body:JSON.stringify({op:"approve-all"})}); toast("Delivered proof approved in bulk"); await refresh(); return d; }
+  async function refresh() { const d=await api("/api/software-factory/state"); renderState(d); return d; }
+  $("save").onclick=()=>save().catch((e)=>toast(e.message,true)); $("preview").onclick=()=>preview().catch((e)=>toast(e.message,true)); $("kickoff").onclick=()=>kickoff().catch(()=>{}); $("approveAll").onclick=()=>approveAll().catch((e)=>toast(e.message,true));
+  $("askAgent").onclick=()=>{ const text=`Help me shape this intent into a short executable plan. Intent: ${$("intent").value.trim()||"(not written yet)"}`; parent.postMessage({t:"open-agent"},"*"); navigator.clipboard?.writeText(text).then(()=>toast("Prompt copied; agent sidebar opened")); };
+  document.querySelectorAll("[data-mode]").forEach((b)=>b.onclick=()=>{ F.mode=b.dataset.mode; document.querySelectorAll("[data-mode]").forEach((x)=>x.classList.toggle("on",x===b)); loadProof(); });
+  const ready=refresh();
+  window.factory={ ready, state:()=>F.state, refresh, setIntent:async(input)=>{ if(input.title!==undefined)$("title").value=input.title;if(input.intent!==undefined)$("intent").value=input.intent;if(input.plan!==undefined)$("plan").value=input.plan.join("\n");return save(); }, select:async(input)=>{ if(input.host&&input.host!==F.host){F.host=input.host;await loadHostRigs(input.host);}if(input.rig)pick("rig",input.rig);if(input.workflow)pick("workflow",input.workflow);return save(); }, preview, kickoff, proof:loadProof, approve, approveAll };
+})();
+</script>
+</body>
+</html>

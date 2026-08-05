@@ -1,0 +1,16 @@
+{
+  "package": "@openrig/studio-factory",
+  "run": {
+    "entry": "factory-server.mjs",
+    "args": [
+      "--port", "{{port}}",
+      "--root", "{{root:factory}}"
+    ]
+  },
+  "verbs": [
+    "/api/software-factory/state",
+    "/api/software-factory/intent",
+    "/api/software-factory/kickoff",
+    "/api/software-factory/proof"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "id": "factory",
+  "name": "FACTORY",
+  "summary": "Turn an intent into a staffed OpenRig build: choose the rig, host and workflow as diagrams, then launch the work on real rails.",
+  "category": "studio",
+  "maker": {
+    "name": "OpenRig",
+    "url": "https://github.com/mvschwarz"
+  },
+  "surface": {
+    "entry": "app/factory.html",
+    "path": "/surfaces/factory.html",
+    "glyph": "◆",
+    "hint": "intent → plan → pick the machine → build"
+  },
+  "roots": {
+    "factory": {
+      "required": true
+    }
+  },
+  "calls": {
+    "/api/software-factory/state": { "required": true },
+    "/api/software-factory/intent": { "required": true },
+    "/api/software-factory/kickoff": { "required": true },
+    "/api/software-factory/proof": { "required": true }
+  },
+  "vendor": [],
+  "provider": {
+    "package": "@openrig/studio-factory",
+    "required": true
+  }
+}
