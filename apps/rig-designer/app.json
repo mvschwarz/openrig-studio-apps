@@ -1,0 +1,22 @@
+{
+  "manifest_version": 1,
+  "id": "rig-designer",
+  "name": "DESIGNER",
+  "summary": "Design a rig by talking to an agent and watching the topology assemble.",
+  "category": "studio",
+  "maker": {
+    "name": "OpenRig",
+    "url": "https://github.com/mvschwarz"
+  },
+  "surface": {
+    "entry": "app/rig-designer.html",
+    "path": "/surfaces/rig-designer.html",
+    "glyph": "⬡",
+    "hint": "say what the rig should do; watch it take shape, then build it"
+  },
+  "_drive_note": "Uses the runtime's own drive channel (capabilities drive.read/drive.write), so there is no provider and nothing in `calls`: `calls` declares verbs a PROVIDER must answer, and naming a runtime verb there makes the box refuse to start because nothing installs a provider for it. Ops carry INTENT, never DOM instructions, per contract/drive.md: {designer:{action:'set-rig'|'add-pod'|'add-seat'|'set-seat'|'remove'|'set-spec'|'reset', ...}}. The vocabulary is this surface's alone; the runtime never interprets it.",
+  "vendor": [],
+  "requires": {
+    "binaries": []
+  }
+}

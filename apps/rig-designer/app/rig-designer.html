@@ -1,0 +1,249 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DESIGNER</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:#0b0e13; --panel:#121722; --line:#252c3a; --text:#f3f5f8; --muted:#929cad;
+    --fresh:#47d18c; --info:#6d9eff; --hot:#ff795f; --warm:#ffb44a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh;
+    background:radial-gradient(circle at 82% -4%, #172032 0, transparent 38%), var(--bg);
+    color:var(--text); font:14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header{padding:18px 22px 10px; border-bottom:1px solid var(--line)}
+  .eyebrow{color:var(--fresh); font-size:11px; letter-spacing:.16em; text-transform:uppercase}
+  h1{margin:4px 0 2px; font:600 clamp(24px,4vw,38px)/1.05 system-ui,sans-serif; letter-spacing:-.04em}
+  .sub{color:var(--muted); font-size:12px}
+
+  .wrap{display:grid; grid-template-columns:1fr 340px; gap:0; align-items:start}
+  @media (max-width:900px){ .wrap{grid-template-columns:1fr} }
+  main{padding:18px 22px 40px; min-width:0}
+  aside{padding:18px 22px 40px; border-left:1px solid var(--line); position:sticky; top:0}
+  @media (max-width:900px){ aside{border-left:0; border-top:1px solid var(--line); position:static} }
+
+  /* ---- the rig: a diagram, not a form ---- */
+  .rig{border:1px solid var(--line); border-radius:14px; background:linear-gradient(180deg,rgba(255,255,255,.025),transparent); padding:16px}
+  .rigname{font:600 20px/1.2 system-ui,sans-serif; letter-spacing:-.02em}
+  .rigmeta{color:var(--muted); font-size:11px; margin-top:2px}
+  .pods{display:flex; flex-wrap:wrap; gap:14px; margin-top:16px}
+  .pod{
+    flex:1 1 260px; border:1px solid var(--line); border-radius:12px; padding:12px;
+    background:var(--panel); position:relative; transition:border-color .18s, transform .18s;
+  }
+  .pod.new{animation:pop .5s ease}
+  @keyframes pop{from{transform:translateY(6px) scale(.985); border-color:var(--fresh)} to{transform:none}}
+  .podname{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--info)}
+  .podrole{color:var(--muted); font-size:11px; margin:3px 0 10px}
+  .seat{display:grid; grid-template-columns:18px 1fr; gap:9px; padding:8px 0; border-top:1px solid var(--line)}
+  .seat:first-of-type{border-top:0}
+  .dot{width:9px;height:9px;border-radius:50%;margin-top:5px;background:var(--muted)}
+  .dot.claude{background:#ad6755} .dot.codex{background:#e8e6e3} .dot.human{background:var(--warm)}
+  .sname{font-size:13px}
+  .sattr{color:var(--muted); font-size:11px; margin-top:2px; word-break:break-word}
+  .skills{margin-top:4px; display:flex; flex-wrap:wrap; gap:4px}
+  .skill{font-size:10px; padding:1px 6px; border:1px solid var(--line); border-radius:999px; color:var(--muted)}
+  .empty{color:var(--muted); padding:26px 8px; text-align:center; border:1px dashed var(--line); border-radius:12px}
+
+  /* ---- the spec, taking shape ---- */
+  pre{margin:0; padding:12px; background:#0a0d12; border:1px solid var(--line); border-radius:10px;
+      font-size:11.5px; line-height:1.5; overflow:auto; max-height:44vh; white-space:pre}
+  .lbl{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin:0 0 8px}
+  .log{margin-top:16px; max-height:26vh; overflow:auto}
+  .op{border-left:2px solid var(--line); padding:4px 0 4px 9px; margin-bottom:7px; font-size:11.5px; color:var(--muted)}
+  .op b{color:var(--text); font-weight:600}
+  .op.newest{border-left-color:var(--fresh)}
+  button{font:inherit; font-size:12px; cursor:pointer; color:var(--text); background:rgba(255,255,255,.04);
+         border:1px solid var(--line); border-radius:8px; padding:7px 12px}
+  button:hover{border-color:rgba(255,255,255,.4)}
+  .row{display:flex; gap:8px; margin-top:12px; flex-wrap:wrap}
+  .hint{color:var(--muted); font-size:11px; margin-top:10px}
+  code{color:var(--info)}
+</style>
+
+<header>
+  <div class="eyebrow">rig designer</div>
+  <h1 id="title">an empty floor</h1>
+  <div class="sub" id="sub">Tell the agent in your sidebar what the rig should do. It takes shape here.</div>
+</header>
+
+<div class="wrap">
+  <main>
+    <div class="rig" id="rig"></div>
+    <div class="row">
+      <button id="build">build it</button>
+      <button id="copy">copy spec</button>
+      <button id="reset">start over</button>
+    </div>
+    <div class="hint">
+      An agent drives this by posting intent to <code>/api/drive</code> — it never touches the markup.
+      Try: <code>{"designer":{"action":"add-pod","pod":"dev","role":"writes the code"}}</code>
+    </div>
+  </main>
+
+  <aside>
+    <p class="lbl">rig spec</p>
+    <pre id="spec">— nothing yet —</pre>
+    <div class="log" id="log"></div>
+  </aside>
+</div>
+
+<script>
+// The whole app: hold a spec, render it as a diagram, and let an AGENT change it
+// through the drive channel. There is deliberately no chat client here — the
+// studio already spawns seat terminals in the sidebar, and a second way to talk
+// to an agent on a box that already has one is not a feature, it is a fork.
+const EMPTY = { rig: null, summary: "", pods: [] };
+let spec = structuredClone(EMPTY);
+let marker = null, fresh = new Set();
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+const runtimeOf = (s) => /claude/i.test(s?.runtime || "") ? "claude" : /codex/i.test(s?.runtime || "") ? "codex" : /human|operator/i.test(s?.runtime || "") ? "human" : "";
+
+function render() {
+  $("title").textContent = spec.rig || "an empty floor";
+  $("sub").textContent = spec.summary || "Tell the agent in your sidebar what the rig should do. It takes shape here.";
+
+  if (!spec.pods.length) {
+    $("rig").innerHTML = '<div class="empty">No pods yet.<br>Say what the rig should do — the agent adds them here.</div>';
+  } else {
+    $("rig").innerHTML = `
+      <div class="rigname">${esc(spec.rig || "untitled rig")}</div>
+      <div class="rigmeta">${spec.pods.length} pod${spec.pods.length === 1 ? "" : "s"} ·
+        ${spec.pods.reduce((n, p) => n + (p.seats?.length || 0), 0)} seat(s)</div>
+      <div class="pods">${spec.pods.map(podHTML).join("")}</div>`;
+  }
+  $("spec").textContent = spec.pods.length ? toYAML(spec) : "— nothing yet —";
+}
+
+const podHTML = (p) => `
+  <div class="pod${fresh.has("pod:" + p.name) ? " new" : ""}">
+    <div class="podname">${esc(p.name)}</div>
+    <div class="podrole">${esc(p.role || "—")}</div>
+    ${(p.seats || []).map(seatHTML).join("") || '<div class="sattr">no seats yet</div>'}
+  </div>`;
+
+const seatHTML = (s) => `
+  <div class="seat">
+    <div class="dot ${runtimeOf(s)}"></div>
+    <div>
+      <div class="sname">${esc(s.name)}</div>
+      <div class="sattr">${esc([s.runtime, s.model].filter(Boolean).join(" · ") || "runtime unset")}</div>
+      ${s.context ? `<div class="sattr">${esc(s.context)}</div>` : ""}
+      ${(s.skills || []).length ? `<div class="skills">${s.skills.map((k) => `<span class="skill">${esc(k)}</span>`).join("")}</div>` : ""}
+    </div>
+  </div>`;
+
+// The spec IS the deliverable — what you would hand to `rig up`. Emitted from the
+// same object the diagram draws, so the picture and the file cannot disagree.
+function toYAML(sp) {
+  const q = (v) => (/^[\w.\/-]+$/.test(v) ? v : JSON.stringify(String(v)));
+  const out = [`name: ${q(sp.rig || "untitled")}`];
+  if (sp.summary) out.push(`summary: ${q(sp.summary)}`);
+  out.push("pods:");
+  for (const p of sp.pods) {
+    out.push(`  - name: ${q(p.name)}`);
+    if (p.role) out.push(`    role: ${q(p.role)}`);
+    out.push(`    members:`);
+    for (const s of p.seats || []) {
+      out.push(`      - name: ${q(s.name)}`);
+      if (s.runtime) out.push(`        runtime: ${q(s.runtime)}`);
+      if (s.model) out.push(`        model: ${q(s.model)}`);
+      if (s.context) out.push(`        startup_context: ${q(s.context)}`);
+      if ((s.skills || []).length) out.push(`        skills: [${s.skills.map(q).join(", ")}]`);
+    }
+  }
+  return out.join("\n");
+}
+
+// ---- the drive channel: intent in, diagram out ------------------------------
+// Ops say WHAT the rig should be, never which element to click. That is the
+// contract, and it is why a re-layout here cannot break a driver.
+function apply(op) {
+  const d = op?.designer;
+  if (!d) return null;
+  const pod = (n) => spec.pods.find((p) => p.name === n);
+  switch (d.action) {
+    case "set-rig":
+      spec.rig = d.rig ?? spec.rig; spec.summary = d.summary ?? spec.summary;
+      return `rig is ${spec.rig}`;
+    case "add-pod": {
+      if (!d.pod) return null;
+      if (!pod(d.pod)) spec.pods.push({ name: d.pod, role: d.role || "", seats: [] });
+      else if (d.role) pod(d.pod).role = d.role;
+      fresh.add("pod:" + d.pod);
+      return `pod <b>${esc(d.pod)}</b>`;
+    }
+    case "add-seat":
+    case "set-seat": {
+      if (!d.pod || !d.seat) return null;
+      if (!pod(d.pod)) spec.pods.push({ name: d.pod, role: "", seats: [] });
+      const p = pod(d.pod);
+      let s = p.seats.find((x) => x.name === d.seat);
+      if (!s) { s = { name: d.seat }; p.seats.push(s); }
+      for (const k of ["runtime", "model", "context"]) if (d[k] != null) s[k] = d[k];
+      if (d.skills) s.skills = [].concat(d.skills);
+      fresh.add("pod:" + d.pod);
+      return `seat <b>${esc(d.seat)}</b> in ${esc(d.pod)}`;
+    }
+    case "remove":
+      if (d.seat) { const p = pod(d.pod); if (p) p.seats = p.seats.filter((x) => x.name !== d.seat); return `removed ${esc(d.seat)}`; }
+      if (d.pod) { spec.pods = spec.pods.filter((p) => p.name !== d.pod); return `removed pod ${esc(d.pod)}`; }
+      return null;
+    case "set-spec":
+      if (d.spec && typeof d.spec === "object") { spec = { ...structuredClone(EMPTY), ...d.spec }; return "spec replaced"; }
+      return null;
+    case "reset":
+      spec = structuredClone(EMPTY); fresh.clear(); return "cleared";
+    default:
+      return null;
+  }
+}
+
+function note(text) {
+  const el = document.createElement("div");
+  el.className = "op newest"; el.innerHTML = text;
+  const log = $("log");
+  log.querySelectorAll(".op").forEach((n) => n.classList.remove("newest"));
+  log.prepend(el);
+  while (log.children.length > 40) log.lastChild.remove();
+}
+
+// Same `?since=` shape as the change signal, so this watches the drive channel
+// with the primitive the surface already has rather than inventing a third.
+async function poll() {
+  try {
+    const r = await fetch("/api/drive" + (marker ? "?since=" + encodeURIComponent(marker) : ""));
+    const d = await r.json();
+    if (d?.ok) {
+      if (d.changed && d.op) {
+        const what = apply(d.op);
+        if (what) { render(); note(what); setTimeout(() => fresh.clear(), 600); }
+      }
+      marker = d.marker ?? marker;
+    }
+  } catch { /* a dropped poll is not a state change; the next one recovers */ }
+  setTimeout(poll, 700);
+}
+
+$("build").onclick = () => {
+  if (!spec.pods.length) return note("nothing to build yet");
+  note(`<b>build requested</b> — spec is ready for <code>rig up</code>`);
+};
+$("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText(toYAML(spec)); note("spec copied"); }
+  catch { note("clipboard blocked — select the spec and copy"); }
+};
+$("reset").onclick = () => { apply({ designer: { action: "reset" } }); render(); note("cleared"); };
+
+// Exposed for tests and for a driver that has a page handle rather than the HTTP
+// channel. Same entry point either way, so there is one code path to trust.
+window.designer = { apply: (op) => { const w = apply(op); render(); if (w) note(w); return w; }, get spec() { return spec; } };
+
+render();
+poll();
+</script>
