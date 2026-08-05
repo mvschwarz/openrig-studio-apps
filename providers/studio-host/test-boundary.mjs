@@ -41,11 +41,18 @@ const check = (label, actual, expected) => {
 console.log("POSITIVE CONTROLS — the boundary must ALLOW legitimate access");
 check("resolve a real file inside the root", resolveInsideRoots(path.join(ROOT, "inside.txt"), roots) !== null, true);
 check("read a real file inside the root", filesRead(path.join(ROOT, "inside.txt"), roots)?.content.trim() === "legitimate content", true);
-// filesTree's shape IS its contract with the surface: no dir → { roots }, a dir
-// → { path, dirs, files }. Assert both, because the earlier hand-rewrite that
-// returned { dir, entries } passed every security check and rendered nothing.
+// filesTree's shape IS its contract with the surface, and it is now ONE shape:
+// { path, dirs, files }, whether or not a dir was named. Assert it, because the
+// earlier hand-rewrite that returned { dir, entries } passed every security
+// check and rendered nothing.
+//
+// THIS ASSERTION USED TO DEMAND TWO SHAPES — no dir → { roots }. That was the
+// tree verb doubling as the root list, and the root list has its own verb
+// (/api/files/roots), which is what the surface reads. The second shape is
+// gone; this case now pins the fallback that replaced it, so an empty `dir`
+// answers the first bound root's contents rather than a different object.
 check("list the root", ((filesTree(ROOT, roots)?.files?.length ?? 0) + (filesTree(ROOT, roots)?.dirs?.length ?? 0)) > 0, true);
-check("no dir → the root list the surface reads", (filesTree(null, roots)?.roots?.length ?? 0) > 0, true);
+check("no dir → the FIRST BOUND ROOT's contents, in the one shape", filesTree(null, roots)?.path, filesTree(ROOT, roots)?.path);
 {
   const p = path.join(ROOT, "new-file.txt");
   let wrote = false;

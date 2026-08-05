@@ -22,7 +22,6 @@ const requiredExact = [
   "/api/approve",
   "/api/export-final",
   "/api/export-review",
-  "/api/focus",
   "/api/health",
   "/api/history-since",
   "/api/library",
@@ -50,6 +49,20 @@ const requiredExact = [
 ];
 
 const requiredPrefixes = ["/api/export-status/"];
+
+// RESERVED TO THE RUNTIME. The surface may CALL these; the manifest must NOT
+// declare them, because `calls` says what this app needs a PROVIDER to answer
+// and no provider answers these — the studio routes them to the runtime before
+// any provider table is consulted.
+//
+// /api/focus MOVED HERE FROM requiredExact rather than being quietly deleted
+// from it. It was declared `required: true`, so the moment @openrig/studio-video
+// stopped claiming the verb, the box refused to start over a route that is
+// always present. Deleting the assertion would have left nothing to stop it
+// coming back; inverting it pins the reason.
+const runtimeOwned = [
+  "/api/focus", "/api/drive", "/api/contract", "/api/events", "/api/factory/state",
+];
 
 function readContract() {
   return {
@@ -110,6 +123,19 @@ test("the route checker demonstrably fails when a known declaration is removed",
   delete calls["/api/patch"];
   const altered = { ...manifest, calls };
   assert.ok(missingRoutes(altered).includes("/api/patch"));
+});
+
+test("runtime-owned verbs are CALLED but never declared", () => {
+  const { manifest, surface } = readContract();
+  for (const route of runtimeOwned) {
+    assert.ok(!declaredRoutes(manifest).includes(route),
+      `${route} is the runtime's; declaring it in calls{} asks a provider for a verb no provider serves`);
+  }
+  // The positive half, so this cannot pass by the surface simply not using
+  // focus at all: it must still be CALLED. Undeclared-and-unused and
+  // undeclared-but-used read identically to the check above, and only one of
+  // them is the state being pinned.
+  assert.match(surface, /fetch\("\/api\/focus"/, "the surface still reports focus over the runtime verb");
 });
 
 test("ruled-out rig injection and Finder reveal have no live surface callers", () => {

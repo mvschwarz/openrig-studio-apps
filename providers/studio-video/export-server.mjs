@@ -1357,43 +1357,51 @@ const server = http.createServer((req, res) => {
             if (lines.length) fs.appendFileSync(path.join(args.sliceRoot, "tags.jsonl"), lines.join("\n") + "\n");
             return sendJson(res, 200, { ok: true, appended: lines.length });
           }
-          // /api/selections: a PIN — a durable named selection for the agent
+          // /api/selections: a PIN — a durable named selection for the agent.
+          //
+          // IT NO LONGER WRITES FOCUS, AND THAT REMOVAL IS THE POINT. This used
+          // to write focus.json as a side effect, which made it a SECOND focus
+          // writer that was not a focus verb — so it was invisible when
+          // /api/focus was reserved to the runtime, and it survived. It also
+          // wrote the WHOLE record every time, with `view` blanked and every
+          // asset path reduced to a basename, so pinning something destroyed
+          // the view context the focus reporter had just written. Both writers
+          // were behaving reasonably; the whole-record write is what made them
+          // collide, and contract/focus.md exists because of this exact pair.
+          //
+          // Focus is the runtime's now (GET/POST /api/focus, field-scoped: a
+          // write updates the fields it names and leaves the rest). A surface
+          // that pins reports its own focus in the same gesture — see the pin
+          // handlers in media-manager and canvas — so nothing is lost except
+          // the clobber.
           const rec = { name: String(j.name || "").slice(0, 120) || null,
             assets: (Array.isArray(j.assets) ? j.assets : []).slice(0, 300).map((a) => path.basename(String(a))),
             surface: String(j.surface || "media-manager").slice(0, 60), ts, by };
           fs.appendFileSync(path.join(args.sliceRoot, "selections.jsonl"), JSON.stringify(rec) + "\n");
-          const focus = { surface: rec.surface, selection: rec.assets, view: "", note: rec.name || "",
-            pinned: true, ts, by };
-          fs.writeFileSync(path.join(args.sliceRoot, "focus.json"), JSON.stringify(focus, null, 1));
           return sendJson(res, 200, { ok: true });
         } catch (error) { sendJson(res, 400, { ok: false, error: error.message }); }
       });
       return;
     }
-    if (url.pathname === "/api/focus" && req.method === "POST") {
-      // the human-attention bridge : surfaces report what the
-      // human has selected/pinned; seats read <bundle>/focus.json when the
-      // human says "these". Attributed + durable, like every UI gesture.
-      let body = "";
-      req.on("data", (c) => (body += c));
-      req.on("end", () => {
-        try {
-          const j = JSON.parse(body);
-          const email = req.headers["cf-access-authenticated-user-email"];
-          const by = email ? `${String(email).split("@")[0].replace(/[^a-z0-9.]/gi, "")}-ui` : "local-ui";
-          const focus = {
-            surface: String(j.surface || "unknown").slice(0, 60),
-            selection: (Array.isArray(j.selection) ? j.selection : []).slice(0, 200).map(String),
-            view: String(j.view || "").slice(0, 40),
-            note: String(j.note || "").slice(0, 2000),
-            ts: new Date().toISOString(), by,
-          };
-          fs.writeFileSync(path.join(args.sliceRoot, "focus.json"), JSON.stringify(focus, null, 1));
-          sendJson(res, 200, { ok: true });
-        } catch (error) { sendJson(res, 400, { ok: false, error: error.message }); }
-      });
-      return;
-    }
+    // POST /api/focus WAS HERE AND IS THE RUNTIME'S. `/api/focus` and
+    // `/api/drive` are reserved: the studio routes them to the runtime before
+    // any provider table is consulted, so this handler had become unreachable —
+    // dead code that still looked like the implementation.
+    //
+    // It is deleted rather than left, because the shape it left behind was the
+    // one that caused the reservation in the first place: this implemented POST
+    // only, the declaration captured BOTH methods, and GET /api/focus answered
+    // 404 while /api/contract went on advertising focus as a capability.
+    //
+    // ONE THING GOT WORSE IN THE MOVE AND IT IS WRITTEN DOWN RATHER THAN GLOSSED:
+    // this derived `by` from the cf-access header, which is a REAL identity
+    // behind an access proxy. The runtime derives one only when the operator
+    // configures --identity-header (or OPENRIG_STUDIO_IDENTITY_HEADER) and
+    // otherwise records what the caller declared. On loopback that is the same
+    // answer; on a studio published behind Cloudflare Access it is not, and the
+    // deployment unit is where that gets set. contract/focus.md is explicit that
+    // trusting an inbound header by DEFAULT would be worse than caller-declared,
+    // so the config step is deliberate and not an oversight to be automated away.
     if (url.pathname === "/api/curation" && req.method === "GET") {
       // server-to-server proxy to the CUTDOWN surface's cut/version/lock
       // state (same box, no CORS/auth seams). Absent cutdown -> graceful
@@ -1482,8 +1490,39 @@ const server = http.createServer((req, res) => {
   }
 });
 
+// RETIRE A focus.json THIS PROVIDER LEFT BEHIND.
+//
+// Focus moved to the runtime's GET/POST /api/focus and nothing writes this file
+// any more. That is the dangerous half of the migration: the file does not
+// disappear, it FREEZES — and a seat that reads it by convention keeps getting a
+// well-formed record with a plausible timestamp that stopped being true the day
+// the writer was removed. Deleting the writer without touching the reader would
+// have shipped exactly the healthy-and-wrong shape this whole contract exists
+// to remove.
+//
+// So it is replaced in place, once, with a record that says where focus went.
+// In place rather than deleted, because a seat doing `cat focus.json` should
+// get an ANSWER and not ENOENT; and the last record is kept inside it, because
+// retiring a convention is not a reason to destroy what it last said.
+function retireFocusFile() {
+  const p = path.join(args.sliceRoot, "focus.json");
+  let prior;
+  try { prior = JSON.parse(fs.readFileSync(p, "utf8")); } catch { return; }  // absent or unreadable: nothing to retire
+  if (prior && prior._retired) return;                                       // already done; this runs on every boot
+  fs.writeFileSync(p, JSON.stringify({
+    _retired: true,
+    _read_focus_from: "GET /api/focus on the studio's origin",
+    _why: "Focus is served by the runtime now, over HTTP, so an agent that is not on this box can "
+        + "read it. This file was only ever readable by a local process and it is no longer written "
+        + "— anything below is the LAST value it held, not the current one.",
+    _last_written_by_this_file: prior,
+  }, null, 1) + "\n");
+  console.log(`focus: ${p} retired — focus is served at GET /api/focus`);
+}
+
 server.listen(args.port, args.host, () => {
   console.log(`timeline export server: http://${args.host}:${args.port}/timeline-viewer.html`);
+  try { retireFocusFile(); } catch (e) { console.error(`focus: could not retire focus.json — ${e.message}`); }
   // notes written while the daemon was down get a fresh chance
   flushPendingNotes().then((flushed) => {
     if (flushed.length) console.log(`flushed ${flushed.length} pending review note(s): ${flushed.join(", ")}`);

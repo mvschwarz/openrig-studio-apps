@@ -25,14 +25,6 @@
     filter:blur(56px) saturate(1.2) brightness(.9); transform:scale(1.1); }
   body > * { position:relative; z-index:1; }
 
-  header { display:flex; align-items:center; gap:12px; padding:12px 16px;
-    border-bottom:1px solid var(--line); }
-  header h1 { font-size:12px; letter-spacing:.22em; margin:0; font-weight:700; }
-  #crumb { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis;
-    white-space:nowrap; flex:1; }
-  #status { font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
-  #status.dirty { color:var(--coral); }
-  #status.saved { color:var(--body); }
   .btn { background:var(--fg); color:#111; border:none; border-radius:2px;
     font-family:var(--sans); font-size:9px; letter-spacing:.18em; text-transform:uppercase;
     font-weight:600; padding:7px 14px; cursor:pointer; }
@@ -96,13 +88,13 @@
 </style>
 </head>
 <body>
-<header>
-  <h1>FILES</h1>
-  <div id="crumb"></div>
-  <span id="status"></span>
-  <button class="ghost" id="rawBtn" style="display:none">RAW</button>
-  <button class="btn" id="saveBtn" style="display:none">SAVE</button>
-</header>
+<!-- NO TITLE BAR HERE ON PURPOSE. The shell already draws one, and this surface
+     DECLARES its half of it (contract/shell-protocol.md: the header's left half
+     belongs to the app, the right half to the shell). Drawing our own put two
+     headers on one screen, and switching surfaces flipped between one and two —
+     which reads as a set of pages rather than one application. The title, the
+     path, the save state and both buttons are all still there; they are sent,
+     not drawn. See declareHeader() below. -->
 <div class="body">
   <nav id="rail">
     <div class="lens">
@@ -202,11 +194,8 @@
     setActive(el);
     const d = await api("/api/files/read?path=" + encodeURIComponent(p));
     if (!d.ok) { $("viewer").innerHTML = `<div id="empty">${esc(d.error || "unreadable")}</div>`; return; }
-    Object.assign(st, { file:p, kind:d.kind, mtime:d.mtime, dirty:false, mode:"preview" });
-    $("crumb").textContent = p;
-    $("saveBtn").style.display = (d.kind === "markdown" || d.kind === "text") ? "" : "none";
-    $("rawBtn").style.display = (d.kind === "markdown" || d.kind === "html") ? "" : "none";
-    $("rawBtn").classList.remove("on");
+    Object.assign(st, { file:p, kind:d.kind, mtime:d.mtime, dirty:false, mode:"preview", note:"" });
+    declareHeader();
     render(d);
     // agent co-editing: watch mtime; refresh view when someone else writes
     st.watch = setInterval(async () => {
@@ -248,13 +237,50 @@
     }
   }
   function wireEditor() {
-    $("ed").addEventListener("input", () => { st.dirty = true; status("unsaved", "dirty"); });
+    $("ed").addEventListener("input", () => { st.dirty = true; status("unsaved"); });
     $("ed").addEventListener("keydown", (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); save(); }
     });
   }
-  const status = (t, cls) => { const s = $("status"); s.textContent = t; s.className = cls || ""; };
-  const flash = (t) => { status(t, "saved"); setTimeout(() => !st.dirty && status(""), 2500); };
+  // ---- our half of the shell's header ---------------------------------------
+  //
+  // DECLARED, never drawn. The shell renders it, which is what keeps exactly one
+  // header on screen and keeps the shell from being handed markup it did not
+  // write. Everything the old <header> held is here: the title, the path, the
+  // save state, and the two buttons.
+  //
+  // Which buttons exist is a function of what is open, so this is called on
+  // every state change rather than once at load. An action that is not offered
+  // is ABSENT rather than disabled — a SAVE that cannot save is worse than no
+  // SAVE, and the old bar hid them with display:none for the same reason.
+  function declareHeader() {
+    const actions = [];
+    if (st.kind === "markdown" || st.kind === "html") {
+      actions.push({ id: "raw", label: "RAW", on: st.mode === "raw" });
+    }
+    if (st.kind === "markdown" || st.kind === "text") {
+      actions.push({ id: "save", label: st.dirty ? "SAVE •" : "SAVE" });
+    }
+    // The save state used to be its own element beside the path. It rides the
+    // crumb now, because the crumb is the app's one line of free text and two
+    // slots for one sentence is how they drift apart.
+    //
+    // With nothing open the crumb is OMITTED rather than sent empty: an absent
+    // field keeps the shell's own hint from the manifest, and a blank one
+    // replaces it with nothing. "Nothing to say" and "say nothing" are
+    // different instructions and the contract distinguishes them.
+    const crumb = [st.file || "", st.note || ""].filter(Boolean).join("  ·  ");
+    parent.postMessage({ t: "header", title: "FILES", actions,
+      ...(crumb ? { crumb } : {}) }, "*");
+  }
+  window.addEventListener("message", (e) => {
+    if (e.data?.t !== "header-action") return;
+    if (e.data.id === "save") save();
+    if (e.data.id === "raw") toggleRaw();
+  });
+
+  const status = (t) => { st.note = t; declareHeader(); };
+  const flash = (t) => { status(t); setTimeout(() => !st.dirty && status(""), 2500); };
 
   async function save() {
     const ed = $("ed"); if (!ed) return;
@@ -270,16 +296,15 @@
       }
       return;
     }
-    if (!r.ok) { status(r.error || "save failed", "dirty"); return; }
+    if (!r.ok) { status(r.error || "save failed"); return; }
     st.mtime = r.mtime; st.dirty = false; st.content = ed.value;
     flash("saved");
   }
-  $("saveBtn").onclick = save;
-  $("rawBtn").onclick = () => {
+  function toggleRaw() {
     st.mode = st.mode === "raw" ? "preview" : "raw";
-    $("rawBtn").classList.toggle("on", st.mode === "raw");
+    declareHeader();
     api("/api/files/read?path=" + encodeURIComponent(st.file)).then(render);
-  };
+  }
   $("lensTree").onclick = () => { st.lens = "tree"; $("lensTree").classList.add("on"); $("lensTags").classList.remove("on"); renderRoots(); };
   $("lensTags").onclick = () => { st.lens = "tags"; $("lensTags").classList.add("on"); $("lensTree").classList.remove("on"); renderTags(); };
 
@@ -342,6 +367,10 @@
   });
 
   renderRoots();
+  // Declare at load as well as on every change: without this the shell shows the
+  // manifest's name and hint until the first file is opened and then swaps to
+  // ours, so the header changes shape for a reason the user did nothing to cause.
+  declareHeader();
   window.__files = { openFile, save, st };
 })();
 </script>

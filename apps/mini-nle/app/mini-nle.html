@@ -4811,9 +4811,16 @@
     // here. Selecting a card slot also jumps the card browser to that card.
     let nleFocusTimer = null;
     function nleReportFocus() {
-      // the human-attention bridge : the sidebar agent reads
-      // <bundle>/focus.json when the human says "this slot" — same
-      // contract the media manager writes. Debounced, fire-and-forget.
+      // The human-attention bridge: an agent asks GET /api/focus what the
+      // human is looking at when they say "this slot". Same contract the media
+      // manager and canvas write. Debounced, fire-and-forget.
+      //
+      // IT IS THE VERB, NOT THE FILE. This used to say the agent reads
+      // <bundle>/focus.json, and for a while that was how seats actually did
+      // it — the write verb had no matching read, so there was nothing else to
+      // do. Reading the record off disk only ever worked for a consumer on this
+      // machine, which excludes every remote agent, and it is the gap
+      // contract/focus.md was written to close.
       clearTimeout(nleFocusTimer);
       nleFocusTimer = setTimeout(() => {
         fetch("/api/focus", { method: "POST", headers: { "content-type": "application/json" },

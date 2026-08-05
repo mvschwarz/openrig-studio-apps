@@ -19,7 +19,12 @@
 // know whether it is and say so. So no-rig is now an explicit, written state
 // with a reason, not an absence.
 //
-// Usage: node live-state.mjs --out <dir> [--interval <ms>] [--once]
+// Usage: node live-state.mjs --out <dir> [--rig <name>] [--interval <ms>] [--once]
+//
+// --rig pins which rig the floor is about. Without it the rig is resolved the
+// same way the SDK's seat roster resolves it — whoami's identity, then the box's
+// only rig — because the floor and the sidebar sit on one screen and must not
+// answer that question differently.
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -27,6 +32,7 @@ import { execFile } from "node:child_process";
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i > -1 && argv[i + 1] ? argv[i + 1] : d; };
 const OUT = arg("--out", "");
+const RIG = arg("--rig", "");
 const INTERVAL = Number(arg("--interval", "10000"));
 const ONCE = argv.includes("--once");
 
@@ -83,11 +89,46 @@ export async function buildLiveState(options = {}) {
       detail: psResult.detail };
   }
   const psRaw = psResult.value;
-  const nodes = Array.isArray(psRaw) ? psRaw : psRaw.nodes || [];
-  if (!nodes.length) {
+  const all = Array.isArray(psRaw) ? psRaw : psRaw.nodes || [];
+  if (!all.length) {
     return { rig: null, attached: false, reason: "no-rig", seats: [], queue: [],
       detail: "this box has no rig running; one can be started here" };
   }
+
+  // SCOPE TO ONE RIG. This used to emit every node on the box: measured here,
+  // 92 seats across 12 rigs, under a header reading LIVE ACTIVITY and a green
+  // dot. A floor is what THIS studio is attached to, and a fleet-wide union is
+  // not a bigger version of that — it is a different claim, made silently.
+  //
+  // Same precedence, and for the same reason, as the SDK's own seat roster
+  // (tools/seat-roster.mjs): an explicit setting, then whoami's identity, then
+  // the box's only rig. The two derivations sit either side of one screen — the
+  // sidebar and the floor — so a floor that resolved its rig differently would
+  // put two disagreeing answers in front of the same person.
+  //
+  // The earlier attempt at this problem captioned the union with every rig name
+  // joined by "·". That names the ambiguity without resolving it: the caption
+  // gets longer and the seat list stays wrong.
+  const rigsOnBox = [...new Set(all.map((n) => n.rigName).filter(Boolean))];
+  let rig = options.rig || null;
+  let ambiguity = null;
+  if (!rig) {
+    const who = await runRig(["whoami", "--json"]);
+    rig = (who.ok ? who.value?.identity?.rigName : null) || null;
+  }
+  if (!rig) {
+    if (rigsOnBox.length === 1) rig = rigsOnBox[0];
+    else if (rigsOnBox.length > 1) {
+      // Cannot tell which rig is ours. Narrowing to a guess would be worse than
+      // the union — it would look right. Say so, and let the surface caption it.
+      ambiguity = `${rigsOnBox.length} rigs on this box and no identity to choose between them: ${rigsOnBox.join(", ")}`;
+      rig = rigsOnBox.join(" · ");
+    }
+  }
+  // A named rig that no node belongs to is a stale name, not an empty floor;
+  // fall back to the union rather than showing zero seats under a live dot.
+  const scoped = rig && rigsOnBox.includes(rig) ? all.filter((n) => n.rigName === rig) : all;
+  const nodes = scoped.length ? scoped : all;
 
   const seats = nodes.map((n) => {
     const [pod, member] = String(n.logicalId || "").split(".");
@@ -120,30 +161,21 @@ export async function buildLiveState(options = {}) {
       title: q.summary ? String(q.summary).split(/(?<=\.)\s/)[0].slice(0, 120) : q.qitemId,
     }));
 
-  // A box can host more than one rig, and naming the first one found would
-  // caption every seat on the box with whichever rig happened to sort first —
-  // a floor reading "kernel" over eleven seats that mostly belong to another
-  // rig. Name one when there is one, name them all when there are several.
-  //
-  // A structured `rigs` array would let a surface be smarter than the caption,
-  // but the runtime's observe envelope is built field by field and does not
-  // carry one — emitting it here would ship a declaration that silently never
-  // arrives, which is the defect this file exists to avoid. It belongs in the
-  // envelope contract first, and that is the runtime's to add.
-  const rigNames = [...new Set(nodes.map((n) => n.rigName).filter(Boolean))];
-  const rig = rigNames.length === 1 ? rigNames[0]
-    : rigNames.length ? rigNames.join(" · ")
-    : "rig";
-  return { rig, attached: true, reason: null, seats, queue };
+  // `reason` carries the ambiguity when there was one, so a floor showing a
+  // union says WHY rather than presenting it as this studio's rig. Attached is
+  // still true — there are real seats on screen; what is uncertain is which of
+  // them are ours.
+  return { rig: rig || "rig", attached: true, reason: ambiguity ? "ambiguous-rig" : null,
+    seats, queue, ...(ambiguity ? { detail: ambiguity } : {}) };
 }
 
 // Safe by construction rather than by validation: the directory comes from the
 // studio's own configuration, never from a request, and the filename is fixed
 // here. There is no caller-supplied path to sanitise because none is accepted.
-export async function writeLiveState(outDir) {
+export async function writeLiveState(outDir, options = {}) {
   if (!outDir) throw new Error("live-state: --out <dir> is required");
   const dir = path.resolve(outDir);
-  const state = await buildLiveState();
+  const state = await buildLiveState(options);
   fs.mkdirSync(dir, { recursive: true });
   const target = path.join(dir, "factory-state.json");
   const next = JSON.stringify(state, null, 2) + "\n";
@@ -157,8 +189,9 @@ export async function writeLiveState(outDir) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const tick = async () => {
     try {
-      const s = await writeLiveState(OUT);
+      const s = await writeLiveState(OUT, RIG ? { rig: RIG } : {});
       if (!s.attached) console.log(`live-state: ${s.reason} — ${s.detail}`);
+      else if (s.reason === "ambiguous-rig") console.log(`live-state: ${s.detail} — pass --rig <name> to scope the floor`);
     } catch (e) {
       // Fail loudly and keep going: a state generator that dies silently
       // leaves the last-written state on screen looking current.

@@ -74,9 +74,6 @@
     "/api/export-status/": {
       "required": true
     },
-    "/api/focus": {
-      "required": true
-    },
     "/api/health": {
       "required": true
     },
@@ -114,6 +111,7 @@
       "required": true
     }
   },
+  "_focus_note": "/api/focus IS NOT DECLARED IN calls{} AND ITS ABSENCE IS DELIBERATE. `calls` says what this app needs a PROVIDER to answer, and no provider answers focus: it is reserved to the runtime (with /api/drive, /api/contract, /api/events, /api/factory/state) and served unconditionally. Declaring it here was harmless only while @openrig/studio-video also declared it — that declaration was itself the defect the reservation removed, and with it gone a `required: true` focus call makes the box REFUSE TO START for a verb that is always present. KNOWN GAP, NOT A CLOSED QUESTION: the resolver answers 'does an installed PROVIDER declare this?' and never asks 'does the RUNTIME serve it?', so today there is no honest way to say 'I depend on the runtime for this'. When it resolves against providers UNION runtime-owned verbs, these declarations can come back as required and mean it. See the rebind/dependency design filed with the SDK. The manifest format was never wrong here; the resolver is.",
   "_calls_note": "What this app CALLS — a different fact from what a provider ANSWERS. It was `verbs`, a flat list doing double duty: authored by the app to mean a dependency, consumed by the composer as provider routing. That double duty is how a route could exist only because some unrelated app declared it.",
   "vendor": [],
   "requires": {

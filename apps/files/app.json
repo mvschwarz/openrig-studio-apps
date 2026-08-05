@@ -2,7 +2,7 @@
   "manifest_version": 1,
   "id": "files",
   "name": "FILES",
-  "summary": "Browse, search, tag and edit \u2014 including the studio's own source, so the agent can reshape the app you are looking at.",
+  "summary": "Browse, search, tag and edit — including the studio's own source, so the agent can reshape the app you are looking at.",
   "category": "studio",
   "maker": {
     "name": "OpenRig",
@@ -11,8 +11,8 @@
   "surface": {
     "entry": "app/files.html",
     "path": "/surfaces/files.html",
-    "glyph": "\u25a4",
-    "hint": "browse, search, tag and edit your media and source \u2014 the agent can drive it"
+    "glyph": "▤",
+    "hint": "browse, search, tag and edit your media and source — the agent can drive it"
   },
   "roots": {
     "media": {
@@ -23,19 +23,32 @@
     }
   },
   "calls": {
-    "/api/files/tree": { "required": true },
-    "/api/files/read": { "required": true },
-    "/api/files/write": { "required": true },
-    "/api/files/raw": { "required": true },
-    "/api/files/search": { "required": true },
-    "/api/files/tags": { "required": true },
-    "/api/files/goto": { "required": true },
-    "/api/files/roots": { "required": true },
-    "/api/focus": {
-      "required": false,
-      "_note": "DECLARED AT LAST, and deliberately optional. This surface has always CALLED focus and never declared it, so the route existed only because canvas, media-manager and mini-nle happen to be co-installed and THEIR declarations built it — a studio with just FILES lost focus silently. Optional is the honest setting: focus is a nicety for a file browser, and an unmatched optional call warns and starts nothing. Marking it required would start the whole video provider on a box that wanted a file browser."
+    "/api/files/tree": {
+      "required": true
+    },
+    "/api/files/read": {
+      "required": true
+    },
+    "/api/files/write": {
+      "required": true
+    },
+    "/api/files/raw": {
+      "required": true
+    },
+    "/api/files/search": {
+      "required": true
+    },
+    "/api/files/tags": {
+      "required": true
+    },
+    "/api/files/goto": {
+      "required": true
+    },
+    "/api/files/roots": {
+      "required": true
     }
   },
+  "_focus_note": "/api/focus IS NOT DECLARED IN calls{} AND ITS ABSENCE IS DELIBERATE. `calls` says what this app needs a PROVIDER to answer, and no provider answers focus: it is reserved to the runtime (with /api/drive, /api/contract, /api/events, /api/factory/state) and served unconditionally. Declaring it here was harmless only while @openrig/studio-video also declared it — that declaration was itself the defect the reservation removed, and with it gone a `required: true` focus call makes the box REFUSE TO START for a verb that is always present. KNOWN GAP, NOT A CLOSED QUESTION: the resolver answers 'does an installed PROVIDER declare this?' and never asks 'does the RUNTIME serve it?', so today there is no honest way to say 'I depend on the runtime for this'. When it resolves against providers UNION runtime-owned verbs, these declarations can come back as required and mean it. See the rebind/dependency design filed with the SDK. The manifest format was never wrong here; the resolver is.",
   "_calls_note": "What this app CALLS — a different fact from what a provider ANSWERS. It was `verbs`, a flat list doing double duty: authored by the app to mean a dependency, consumed by the composer as provider routing. That double duty is how a route could exist only because some unrelated app declared it.",
   "vendor": [
     "marked"

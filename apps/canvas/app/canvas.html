@@ -23,29 +23,14 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); overflow: hidden; }
-  header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
-  header h1 { font: 600 13px var(--sans); letter-spacing: 0.08em; color: var(--ink); margin: 0; text-transform: uppercase; }
-  header .sub { color: var(--dim); font-size: 11px; }
-  header .spacer { flex: 1; }
-  header button { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
-    border-radius: 2px; font: 11.5px var(--sans); padding: 4px 10px; cursor: pointer; }
-  header button:hover { border-color: rgba(255,255,255,.35); color: var(--ink); }
-  /* PIN -> AGENT is the primary chrome action: ACTIVE = INVERT (solid, black text) */
-  #pinBtn { background: var(--ink); color: #111; border-color: var(--ink); font-weight: 600; }
-  #pinBtn:hover { border-color: var(--ink); color: #111; opacity: .9; }
-  #sync { font-size: 10px; color: var(--dim); letter-spacing: .05em; }
-  #sync.dirty { color: var(--coral); }
+  /* The board tabs, the sync line and PIN -> AGENT were styled here when this
+     surface drew its own bar. They are declared to the shell now, which styles
+     them, so their CSS is gone rather than left behind matching nothing. */
 
-  /* ---- canvas tabs: boards are files, pages live inside a board ---- */
-  #tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; }
-  #tabs .tab { border: 1px solid var(--line); border-bottom-color: transparent; border-radius: 2px 2px 0 0;
-    background: var(--bg); color: var(--dim); font: 11px var(--sans); padding: 4px 12px 5px;
-    cursor: pointer; white-space: nowrap; letter-spacing: .04em; }
-  #tabs .tab:hover { color: var(--ink); }
-  #tabs .tab.on { background: var(--ink); color: #111; border-color: var(--ink); font-weight: 600; }
-  #tabs .tab.add { padding: 4px 9px 5px; font-weight: 600; }
-
-  .body { display: grid; grid-template-columns: 230px minmax(0, 1fr); height: calc(100vh - 62px); }
+  /* 100vh, not calc(100vh - 62px): that 62 was this surface's own header, and
+     leaving it would reserve a strip for a bar that is no longer drawn. A
+     stale magic number is the usual souvenir of deleting chrome. */
+  .body { display: grid; grid-template-columns: 230px minmax(0, 1fr); height: 100vh; }
 
   /* ---- assets rail: the unified index; tags optional, never required ---- */
   #rail { border-right: 1px solid var(--line); overflow-y: auto; padding: 8px 0; background: var(--panel); }
@@ -101,13 +86,10 @@
 </style>
 </head>
 <body>
-<header>
-  <h1>Canvas</h1>
-  <div id="tabs"></div>
-  <span class="spacer"></span>
-  <span id="sync">—</span>
-  <button id="pinBtn" title="hand the selected media cards to the agent as a named durable selection">PIN → AGENT</button>
-</header>
+<!-- NO TITLE BAR HERE ON PURPOSE. The shell already draws one; this surface
+     DECLARES its half (contract/shell-protocol.md). Board tabs, the sync line
+     and PIN → AGENT all still exist — they are sent as the app's title, crumb
+     and actions rather than painted into a second bar. See declareHeader(). -->
 <div class="body">
   <nav id="rail">
     <h3>Assets</h3>
@@ -154,6 +136,7 @@
     editor: null,
     canvas: null,       // active board slug (tabs); pages organize WITHIN a board
     canvases: [],
+    sync: "",           // the sync line, declared into the shell header's crumb
     rev: 0,
     lastSynced: null,   // the document at the last successful sync — 3-way merge base
     dirty: false,
@@ -191,7 +174,14 @@
   const post = (pathname, body) => api(pathname, { method: "POST",
     headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
-  const setSync = (text, dirty) => { $("sync").textContent = text; $("sync").classList.toggle("dirty", !!dirty); };
+  // The sync line rides the crumb — the app's one line of free text in the
+  // header it declares. `dirty` no longer has a colour to set, so it is folded
+  // into the words: a state you can only see as a shade is a state a screenshot
+  // cannot report.
+  const setSync = (text, dirty) => {
+    state.sync = dirty && text ? `⚠ ${text}` : (text || "");
+    declareHeader();
+  };
 
   /* ================= sync engine: autosave + rev discipline ================ */
 
@@ -279,28 +269,56 @@
 
   /* ================= boards: tabs + switching ================= */
 
-  function renderTabs() {
-    const tabs = $("tabs"); tabs.innerHTML = "";
-    for (const c of state.canvases) {
-      const b = document.createElement("button");
-      b.className = "tab" + (c.slug === state.canvas ? " on" : "");
-      b.textContent = c.slug;
-      b.title = c.updated_by ? `rev ${c.rev} · last by ${c.updated_by}` : "empty board";
-      b.onclick = () => switchCanvas(c.slug);
-      tabs.appendChild(b);
-    }
-    const add = document.createElement("button");
-    add.className = "tab add"; add.textContent = "+";
-    add.title = "new board (canvases are boards; use Pages inside a board for scenes/acts)";
-    add.onclick = async () => {
-      const name = await ask("Name the new board", "brand v3");
-      if (!name) return;
-      const r = await post("/api/canvases", { name });
-      state.canvases = r.canvases;
-      switchCanvas(r.slug);
-    };
-    tabs.appendChild(add);
+  // ---- our half of the shell's header ---------------------------------------
+  //
+  // DECLARED, never drawn. The boards are the interesting case: they were a row
+  // of tab buttons this surface painted, and they are actions now — one per
+  // board, with `on` marking the open one, plus "+" and PIN → AGENT. The shell
+  // does not know what any of them mean; it renders a label and posts the click
+  // back, which is the whole contract.
+  //
+  // Re-declared on every board change, because actions are cleared when the
+  // shown surface changes and a tab row that survived a switch-away would be
+  // showing a board list from before.
+  // THE SHELL RENDERS AT MOST SIX ACTIONS AND DROPS THE REST SILENTLY, so what
+  // goes in those six is decided here rather than left to however many boards
+  // happen to exist. Fixed controls first, then the ACTIVE board (which must
+  // never be the one that falls off — a board switcher that cannot show you
+  // which board you are on is worse than no switcher), then the others in order.
+  // Anything that does not fit is COUNTED in the crumb, so a truncated row says
+  // it is truncated instead of looking like the whole list.
+  const HEADER_ACTION_CAP = 6;
+  function declareHeader() {
+    const fixed = [{ id: "pin", label: "PIN → AGENT" }, { id: "board:new", label: "+" }];
+    const boards = [...state.canvases].sort((a, b) =>
+      (b.slug === state.canvas) - (a.slug === state.canvas));
+    const room = Math.max(0, HEADER_ACTION_CAP - fixed.length);
+    const shown = boards.slice(0, room);
+    const actions = [...fixed, ...shown.map((c) => ({
+      id: `board:${c.slug}`, label: c.slug, on: c.slug === state.canvas,
+    }))];
+    const hidden = boards.length - shown.length;
+    const crumb = [state.sync || "", hidden ? `+${hidden} more board${hidden > 1 ? "s" : ""}` : ""]
+      .filter(Boolean).join("  ·  ");
+    parent.postMessage({ t: "header", title: "CANVAS", crumb, actions }, "*");
   }
+  window.addEventListener("message", (e) => {
+    if (e.data?.t !== "header-action") return;
+    const id = String(e.data.id || "");
+    if (id === "pin") return pinToAgent();
+    if (id === "board:new") return newBoard();
+    if (id.startsWith("board:")) return switchCanvas(id.slice("board:".length));
+  });
+
+  async function newBoard() {
+    const name = await ask("Name the new board", "brand v3");
+    if (!name) return;
+    const r = await post("/api/canvases", { name });
+    state.canvases = r.canvases;
+    switchCanvas(r.slug);
+  }
+
+  function renderTabs() { declareHeader(); }
 
   async function loadCanvasDoc(slug) {
     state.loading = true;
@@ -342,16 +360,23 @@
     }, 600);
   }
 
-  $("pinBtn").onclick = async () => {
+  async function pinToAgent() {
     const shapes = state.editor ? state.editor.getSelectedShapes() : [];
     const assets = shapes.map((s) => s.meta?.assetName).filter(Boolean);
     if (!assets.length) { setSync("select media cards first", true); return; }
     const name = await ask("Name this selection (optional — e.g. 'act 2 boards')", "act 2 boards");
     if (name === null) return;
     await post("/api/selections", { name, assets, surface: "canvas" });
+    // A PIN IS ALSO A STATEMENT OF FOCUS, and the surface makes it — the
+    // selections verb used to write focus as a side effect, which made it a
+    // second focus writer that blanked `view` and basenamed every path. Naming
+    // only surface/selection/note leaves `view` (the board and page this
+    // surface reports) exactly as it was.
+    fetch("/api/focus", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ surface: "canvas", selection: assets, note: name || "" }) }).catch(() => {});
     try { parent.postMessage({ t: "open-agent" }, "*"); } catch {}
     setSync(`pinned ${assets.length} → agent`, false);
-  };
+  }
 
   /* ================= media placement from the unified index ================ */
 

@@ -27,9 +27,6 @@
   body > * { position: relative; z-index: 1; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 var(--mono); }
-  header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
-  header h1 { font: 600 13px var(--mono); letter-spacing: 0.08em; color: var(--amber); margin: 0; text-transform: uppercase; }
-  header .sub { color: var(--dim); font-size: 11px; }
   .tools { display: flex; align-items: center; gap: 8px; padding: 8px 14px; flex-wrap: wrap; border-bottom: 1px solid var(--hairline); }
   input[type="search"], select, button, input[type="text"] {
     background: var(--well); color: var(--ink); border: 1px solid var(--line);
@@ -134,10 +131,9 @@
 </style>
 </head>
 <body>
-<header>
-  <h1>Media Manager</h1>
-  <span class="sub" id="projectName">loading...</span>
-</header>
+<!-- NO TITLE BAR HERE ON PURPOSE. The shell already draws one; this surface
+     DECLARES its half (contract/shell-protocol.md). See declareHeader() below —
+     the title and the project path are sent, not drawn. -->
 <div class="tools">
   <input id="search" type="search" placeholder="filter by name, note, tag, path">
   <button id="viewLocked" aria-pressed="true" title="each cut collapsed to its locked version (locked versions)">Locked</button>
@@ -381,6 +377,14 @@
       if (name === null) return;
       await api("/api/selections", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, assets: ctxAssets, surface: "media-manager" }) });
+      // A PIN IS ALSO A STATEMENT OF FOCUS, and the surface makes it — the
+      // selections verb used to write focus as a side effect, which made it a
+      // second focus writer that blanked `view` and basenamed every path.
+      // Naming only surface/selection/note leaves `view` exactly as it was: a
+      // field-scoped write updates what it names and nothing else.
+      fetch("/api/focus", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ surface: "media-manager", selection: ctxAssets,
+          note: name || "" }) }).catch(() => {});
       try { parent.postMessage({ t: "open-agent" }, "*"); } catch {}
       $("status").textContent = `Pinned ${ctxAssets.length} item(s)${name ? ` as "${name}"` : ""} — tell the agent what to do with them.`;
     };
@@ -521,9 +525,19 @@
   }
   $("search").addEventListener("input", render);
   $("refresh").addEventListener("click", load);
+  // ---- our half of the shell's header ---------------------------------------
+  // Declared, never drawn: the shell renders it, so there is one header on
+  // screen instead of two. Nothing here is new — it is the same title and the
+  // same project path the surface used to paint itself.
+  const declareHeader = (crumb) =>
+    parent.postMessage({ t: "header", title: "MEDIA MANAGER", crumb: crumb ?? "" }, "*");
+  declareHeader("loading…");
   fetch("/api/patch").then((r) => r.json()).then((p) => {
-    $("projectName").textContent = (p.timelinePath || "").split("/").slice(-2).join("/");
-  }).catch(() => { $("projectName").textContent = "(server offline?)"; });
+    declareHeader((p.timelinePath || "").split("/").slice(-2).join("/"));
+    // A crumb that never resolves past "loading…" is the failure this catch
+    // exists for: say the backend is unreachable rather than leaving a word that
+    // reads like progress.
+  }).catch(() => declareHeader("(server offline?)"));
   load();
 })();
 </script>

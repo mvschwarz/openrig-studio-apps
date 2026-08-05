@@ -4,8 +4,12 @@
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
-    "test": "node --test ../../test/live-state.test.mjs"
+    "test": "npm run verify:containment && npm run test:boundary && npm run verify:controls && node --test ../../test/live-state.test.mjs",
+    "verify:containment": "node verify-containment.mjs",
+    "test:boundary": "node test-boundary.mjs",
+    "verify:controls": "node verify-controls.mjs"
   },
+  "_scripts_note": "The containment checkers came WITH the backend when it moved out of the studio repo's scripts/ into this provider — a control left behind in the repo the code moved OUT of keeps passing forever and guards nothing. They were half-left-behind once already: `test` ran only live-state, so test-boundary.mjs sat in this directory FAILING and unrun, its no-dir case still demanding the retired two-shape filesTree. Chained with && so a non-zero anywhere fails the run, and never piped: a pipeline takes the LAST command's status, which is how a not-clean result clears a gate.",
   "description": "Host capabilities for studio apps: file browsing with root containment, and the seat roster/messaging that makes an app agent-managed.",
   "_note": "These verbs used to be special-cased as requires.host_capabilities and served by a private box. That meant FILES and AGENTS installed onto a public studio and rendered empty panes. They are an ordinary provider now \u2014 one mechanism instead of two."
 }
