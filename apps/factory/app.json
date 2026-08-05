@@ -29,5 +29,6 @@
   "provider": {
     "package": "@openrig/studio-factory",
     "required": true
-  }
+  },
+  "_drive_note": "Uses the SDK drive and focus primitives directly. Ops carry Factory intent: {intent:{title,intent,plan}, select:{rig,host,workflow}, preview:true, kickoff:{...options}, proof:{approve|approveAll}, say}. Runtime-owned /api/drive and /api/focus do not belong in calls{} because no provider answers them. window.factory remains the same richer page-handle API."
 }

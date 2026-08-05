@@ -188,7 +188,8 @@
   </div>
 </main>
 <div class="toast" id="toast"></div>
-<script>
+<script type="module">
+import { driveSurface } from "/signal.js";
 (() => {
   const $ = (id) => document.getElementById(id);
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -199,7 +200,7 @@
   const planLines = () => $("plan").value.split("\n").map((x)=>x.replace(/^\s*[-•]\s*/,"").trim()).filter(Boolean);
   function currentPayload(extra={}) { return { title:$("title").value.trim(), intent:$("intent").value.trim(), plan:planLines(), rig:F.rig, host:F.host, workflow:F.workflow, ...extra }; }
   function isRunning(rig) { return rig && !["stopped","recoverable"].includes(rig.status); }
-  function pick(id,value) { F[id]=value; document.querySelectorAll(`[data-group="${id}"]`).forEach((el)=>el.classList.toggle("selected",el.dataset.value===value)); updateLaunch(); if(id==="host") loadHostRigs(value); }
+  function pick(id,value) { F[id]=value; document.querySelectorAll(`[data-group="${id}"]`).forEach((el)=>el.classList.toggle("selected",el.dataset.value===value)); updateLaunch(); if(id==="host") loadHostRigs(value); reportFocus(); }
   function rigCard(r) { const count=Math.max(2,Math.min(4,r.nodes||2)); return `<button class="choice" data-group="rig" data-value="${esc(r.id)}"><div class="choice-title"><span class="dot ${esc(r.status)}"></span>${esc(r.id)}</div><div class="rig-picture"><span class="rig-node lead"></span>${Array.from({length:count-1},()=>'<span class="wire"></span><span class="rig-node"></span>').join("")}</div><div class="choice-meta">${r.running}/${r.nodes} seats · ${esc(r.status)}</div></button>`; }
   function hostCard(h) { return `<button class="choice" data-group="host" data-value="${esc(h.id)}"><div class="choice-title"><span class="dot ${esc(h.status)}"></span>${esc(h.id)}</div><div class="host-picture"><span class="host-box"></span><span class="host-line"></span><span class="dot ${esc(h.status)}"></span></div><div class="choice-meta">${esc(h.transport)} · ${esc(h.notes||h.status)}</div></button>`; }
   function workflowCard(w) { const nodes=/branched/.test(w.id)?3:/gate|triple/.test(w.id)?4:3; return `<button class="choice" data-kind="${esc(w.id)}" data-group="workflow" data-value="${esc(w.id)}"><div class="choice-title">${esc(w.id)} <span class="hint">v${esc(w.version)}</span></div><div class="workflow-picture">${Array.from({length:nodes},()=>'<span class="wf-node"></span>').join("")}</div><div class="choice-meta">${esc(w.purpose||"declared workflow")}</div></button>`; }
@@ -224,11 +225,33 @@
   async function approve(id) { const d=await api("/api/software-factory/proof",{method:"POST",body:JSON.stringify({op:"approve",id})}); toast("Proof approved; orchestrator notified"); await refresh(); return d; }
   async function approveAll() { const d=await api("/api/software-factory/proof",{method:"POST",body:JSON.stringify({op:"approve-all"})}); toast("Delivered proof approved in bulk"); await refresh(); return d; }
   async function refresh() { const d=await api("/api/software-factory/state"); renderState(d); return d; }
+  async function reportFocus(message) {
+    try {
+      const r=await fetch("/api/focus",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({surface:"factory",selection:{rig:F.rig,host:F.host,workflow:F.workflow},view:{mode:F.mode},note:message||"Factory machine selection",by:"factory-surface"})});
+      if(!r.ok) return null;
+      return r.json();
+    } catch { return null; }
+  }
+  async function setIntent(input={}) { if(input.title!==undefined)$("title").value=input.title;if(input.intent!==undefined)$("intent").value=input.intent;if(input.plan!==undefined)$("plan").value=[].concat(input.plan||[]).join("\n");return save(); }
+  async function select(input={}) { if(input.host&&input.host!==F.host){F.host=input.host;await loadHostRigs(input.host);}if(input.rig)pick("rig",input.rig);if(input.workflow)pick("workflow",input.workflow);const project=await save();await reportFocus();return project; }
+  async function applyDrive(op={}) {
+    if(op.intent) await setIntent(op.intent);
+    if(op.select) await select(op.select);
+    if(op.preview) await preview();
+    if(op.kickoff) await kickoff(typeof op.kickoff==="object"?op.kickoff:{});
+    if(op.proof?.approve) await approve(op.proof.approve);
+    if(op.proof?.approveAll) await approveAll();
+    if(op.say) toast(op.say);
+    await reportFocus(op.say);
+    return F.state;
+  }
   $("save").onclick=()=>save().catch((e)=>toast(e.message,true)); $("preview").onclick=()=>preview().catch((e)=>toast(e.message,true)); $("kickoff").onclick=()=>kickoff().catch(()=>{}); $("approveAll").onclick=()=>approveAll().catch((e)=>toast(e.message,true));
   $("askAgent").onclick=()=>{ const text=`Help me shape this intent into a short executable plan. Intent: ${$("intent").value.trim()||"(not written yet)"}`; parent.postMessage({t:"open-agent"},"*"); navigator.clipboard?.writeText(text).then(()=>toast("Prompt copied; agent sidebar opened")); };
   document.querySelectorAll("[data-mode]").forEach((b)=>b.onclick=()=>{ F.mode=b.dataset.mode; document.querySelectorAll("[data-mode]").forEach((x)=>x.classList.toggle("on",x===b)); loadProof(); });
   const ready=refresh();
-  window.factory={ ready, state:()=>F.state, refresh, setIntent:async(input)=>{ if(input.title!==undefined)$("title").value=input.title;if(input.intent!==undefined)$("intent").value=input.intent;if(input.plan!==undefined)$("plan").value=input.plan.join("\n");return save(); }, select:async(input)=>{ if(input.host&&input.host!==F.host){F.host=input.host;await loadHostRigs(input.host);}if(input.rig)pick("rig",input.rig);if(input.workflow)pick("workflow",input.workflow);return save(); }, preview, kickoff, proof:loadProof, approve, approveAll };
+  const drive=driveSurface({apply:applyDrive});
+  ready.then(()=>reportFocus()).catch(()=>{});
+  window.factory={ ready, state:()=>F.state, refresh, setIntent, select, preview, kickoff, proof:loadProof, approve, approveAll, drive:applyDrive, stopDrive:drive.stop };
 })();
 </script>
 </body>
