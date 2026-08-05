@@ -3,66 +3,75 @@
 <title>DESIGNER</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
+  /* Tokens taken from the FILES app rather than invented, so this reads as part
+     of the same product. Monospace is confined to the spec panel, where it is
+     genuinely code — the terminal look everywhere else was the thing to move
+     away from, not a house style to match. */
   :root{
-    color-scheme: dark;
-    --bg:#0b0e13; --panel:#121722; --line:#252c3a; --text:#f3f5f8; --muted:#929cad;
-    --fresh:#47d18c; --info:#6d9eff; --hot:#ff795f; --warm:#ffb44a;
+    --bg:#121214; --fg:rgba(255,255,255,.95); --body:rgba(255,255,255,.68);
+    --dim:rgba(255,255,255,.52); --faint:rgba(255,255,255,.38);
+    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.16);
+    --card:rgba(255,255,255,.07); --coral:#ff6b5a; --indigo:#8b93ff;
+    --sans:Helvetica,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
   }
   *{box-sizing:border-box}
   body{
-    margin:0; min-height:100vh;
-    background:radial-gradient(circle at 82% -4%, #172032 0, transparent 38%), var(--bg);
-    color:var(--text); font:14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    margin:0; min-height:100vh; background:var(--bg); color:var(--fg);
+    font-family:var(--sans); font-size:13.5px;
   }
-  header{padding:18px 22px 10px; border-bottom:1px solid var(--line)}
-  .eyebrow{color:var(--fresh); font-size:11px; letter-spacing:.16em; text-transform:uppercase}
-  h1{margin:4px 0 2px; font:600 clamp(24px,4vw,38px)/1.05 system-ui,sans-serif; letter-spacing:-.04em}
-  .sub{color:var(--muted); font-size:12px}
+  body::before{content:""; position:fixed; inset:-10%; z-index:0; pointer-events:none;
+    background:radial-gradient(42% 55% at 18% 22%, rgba(139,147,255,.08), transparent 70%),
+               radial-gradient(38% 50% at 82% 8%, rgba(255,107,90,.05), transparent 72%)}
+  body>*{position:relative; z-index:1}
 
-  .wrap{display:grid; grid-template-columns:1fr 340px; gap:0; align-items:start}
-  @media (max-width:900px){ .wrap{grid-template-columns:1fr} }
-  main{padding:18px 22px 40px; min-width:0}
-  aside{padding:18px 22px 40px; border-left:1px solid var(--line); position:sticky; top:0}
-  @media (max-width:900px){ aside{border-left:0; border-top:1px solid var(--line); position:static} }
+  header{padding:26px 30px 16px; border-bottom:1px solid var(--line)}
+  .eyebrow{color:var(--dim); font-size:9px; letter-spacing:.18em; text-transform:uppercase; font-weight:600}
+  h1{margin:6px 0 3px; font:600 clamp(26px,4vw,40px)/1.05 var(--sans); letter-spacing:-.025em}
+  .sub{color:var(--body); font-size:13px; max-width:62ch}
 
-  /* ---- the rig: a diagram, not a form ---- */
-  .rig{border:1px solid var(--line); border-radius:14px; background:linear-gradient(180deg,rgba(255,255,255,.025),transparent); padding:16px}
-  .rigname{font:600 20px/1.2 system-ui,sans-serif; letter-spacing:-.02em}
-  .rigmeta{color:var(--muted); font-size:11px; margin-top:2px}
-  .pods{display:flex; flex-wrap:wrap; gap:14px; margin-top:16px}
-  .pod{
-    flex:1 1 260px; border:1px solid var(--line); border-radius:12px; padding:12px;
-    background:var(--panel); position:relative; transition:border-color .18s, transform .18s;
-  }
+  .wrap{display:grid; grid-template-columns:1fr 360px}
+  @media (max-width:900px){.wrap{grid-template-columns:1fr}}
+  main{padding:22px 30px 48px; min-width:0}
+  aside{padding:22px 26px 48px; border-left:1px solid var(--line); position:sticky; top:0}
+  @media (max-width:900px){aside{border-left:0; border-top:1px solid var(--line); position:static}}
+
+  .rig{border:1px solid var(--line); border-radius:14px; background:var(--card); padding:18px}
+  .rigname{font:600 19px/1.2 var(--sans); letter-spacing:-.02em}
+  .rigmeta{color:var(--dim); font-size:11px; margin-top:3px}
+  .pods{display:flex; flex-wrap:wrap; gap:14px; margin-top:18px}
+  .pod{flex:1 1 250px; border:1px solid var(--line); border-radius:12px; padding:14px;
+       background:rgba(255,255,255,.03); transition:border-color .2s, transform .2s}
   .pod.new{animation:pop .5s ease}
-  @keyframes pop{from{transform:translateY(6px) scale(.985); border-color:var(--fresh)} to{transform:none}}
-  .podname{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--info)}
-  .podrole{color:var(--muted); font-size:11px; margin:3px 0 10px}
-  .seat{display:grid; grid-template-columns:18px 1fr; gap:9px; padding:8px 0; border-top:1px solid var(--line)}
+  @keyframes pop{from{transform:translateY(6px); border-color:var(--indigo)} to{transform:none}}
+  .podname{font-size:9px; letter-spacing:.16em; text-transform:uppercase; font-weight:600; color:var(--indigo)}
+  .podrole{color:var(--body); font-size:12px; margin:5px 0 12px}
+  .seat{display:grid; grid-template-columns:16px 1fr; gap:10px; padding:10px 0; border-top:1px solid var(--line)}
   .seat:first-of-type{border-top:0}
-  .dot{width:9px;height:9px;border-radius:50%;margin-top:5px;background:var(--muted)}
-  .dot.claude{background:#ad6755} .dot.codex{background:#e8e6e3} .dot.human{background:var(--warm)}
-  .sname{font-size:13px}
-  .sattr{color:var(--muted); font-size:11px; margin-top:2px; word-break:break-word}
-  .skills{margin-top:4px; display:flex; flex-wrap:wrap; gap:4px}
-  .skill{font-size:10px; padding:1px 6px; border:1px solid var(--line); border-radius:999px; color:var(--muted)}
-  .empty{color:var(--muted); padding:26px 8px; text-align:center; border:1px dashed var(--line); border-radius:12px}
+  .dot{width:8px;height:8px;border-radius:50%;margin-top:6px;background:var(--faint)}
+  .dot.claude{background:var(--coral)} .dot.codex{background:rgba(255,255,255,.85)} .dot.human{background:var(--indigo)}
+  .sname{font-size:13.5px; font-weight:600}
+  .sattr{color:var(--dim); font-size:11.5px; margin-top:2px}
+  .skills{margin-top:6px; display:flex; flex-wrap:wrap; gap:5px}
+  .skill{font-size:10px; padding:2px 8px; border:1px solid var(--line2); border-radius:999px; color:var(--body)}
+  .empty{color:var(--dim); padding:34px 8px; text-align:center; border:1px dashed var(--line2); border-radius:12px}
 
-  /* ---- the spec, taking shape ---- */
-  pre{margin:0; padding:12px; background:#0a0d12; border:1px solid var(--line); border-radius:10px;
-      font-size:11.5px; line-height:1.5; overflow:auto; max-height:44vh;
-      white-space:pre-wrap; overflow-wrap:anywhere}
-  .lbl{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin:0 0 8px}
-  .log{margin-top:16px; max-height:26vh; overflow:auto}
-  .op{border-left:2px solid var(--line); padding:4px 0 4px 9px; margin-bottom:7px; font-size:11.5px; color:var(--muted)}
-  .op b{color:var(--text); font-weight:600}
-  .op.newest{border-left-color:var(--fresh)}
-  button{font:inherit; font-size:12px; cursor:pointer; color:var(--text); background:rgba(255,255,255,.04);
-         border:1px solid var(--line); border-radius:8px; padding:7px 12px}
-  button:hover{border-color:rgba(255,255,255,.4)}
-  .row{display:flex; gap:8px; margin-top:12px; flex-wrap:wrap}
-  .hint{color:var(--muted); font-size:11px; margin-top:10px}
-  code{color:var(--info)}
+  .lbl{font-size:9px; letter-spacing:.16em; text-transform:uppercase; font-weight:600; color:var(--dim); margin:0 0 10px}
+  /* The one place monospace earns its keep: this is a file you will paste. */
+  pre{margin:0; padding:14px; background:rgba(0,0,0,.28); border:1px solid var(--line);
+      border-radius:10px; font-family:var(--mono); font-size:11.5px; line-height:1.55;
+      overflow:auto; max-height:44vh; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--body)}
+  .log{margin-top:18px; max-height:26vh; overflow:auto}
+  .op{border-left:2px solid var(--line2); padding:5px 0 5px 10px; margin-bottom:8px; font-size:12px; color:var(--dim)}
+  .op b{color:var(--fg); font-weight:600}
+  .op.newest{border-left-color:var(--indigo)}
+  button{font-family:var(--sans); font-size:9px; letter-spacing:.16em; text-transform:uppercase; font-weight:600;
+         cursor:pointer; color:var(--fg); background:rgba(255,255,255,.05);
+         border:1px solid var(--line2); border-radius:8px; padding:9px 15px}
+  button:hover{border-color:rgba(255,255,255,.42)}
+  .row{display:flex; gap:9px; margin-top:14px; flex-wrap:wrap}
+  .hint{color:var(--faint); font-size:11.5px; margin-top:14px; max-width:70ch}
+  code{font-family:var(--mono); font-size:11px; color:var(--indigo)}
 </style>
 
 <header>
@@ -99,14 +108,31 @@
 // to an agent on a box that already has one is not a feature, it is a fork.
 const EMPTY = { rig: null, summary: "", pods: [] };
 let spec = structuredClone(EMPTY);
-let marker = null, fresh = new Set();
+let marker = null, fresh = new Set(), primed = false;
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
 const count = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const runtimeOf = (s) => /claude/i.test(s?.runtime || "") ? "claude" : /codex/i.test(s?.runtime || "") ? "codex" : /human|operator/i.test(s?.runtime || "") ? "human" : "";
 
+// A design you lose on refresh makes people distrust the tool. The drive channel
+// keeps only the LAST op, so a page loading late sees one op against an empty
+// spec rather than a replay — persisting here is what makes a reload survivable
+// without asking the runtime to become a store.
+const SAVE = "rig-designer.spec";
+function persist() { try { localStorage.setItem(SAVE, JSON.stringify(spec)); } catch {} }
+function restore() {
+  try {
+    const raw = localStorage.getItem(SAVE);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    if (d && Array.isArray(d.pods) && d.pods.length) { spec = { ...structuredClone(EMPTY), ...d }; return true; }
+  } catch {}
+  return false;
+}
+
 function render() {
+  persist();
   $("title").textContent = spec.rig || "an empty floor";
   $("sub").textContent = spec.summary || "Tell the agent in your sidebar what the rig should do. It takes shape here.";
 
@@ -221,6 +247,12 @@ async function poll() {
     const r = await fetch("/api/drive" + (marker ? "?since=" + encodeURIComponent(marker) : ""));
     const d = await r.json();
     if (d?.ok) {
+      // The FIRST poll adopts the marker without applying. The channel holds the
+      // last op forever, so a fresh page would replay it as if it had just been
+      // sent — which resurrected a design after "start over" and would have made
+      // clearing look broken. An op already on the wire when you arrive is
+      // history; only what arrives after you are watching is intent.
+      if (!primed) { primed = true; marker = d.marker ?? marker; setTimeout(poll, 700); return; }
       if (d.changed && d.op) {
         const what = apply(d.op);
         if (what) { render(); note(what); setTimeout(() => fresh.clear(), 600); }
@@ -239,12 +271,13 @@ $("copy").onclick = async () => {
   try { await navigator.clipboard.writeText(toYAML(spec)); note("spec copied"); }
   catch { note("clipboard blocked — select the spec and copy"); }
 };
-$("reset").onclick = () => { apply({ designer: { action: "reset" } }); render(); note("cleared"); };
+$("reset").onclick = () => { apply({ designer: { action: "reset" } }); try { localStorage.removeItem(SAVE); } catch {} render(); note("cleared"); };
 
 // Exposed for tests and for a driver that has a page handle rather than the HTTP
 // channel. Same entry point either way, so there is one code path to trust.
 window.designer = { apply: (op) => { const w = apply(op); render(); if (w) note(w); return w; }, get spec() { return spec; } };
 
+if (restore()) note("restored the design from this browser");
 render();
 poll();
 </script>
