@@ -1,0 +1,12 @@
+{
+  "_": "TWO CLIPS, DISSOLVING ACROSS THE SWEEP. `source.clips` names them and `source.blend` mixes — 0 is the first, 1 is the second. The point is that the dissolve is written into the tape A COLUMN AT A TIME while the head travels, so the left of the frame is one clip, the right is the other, and the middle is genuinely both. That is not a crossfade applied to a finished picture; the tape never held either clip whole. ADD THE MOSH PASS and the transition BLOOMS, because a fast dissolve looks to the block matcher exactly like a cut — mosh.refresh 0.94, bloom 1, sliceLoss 0.1. Put a `hand` lane on blend instead of a ramp for a dissolve that hesitates. Both clips must be in the media pool.",
+  "scan": { "duration": "10s" },
+  "stages": [
+    { "id": "a",
+      "source": { "rate": 1, "clips": ["face-still.mp4", "tos-city.mp4"], "blend": { "ramp": [0, 1] } },
+      "head": { "axis": "vertical", "position": { "ramp": [0, 1] }, "width": 6, "softness": 0.5 },
+      "response": { "read": "passthrough" },
+      "mosh": { "refresh": 0.94, "bloom": 1.0, "strength": 1.5, "sliceLoss": 0.1, "sliceShift": 26 },
+      "write": { "mode": "direct", "advance": 0, "frames": 16, "fps": 12 } }
+  ]
+}

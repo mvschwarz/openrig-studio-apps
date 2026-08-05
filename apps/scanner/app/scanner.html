@@ -228,15 +228,61 @@ function mkTex(unit, w, h) {
 }
 
 // ---- source --------------------------------------------------------------
+//
+// TWO CLIPS, COMPOSITED BEFORE THE SCAN. `source.clips` names a second video and
+// `sourceBlend` mixes them. Done HERE rather than in the write shader on purpose:
+// every response mode, every write mode and the mosh pass then see one ordinary
+// source and none of them has to learn that there might be two. The alternative
+// -- a second sampler in the shader -- would have put the same fact in five
+// places that could disagree about it.
+//
+// The pay-off is that a dissolve is written into the tape A COLUMN AT A TIME
+// while the head sweeps, rather than applied to a finished picture. And a fast
+// dissolve looks to the block matcher exactly like a CUT, so the mosh pass blooms
+// on it for free.
+const vidB = document.createElement('video');
+vidB.muted = true; vidB.loop = true; vidB.playsInline = true; vidB.crossOrigin = 'anonymous';
+let hasB = false, mixCanvas = null, mixCtx = null;
+
 function uploadSource() {
   if (!srcEl) return;
   const w = isVideo ? vid.videoWidth : (srcEl.naturalWidth||srcEl.width);
   const h = isVideo ? vid.videoHeight : (srcEl.naturalHeight||srcEl.height);
   if (!w || !h) return;
   if (!srcTex || srcW!==w || srcH!==h) { srcW=w; srcH=h; srcTex = mkTex(UNIT_SRC,w,h); }
+
+  // The blend comes from stage 0, because the SOURCE is shared by every stage --
+  // a per-stage blend would be a promise the one-texture design cannot keep, and
+  // silently honouring only the first stage's value is worse than not offering it.
+  const blend = hasB && stages[0] ? (effectiveFor(stages[0]).sourceBlend ?? 0) : 0;
+  let upload = isVideo ? vid : srcEl;
+  if (hasB && blend > 0.001 && vidB.readyState >= 2) {
+    if (!mixCanvas) { mixCanvas = document.createElement('canvas'); mixCtx = mixCanvas.getContext('2d'); }
+    if (mixCanvas.width !== w || mixCanvas.height !== h) { mixCanvas.width = w; mixCanvas.height = h; }
+    mixCtx.globalAlpha = 1; mixCtx.drawImage(upload, 0, 0, w, h);
+    mixCtx.globalAlpha = Math.min(1, blend);
+    mixCtx.drawImage(vidB, 0, 0, w, h);
+    mixCtx.globalAlpha = 1;
+    upload = mixCanvas;
+  }
   gl.activeTexture(gl.TEXTURE0+UNIT_SRC); gl.bindTexture(gl.TEXTURE_2D, srcTex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE, isVideo?vid:srcEl);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE, upload);
+}
+
+// The second clip named by a spec. Loaded beside the picked source rather than
+// replacing it, so the picker still means "the first clip".
+async function useSecond(rel) {
+  hasB = false;
+  if (!rel) { try { vidB.pause(); } catch {} return; }
+  vidB.src = `/media/${encodeURIComponent(rel)}`;
+  await new Promise((r) => {
+    const done = () => r();
+    vidB.onloadeddata = done; vidB.onerror = () => { fail(`could not load second clip ${rel}`); r(); };
+    setTimeout(done, 4000);   // a slow decode must not wedge the run
+  });
+  hasB = vidB.readyState >= 2;
+  if (hasB) { vidB.playbackRate = 1; vidB.play().catch(()=>{}); }
 }
 
 // ---- a stage -------------------------------------------------------------
@@ -1035,6 +1081,9 @@ async function loadSpec(text) {
   if (res.problems?.length) fail(res.problems.join(' · '));
   const clip = spec.stages?.[0]?.source?.clip ?? spec.source?.clip;
   if (clip) { $('#source').value = clip; await useSource(clip); }
+  const clips = spec.stages?.[0]?.source?.clips ?? spec.source?.clips;
+  await useSecond(Array.isArray(clips) && clips[1] ? clips[1] : null);
+  if (Array.isArray(clips) && clips[0]) { $('#source').value = clips[0]; await useSource(clips[0]); }
 }
 
 

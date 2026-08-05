@@ -272,6 +272,15 @@ export const SCANNER_PARAMS = {
                  says: "how many instants each column holds. 1 is a still — every column is a single moment. Above 1 the column becomes a WINDOW, and the stack plays back with every column advancing through its own window at once, so one continuous movement in the source becomes a row of bands each animating a different fragment of it" },
   fps:         { type: "int", min: 4, max: 30, default: 12, group: "output", pairsWith: ["frames"],
                  says: "playback rate of the frame stack; only means anything when frames is above 1" },
+  // TWO CLIPS AT ONCE. 0 is the first, 1 is the second, and the whole point is
+  // the JOURNEY: a lane here dissolves one clip into another WHILE the head is
+  // sweeping, so the crossfade is written into the tape a column at a time rather
+  // than applied to a finished picture. Compose it before the scan rather than in
+  // the write shader, so every response, write mode and the mosh pass all see one
+  // ordinary source and none of them need to know there are two.
+  sourceBlend: { type: "float", min: 0, max: 1, default: 0, group: "output",
+                 says: "mix between the clips named in source.clips — 0 is the first, 1 is the second. Put a lane on it and one clip dissolves into the other across the sweep; a fast dissolve reads to the motion search as a CUT, so the mosh pass blooms on it" },
+
   // THE TEMPORAL-SHEAR KNOB. Two adjacent columns of the recording are separated
   // by `headWidth * sourceRate / (advance * 60)` seconds OF THE FOOTAGE, and this
   // is the only term in that numerator you can raise without also slowing the
@@ -574,7 +583,7 @@ const laneGroups = {
   // that is supposed to be complete. A lane rather than a constant because a rate
   // that climbs mid-scan is the point: the footage accelerates under a head that
   // does not.
-  source:   ["rate"],
+  source:   ["rate", "blend"],
   mosh:     ["refresh", "residual", "strength", "bloom", "sliceLoss", "sliceShift", "block", "search"],
 };
 const passthroughKeys = [

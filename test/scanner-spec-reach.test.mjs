@@ -24,7 +24,7 @@ const EVERYTHING = {
   scan: { duration: "10s" },
   stages: [{
     id: "a",
-    source: { rate: 2 },
+    source: { rate: 2, blend: 0.5 },
     bed: { x: 10, y: 20, rotate: 5, scale: 1.5 },
     head: { axis: "horizontal", position: 0.5, width: 8, angle: 3, softness: 0.25 },
     response: { read: "edge", gain: 1.2, bias: 0.1, threshold: 0.2,
