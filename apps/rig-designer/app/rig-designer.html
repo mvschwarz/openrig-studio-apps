@@ -50,7 +50,8 @@
 
   /* ---- the spec, taking shape ---- */
   pre{margin:0; padding:12px; background:#0a0d12; border:1px solid var(--line); border-radius:10px;
-      font-size:11.5px; line-height:1.5; overflow:auto; max-height:44vh; white-space:pre}
+      font-size:11.5px; line-height:1.5; overflow:auto; max-height:44vh;
+      white-space:pre-wrap; overflow-wrap:anywhere}
   .lbl{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin:0 0 8px}
   .log{margin-top:16px; max-height:26vh; overflow:auto}
   .op{border-left:2px solid var(--line); padding:4px 0 4px 9px; margin-bottom:7px; font-size:11.5px; color:var(--muted)}
@@ -102,6 +103,7 @@ let marker = null, fresh = new Set();
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+const count = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const runtimeOf = (s) => /claude/i.test(s?.runtime || "") ? "claude" : /codex/i.test(s?.runtime || "") ? "codex" : /human|operator/i.test(s?.runtime || "") ? "human" : "";
 
 function render() {
@@ -113,8 +115,7 @@ function render() {
   } else {
     $("rig").innerHTML = `
       <div class="rigname">${esc(spec.rig || "untitled rig")}</div>
-      <div class="rigmeta">${spec.pods.length} pod${spec.pods.length === 1 ? "" : "s"} ·
-        ${spec.pods.reduce((n, p) => n + (p.seats?.length || 0), 0)} seat(s)</div>
+      <div class="rigmeta">${count(spec.pods.length, "pod")} · ${count(spec.pods.reduce((n, p) => n + (p.seats?.length || 0), 0), "seat")}</div>
       <div class="pods">${spec.pods.map(podHTML).join("")}</div>`;
   }
   $("spec").textContent = spec.pods.length ? toYAML(spec) : "— nothing yet —";
