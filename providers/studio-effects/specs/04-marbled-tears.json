@@ -1,0 +1,13 @@
+{
+  "_": "MARBLED TEARS. The answer to 'those hard vertical banded slices are not very interesting'. Three things run at once and none of them is the banding. (1) The tape is an ACCUMULATOR dragged along its own time axis — on a tape the sweep axis IS time, so the recording's previous frame is itself shifted one head-width, and block-matching those two gives the recording's own motion field. (2) moshBloom gates that drag on CONFIDENCE, so continuous footage passes through clean and the drag lands only where the match failed — which is exactly at a cut. (3) moshSliceLoss drops horizontal slices that then receive NO correction and keep sliding on old vectors, so torn horizontal bands cut ACROSS the vertical grain of the sweep. That third one is what actually kills the banded look: the picture stops being a row of columns and becomes marbled, like oil on water. Keep the face readable by staying near these numbers; sliceLoss above ~0.2 or refresh below ~0.9 turns it to mush within a couple of seconds because every one of these compounds over 200-plus steps. WANTS FOOTAGE WITH CUTS — the cuts are the raw material.",
+  "scan": { "duration": "10s" },
+  "stages": [
+    { "id": "a",
+      "source": { "rate": 1 },
+      "head": { "axis": "vertical", "position": { "ramp": [0, 1] }, "width": 6, "softness": 0.5 },
+      "response": { "read": "passthrough" },
+      "mosh": { "refresh": 0.96, "residual": 0, "strength": 1.1, "bloom": 1.0,
+                "sliceLoss": 0.08, "sliceShift": 22, "block": 16, "search": 24 },
+      "write": { "mode": "direct", "advance": 0, "frames": 16, "fps": 12 } }
+  ]
+}

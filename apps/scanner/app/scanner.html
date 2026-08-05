@@ -139,7 +139,7 @@ let PARAMS = {}, PRESETS = {}, mediaRoot = null, specsDir = null;
 let vid = document.createElement('video');
 vid.muted = true; vid.loop = true; vid.playsInline = true; vid.crossOrigin = 'anonymous';
 let srcEl = null, isVideo = false, srcTex = null, srcW = 0, srcH = 0, lastStamp = NaN;
-let writeProg = null, blitProg = null, fadeProg = null, motionProg = null, moshProg = null;
+let writeProg = null, blitProg = null, fadeProg = null, motionProg = null, moshProg = null, shiftProg = null;
 let recording = false, scanTime = 0, lastWall = 0, rafId = null, duration = 12;
 let stepCount = 0, wallStart = 0, showAll = false, playAccum = 0, playing = true;
 // THE STACK PASS. When a stage holds a stack, the artifact is the STACK PLAYED
@@ -362,6 +362,15 @@ function fadePass(st, P) {
   st.alt = t; st.altFbos = f;
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
+let shiftTex = null, shiftFbo = null;
+function ensureShift() {
+  if (shiftTex) return;
+  shiftTex = mkTex(UNIT_PREV, OUT_W, OUT_H);
+  shiftFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, shiftFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, shiftTex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
 function moshPass(st, P) {
   const refresh  = P.moshRefresh  ?? 1;
   const residual = P.moshResidual ?? 0;
@@ -369,14 +378,36 @@ function moshPass(st, P) {
   // refresh 1 takes the tape whole, so there is nothing to compute.
   if (refresh >= 0.999) return;
   if (!motionProg || !moshProg || !st.tapes.length) return;
-  const src = sourceFor(st);
-  if (!src.tex || !st.prevTex || !src.w) return;
 
   const block  = Math.max(4, Math.round(P.moshBlock  ?? 16));
   const search = Math.max(4, Math.round(P.moshSearch ?? 24));
-  ensureField(src.w, src.h, block);
+  ensureField(OUT_W, OUT_H, block);
   ensureAlt(st, st.tapes.length);
+  ensureShift();
   gl.disable(gl.SCISSOR_TEST); gl.disable(gl.BLEND);
+
+  // 0. THE TAPE, SHIFTED BY ONE HEAD-WIDTH ALONG THE SWEEP AXIS.
+  //
+  //    THIS IS THE WHOLE CORRECTION. The first version estimated motion on the
+  //    SOURCE VIDEO and dragged the tape with it, which cannot dissolve a seam:
+  //    a source motion field has no spatial correspondence with a time-warped
+  //    recording, and on the nearly-still footage this effect wants, frame-to-
+  //    frame source motion is ~0, so it advected the tape by nothing.
+  //
+  //    On the tape the sweep axis IS time. Its own previous frame is itself,
+  //    shifted one column back. Block-matching those two gives the RECORDING's
+  //    motion field -- small where the footage was continuous, and garbage
+  //    exactly at a cut, which is where the bloom is wanted.
+  const vertical = (P.axis || 'vertical') === 'vertical';
+  const wpx = Math.max(1, Math.round(P.headWidth || 6));
+  gl.bindFramebuffer(gl.FRAMEBUFFER, shiftFbo);
+  gl.viewport(0, 0, OUT_W, OUT_H);
+  gl.useProgram(shiftProg);
+  gl.activeTexture(gl.TEXTURE0+UNIT_TAPE); gl.bindTexture(gl.TEXTURE_2D, st.tapes[0]);
+  gl.uniform1i(gl.getUniformLocation(shiftProg,'t'), UNIT_TAPE);
+  gl.uniform2f(gl.getUniformLocation(shiftProg,'r'), OUT_W, OUT_H);
+  gl.uniform2f(gl.getUniformLocation(shiftProg,'sh'), vertical ? -wpx : 0, vertical ? 0 : -wpx);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   // 1. THE MOTION FIELD, at block resolution. One vector per macroblock, never
   //    interpolated -- the coarseness is what makes it read as compression.
@@ -384,11 +415,11 @@ function moshPass(st, P) {
   gl.viewport(0, 0, fieldW, fieldH);
   gl.useProgram(motionProg);
   const mu = (n) => gl.getUniformLocation(motionProg, n);
-  gl.activeTexture(gl.TEXTURE0+UNIT_SRC);  gl.bindTexture(gl.TEXTURE_2D, src.tex);
-  gl.uniform1i(mu('uCur'), UNIT_SRC);
-  gl.activeTexture(gl.TEXTURE0+UNIT_PREV); gl.bindTexture(gl.TEXTURE_2D, st.prevTex);
+  gl.activeTexture(gl.TEXTURE0+UNIT_TAPE); gl.bindTexture(gl.TEXTURE_2D, st.tapes[0]);
+  gl.uniform1i(mu('uCur'), UNIT_TAPE);
+  gl.activeTexture(gl.TEXTURE0+UNIT_PREV); gl.bindTexture(gl.TEXTURE_2D, shiftTex);
   gl.uniform1i(mu('uPrev'), UNIT_PREV);
-  gl.uniform2f(mu('uRes'), src.w, src.h);
+  gl.uniform2f(mu('uRes'), OUT_W, OUT_H);
   gl.uniform1f(mu('uBlock'), block);
   gl.uniform1f(mu('uSearch'), search);
   gl.uniform1f(mu('uTaps'), 4);
@@ -409,12 +440,13 @@ function moshPass(st, P) {
   gl.uniform1f(au('uStrength'), P.moshStrength ?? 1);
   gl.uniform1f(au('uRefresh'), refresh);
   gl.uniform1f(au('uResidual'), residual);
+  gl.uniform1f(au('uCutBloom'), P.moshBloom ?? 0);
   gl.uniform1f(au('uQuantise'), 0);
   gl.uniform1f(au('uReset'), 0);
-  gl.uniform1f(au('uSliceLoss'), 0);
-  gl.uniform1f(au('uSliceHeight'), 1);
-  gl.uniform1f(au('uSliceShift'), 0);
-  gl.uniform1f(au('uSliceHold'), 1);
+  gl.uniform1f(au('uSliceLoss'), P.moshSliceLoss ?? 0);
+  gl.uniform1f(au('uSliceHeight'), 2);
+  gl.uniform1f(au('uSliceShift'), P.moshSliceShift ?? 0);
+  gl.uniform1f(au('uSliceHold'), 6);
   gl.uniform1f(au('uFrame'), stepCount);
   for (let k = 0; k < st.tapes.length; k++) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, st.altFbos[k]);
@@ -1022,6 +1054,16 @@ async function boot() {
     if (mo.ok) motionProg = build(mo.vertex, mo.fragment);
     const mh = await (await fetch('/api/scanner/shader?pass=mosh')).json();
     if (mh.ok) moshProg = build(mh.vertex, mh.fragment);
+    // THE TAPE'S OWN PREVIOUS FRAME. On the tape the SWEEP AXIS IS TIME: column k
+    // is one instant and column k+1 the next. So the recording's "previous frame"
+    // is the recording shifted by one head-width along that axis -- not the source
+    // video, which has no spatial correspondence with the tape at all.
+    shiftProg = build(
+      `#version 300 es
+       void main(){ vec2 p=vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position=vec4(p*2.0-1.0,0.,1.); }`,
+      `#version 300 es
+       precision highp float; out vec4 o; uniform sampler2D t; uniform vec2 r; uniform vec2 sh;
+       void main(){ o=vec4(texture(t, (gl_FragCoord.xy + sh)/r).rgb, 1.0); }`);
     blitProg = build(
       `#version 300 es
        void main(){ vec2 p=vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position=vec4(p*2.0-1.0,0.,1.); }`,

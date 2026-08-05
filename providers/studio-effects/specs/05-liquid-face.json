@@ -1,0 +1,13 @@
+{
+  "_": "LIQUID FACE. The same marbling on a CONTINUOUS shot of a nearly-still subject, where there are no cuts to bloom at — so the drag is driven by the subject's own small movement and the picture dissolves into ripples rather than tearing at seams. The most painterly thing the tier makes. Wants the opposite footage to 04: one unbroken shot, subject barely moving. Raise sliceLoss for more tearing, lower moshRefresh for more dissolve; both compound over every step, so small changes are large.",
+  "scan": { "duration": "10s" },
+  "stages": [
+    { "id": "a",
+      "source": { "rate": 1 },
+      "head": { "axis": "vertical", "position": { "ramp": [0, 1] }, "width": 6, "softness": 0.5 },
+      "response": { "read": "passthrough" },
+      "mosh": { "refresh": 0.94, "residual": 0, "strength": 1.3, "bloom": 1.0,
+                "sliceLoss": 0.12, "sliceShift": 30, "block": 16, "search": 24 },
+      "write": { "mode": "direct", "advance": 0, "frames": 16, "fps": 12 } }
+  ]
+}

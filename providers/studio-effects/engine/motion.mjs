@@ -154,6 +154,16 @@ uniform float uSliceHeight; // slice height in macroblocks
 uniform float uSliceShift;  // sideways desync of a broken slice, in pixels
 uniform float uSliceHold;   // frames a loss persists before it is re-rolled
 uniform float uFrame;
+// CONFIDENCE-GATED MELT. 0 keeps the classic behaviour exactly: the whole picture
+// is dragged and corrected uniformly, which is what a struggling decoder does.
+//
+// Raise it and the drag is applied ONLY where the prediction failed. On live
+// video that is moving edges. On a SCANNER TAPE, where the sweep axis is time,
+// prediction fails at exactly one thing: A CUT IN THE FOOTAGE. So the recording
+// stays clean everywhere it was continuous and blooms precisely at the seams --
+// which turns the cut from the defect that broke the picture into the thing the
+// picture is made of.
+uniform float uCutBloom;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -173,7 +183,12 @@ void main() {
   // entire difference between datamosh and a warp: a warp moves the current
   // picture, this moves whatever the buffer has accumulated, so error compounds
   // frame over frame instead of resetting.
-  vec3 moved = texture(uAcc, uv - mv * uStrength * texel).rgb;
+  //
+  // uCutBloom gates both halves on confidence: the drag is withheld where the
+  // prediction held, and the fresh picture is restored there, so a confident
+  // region passes through untouched no matter how low uRefresh goes.
+  float gate  = mix(1.0, 1.0 - f.b, uCutBloom);
+  vec3 moved  = texture(uAcc, uv - mv * uStrength * gate * texel).rgb;
 
   // SLICE LOSS — the other half of how a broken stream looks, and the reason
   // torn video has horizontal BANDS rather than scattered damage.
@@ -208,7 +223,7 @@ void main() {
 
   // Where confidence is low the prediction failed, so that is where a real
   // encoder would have spent bits on a correction.
-  float correction = clamp(uRefresh + uResidual * (1.0 - f.b), 0.0, 1.0);
+  float correction = clamp(uRefresh + uResidual * (1.0 - f.b) + uCutBloom * f.b * (1.0 - uRefresh), 0.0, 1.0);
   fragColor = vec4(mix(moved, live, correction), 1.0);
 }`;
 

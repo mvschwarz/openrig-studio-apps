@@ -302,12 +302,23 @@ export const SCANNER_PARAMS = {
                  says: "extra fresh picture let in WHERE THE PREDICTION FAILED, which is what a real codec spends its bits on. Raise it to keep cuts legible while everything else melts; at 0 a cut is pure smear" },
   moshStrength:{ type: "float", min: 0, max: 4, default: 1, group: "mosh",
                  says: "how far the tape is dragged by each step of motion. Above 1 the error compounds faster than the footage moves, which is the runaway melt" },
+  moshBloom:   { type: "float", min: 0, max: 1, default: 0, group: "mosh",
+                 says: "gate the melt on confidence. 0 drags the whole recording uniformly. 1 drags it ONLY where the block match failed — which on a tape, where the sweep axis is time, means only at a cut. Everything that was continuous footage passes through clean and the seams bloom" },
+  moshSliceLoss:{ type: "float", min: 0, max: 1, default: 0, group: "mosh",
+                 says: "share of horizontal slices that arrive broken. A lost slice gets NO correction at all, so it keeps sliding on old vectors while everything around it is pulled back — horizontal tears cutting across the vertical grain of the sweep" },
+  moshSliceShift:{ type: "float", min: 0, max: 200, default: 0, group: "mosh",
+                 says: "how far a broken slice is decoded off-register, in pixels; this is where sideways-displaced torn bands come from" },
   moshBlock:   { type: "float", min: 4, max: 64, default: 16, group: "mosh",
                  says: "macroblock size for the motion search, in pixels; 16 is what H.264 uses and the coarseness is what makes it read as compression rather than as a smooth warp" },
   moshSearch:  { type: "float", min: 4, max: 64, default: 24, group: "mosh",
                  says: "how far the search looks for a match, in pixels. Too small and fast motion is missed; too large and it finds false matches, which is its own look" },
-  persistence: { type: "float", min: 0.9, max: 1, default: 1, group: "output",
-                 says: "1 means the tape retains, which is what a tape does; below 1 the recording fades as it is laid down" },
+  // THE RANGE HAD TO MOVE. This is applied EVERY STEP and compounds, and a run
+  // is 200-300 steps, so 0.955 -- comfortably inside the old range and a
+  // reasonable-looking number -- is 0.955^250, which is black. The old minimum of
+  // 0.9 could not produce a picture at all. Useful values live in the last
+  // percent, which is exactly the sort of range a slider should be told about.
+  persistence: { type: "float", min: 0.99, max: 1, default: 1, group: "output",
+                 says: "1 means the tape retains, which is what a tape does. Below 1 the recording fades WHILE it is being laid down, so the oldest columns dim into a trail — and because it compounds over every step of the run, 0.999 is a gentle fade and 0.99 is nearly gone by the end" },
   sourceRate:  { type: "float", min: 0, max: 16, default: 1, group: "output",
                  says: "clip time per unit of master clock; 0 freezes the frame into a still, 1 is normal playback, and high values are what make a recognisable picture undulate — the footage's own frame rate becomes the thing being interpolated across the tape" },
 };
@@ -564,7 +575,7 @@ const laneGroups = {
   // that climbs mid-scan is the point: the footage accelerates under a head that
   // does not.
   source:   ["rate"],
-  mosh:     ["refresh", "residual", "strength", "block", "search"],
+  mosh:     ["refresh", "residual", "strength", "bloom", "sliceLoss", "sliceShift", "block", "search"],
 };
 const passthroughKeys = [
   ["response", "read", "read"], ["response", "invert", "invert"],

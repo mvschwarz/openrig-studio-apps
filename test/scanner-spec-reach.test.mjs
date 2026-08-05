@@ -31,7 +31,7 @@ const EVERYTHING = {
                 invert: true, targetColor: "#c84a2a" },
     write: { mode: "direct", palette: "ember", displace: 40,
              advance: 4, frames: 3, fps: 12, persistence: 0.9 },
-    mosh: { refresh: 0.4, residual: 0.2, strength: 1.5, block: 16, search: 24 },
+    mosh: { refresh: 0.4, residual: 0.2, strength: 1.5, bloom: 0.5, sliceLoss: 0.2, sliceShift: 30, block: 16, search: 24 },
   }],
 };
 
