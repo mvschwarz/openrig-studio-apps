@@ -323,6 +323,26 @@ export function buildView({ samples, boxes, labels = {}, boxLabels = {}, now = D
         capacityLeft: typedWins ? ov.capacityLeft : a.capacityLeft,
         capacitySource: typedWins ? "typed" : (a.capacityLeft === null ? "none" : "measured"),
         capacitySetAt: typedWins ? ov.capacitySetAt : null,
+
+        // A TYPED RESET WINS OUTRIGHT, and it was not being read back at all.
+        //
+        // This block already resolved label and capacity from the override and
+        // then stopped, so a reset time you typed was WRITTEN to overrides.json
+        // and never looked at again: the row kept rendering the value derived
+        // from samples. On screen that is indistinguishable from the save having
+        // failed — you set it, it holds until the next poll, and then it appears
+        // to revert. It never reverted; it was never displayed.
+        //
+        // Unlike capacity, this is not decided on recency. Capacity has two
+        // honest sources — a fresh measurement really can supersede an old typed
+        // figure — but a reset time is typed precisely BECAUSE the derived one is
+        // wrong, and there is no setAt to compare against. So an override here
+        // means override.
+        ...(ov.resetsWeeklyAt ? {
+          resetObservedAt: ov.resetsWeeklyAt,
+          resetsWeeklyAt: weeklySlot(ov.resetsWeeklyAt),
+          nextResetAt: projectWeeklyReset(ov.resetsWeeklyAt, now),
+        } : {}),
       };
     })(),
     state: a.readingSupersededByReset ? "reset — full capacity, presumed"

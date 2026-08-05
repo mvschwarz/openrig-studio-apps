@@ -2,10 +2,22 @@
   "package": "@openrig/studio-fleet",
   "run": {
     "entry": "fleet-server.mjs",
-    "args": ["--port", "{{port}}", "--fleet", "{{root:fleet}}"],
+    "args": [
+      "--port",
+      "{{port}}",
+      "--fleet",
+      "{{root:fleet}}"
+    ],
     "_args_note": "ONE bound root, not a config flag plus a store flag. fleet.json is the DECLARED fleet and samples.jsonl is what we have actually read from it; splitting them across two flags lets the two disagree about which fleet you are looking at."
   },
-  "verbs": ["/api/fleet/state", "/api/fleet/sample"],
-  "_no_companion_note": "THE ABSENCE IS THE DECLARATION. This provider deliberately ships no companion, because sampling spends a real API call against the very budget it reports — a background poller would be an instrument that quietly consumes what it measures, and would do it on every box forever. The caller asks; nothing polls. If someone later adds a timer, it belongs here as a declared companion and it needs an argument for why the cost is worth it, not a default.",
-  "_why_this_file_exists": "Same reason as the other three lifts: the run spec lived on apps/provider-manager, which made a fact about this PACKAGE the property of one CONSUMER of it. With this file the app is a client that names its backend, and the backend says how to start itself."
+  "verbs": [
+    "/api/fleet/state",
+    "/api/fleet/sample",
+    "/api/fleet/account",
+    "/api/fleet/assign",
+    "/api/fleet/switch"
+  ],
+  "_no_companion_note": "THE ABSENCE IS THE DECLARATION. This provider deliberately ships no companion, because sampling spends a real API call against the very budget it reports \u2014 a background poller would be an instrument that quietly consumes what it measures, and would do it on every box forever. The caller asks; nothing polls. If someone later adds a timer, it belongs here as a declared companion and it needs an argument for why the cost is worth it, not a default.",
+  "_why_this_file_exists": "Same reason as the other three lifts: the run spec lived on apps/provider-manager, which made a fact about this PACKAGE the property of one CONSUMER of it. With this file the app is a client that names its backend, and the backend says how to start itself.",
+  "_verbs_note": "EVERY route this server answers, not just the read ones. It declared only state and sample while serving five, so account, assign and switch were routed nowhere and 404'd -- and the surface reported nothing, because a failed write looks exactly like a write that has not been polled back yet. Every WRITE in PROVIDER MANAGER was silently dead. The asymmetry that hid it: a verb declared REQUIRED but unserved refuses to boot, loudly; a verb SERVED but undeclared fails at call time, silently."
 }
