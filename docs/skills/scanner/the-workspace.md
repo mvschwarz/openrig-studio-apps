@@ -35,24 +35,41 @@ shelf; the compiler only reads `scan`, `clocks` and `stages`.
 ## Where things go
 
 ```
-<media>/                 the media root
-  plain-with-beats.mp4   your footage
-  exp-*.mp4              outputs, which are ALSO valid sources
-  specs/                 the workspace: one .json per effect
+<workspace>/             the single data root — this is what you bind
+  media/                 SHARED POOL: your footage AND everything made from it
+  specs/                 SHARED POOL: one .json per effect
+  <project>/             per-project folders, when there are projects
 ```
 
-**Outputs live in the media root, not in a subfolder**, and that is deliberate:
-anything in the media root appears in the source picker, so what the scanner made
+This follows studio-box's `docs/WORKSPACE-CANON.md`, whose one law is worth
+quoting because everything else falls out of it:
+
+> **Apps never own project data.** An app is code + UI + rails; everything it
+> references lives in the workspace. Consequence: uninstalling an app never
+> touches your files.
+
+The canon does *not* forbid an app making its own subfolder — it may, inside a
+project, "like an app creating a folder in a user's home dir." What it forbids is
+an app keeping data inside `app/`, `rigs/` or its own bundle. The distinction is
+ownership, not nesting.
+
+**Bind the workspace, not the media pool.** The pool is derived (`<workspace>/media`).
+Binding the pool directly makes the root mean "one app's files" and leaves
+nowhere for projects or a second app's data — which is the mistake this layout
+exists to avoid.
+
+**Outputs live in the shared media pool beside your footage**, and that is
+deliberate: anything in the pool appears in the source picker, so what the scanner made
 can immediately be scanned again. A tape of a tape is a real technique here, and
 filing outputs somewhere tidy would break it.
 
-Specs live in `<media>/specs/` — the same folder SCANNER's `save as…` writes to
+Specs live in `<workspace>/specs/` — the same folder SCANNER's `save as…` writes to
 and lists under **yours**. A saved spec of the same name wins over a shipped
 example, so an example can be adapted and kept without renaming it.
 
 ## What the shelf does with it
 
-`SHELF` (`/surfaces/gallery.html`) reads `<media>/specs/*.json` through
+`SHELF` (`/surfaces/gallery.html`) reads `<workspace>/specs/*.json` through
 `/api/gallery/cards` and renders one card per spec: the preview playing on loop,
 the title, the tags, the footage it came from, and the spec itself.
 

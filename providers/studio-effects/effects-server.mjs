@@ -70,7 +70,11 @@ function defaultWorkspace() {
   if (home) return path.join(home, "OpenRig Studio");
   return path.join(process.env.OPENRIG_HOME || path.join(home || ".", ".openrig"), "workspace");
 }
-let MEDIA = savedWorkspace() || (arg("--workspace", "") || arg("--media", "") || "").replace(/^~/, HOME) || defaultWorkspace();
+let WORKSPACE = savedWorkspace() || (arg("--workspace", "") || arg("--media", "") || "").replace(/^~/, HOME) || defaultWorkspace();
+// Derived at startup the same way bindWorkspace derives it, so there is ONE rule
+// for where the pool is rather than a startup path and a rebind path that drift.
+let MEDIA = path.join(WORKSPACE, "media");
+try { fs.mkdirSync(MEDIA, { recursive: true }); fs.mkdirSync(path.join(WORKSPACE, "specs"), { recursive: true }); } catch {}
 
 // BOTH HALVES ON THE PATH, as everywhere else here, and it matters more than
 // usual: /media/ serves BYTES out of this root, so a root of "/" would publish
@@ -90,15 +94,31 @@ function bindWorkspace(raw, { persist = true } = {}) {
   }
   try { fs.accessSync(real, fs.constants.W_OK); }
   catch { return { ok: false, error: "that folder is not writable" }; }
-  MEDIA = real;
-  try { fs.mkdirSync(path.join(real, "specs"), { recursive: true }); } catch {}
+  // THE BOUND ROOT IS THE WORKSPACE; THE MEDIA POOL IS DERIVED FROM IT.
+  //
+  // studio-box's WORKSPACE-CANON.md, whose one law is APPS NEVER OWN PROJECT
+  // DATA: an app is code and UI, and everything it references lives in the
+  // workspace, so uninstalling an app never touches your files. The layout that
+  // follows from it is a single data root holding SHARED POOLS (media/,
+  // canvases/) alongside per-project folders.
+  //
+  // Binding the pool directly -- which is what this did first -- makes the root
+  // mean "one app's files" and leaves nowhere for projects or a second app's
+  // data to live. Binding the workspace and deriving the pool costs one line and
+  // leaves that room.
+  WORKSPACE = real;
+  MEDIA = path.join(real, "media");
+  try {
+    fs.mkdirSync(MEDIA, { recursive: true });
+    fs.mkdirSync(path.join(real, "specs"), { recursive: true });
+  } catch {}
   if (persist) {
     try {
       fs.mkdirSync(path.dirname(WORKSPACE_CONFIG), { recursive: true });
       fs.writeFileSync(WORKSPACE_CONFIG, JSON.stringify({ media: real }, null, 2) + "\n");
-    } catch (e) { return { ok: true, media: real, warning: `bound, but not remembered: ${e.message}` }; }
+    } catch (e) { return { ok: true, workspace: real, media: MEDIA, warning: `bound, but not remembered: ${e.message}` }; }
   }
-  return { ok: true, media: real };
+  return { ok: true, workspace: real, media: MEDIA };
 }
 
 const json = (res, code, body) => {
@@ -375,10 +395,10 @@ http.createServer(async (req, res) => {
         let counts = null;
         if (MEDIA) {
           const clips = (() => { try { return fs.readdirSync(MEDIA).filter((f) => /\.(mp4|webm|mov|png|jpe?g)$/i.test(f)).length; } catch { return 0; } })();
-          const specs = (() => { try { return fs.readdirSync(path.join(MEDIA, "specs")).filter((f) => f.endsWith(".json")).length; } catch { return 0; } })();
+          const specs = (() => { try { return fs.readdirSync(path.join(WORKSPACE, "specs")).filter((f) => f.endsWith(".json")).length; } catch { return 0; } })();
           counts = { clips, specs };
         }
-        return json(res, 200, { ok: true, media: MEDIA || null, specs: MEDIA ? path.join(MEDIA, "specs") : null,
+        return json(res, 200, { ok: true, workspace: WORKSPACE || null, media: MEDIA || null, specs: WORKSPACE ? path.join(WORKSPACE, "specs") : null,
                                 config: WORKSPACE_CONFIG, remembered: Boolean(savedWorkspace()), home: HOME, counts });
       }
       if (req.method === "POST") {
@@ -387,14 +407,14 @@ http.createServer(async (req, res) => {
         // The reply carries the ROOT IT ACTUALLY BOUND rather than the string it
         // was handed, so a surface shows what is true rather than what was asked.
         return json(res, r.ok ? 200 : 400, r.ok
-          ? { ...r, specs: path.join(r.media, "specs"), config: WORKSPACE_CONFIG }
+          ? { ...r, workspace: WORKSPACE, media: MEDIA, specs: path.join(WORKSPACE, "specs"), config: WORKSPACE_CONFIG }
           : r);
       }
     }
     if (url.pathname === "/api/gallery/cards" && req.method === "GET") {
       if (!MEDIA) return json(res, 200, { ok: true, cards: [], workspace: null,
                                           note: "no media root is bound, so there is no workspace" });
-      const dir = path.join(MEDIA, "specs");
+      const dir = path.join(WORKSPACE, "specs");
       let names = [];
       try { names = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort(); } catch {}
       const cards = [];
@@ -514,7 +534,7 @@ http.createServer(async (req, res) => {
       // deliberately name NO clip, because a spec that hardcodes a filename only
       // works on the machine that has it.
       const shipped = path.join(HERE, "specs");
-      const dir = MEDIA ? path.join(MEDIA, "specs") : null;
+      const dir = WORKSPACE ? path.join(WORKSPACE, "specs") : null;
 
       // BOTH HALVES, per the rule this repo has already paid for once: sanitise
       // the name to a single segment AND validate the RESOLVED path. Input-only
