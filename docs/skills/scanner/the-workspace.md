@@ -53,6 +53,36 @@ project, "like an app creating a folder in a user's home dir." What it forbids i
 an app keeping data inside `app/`, `rigs/` or its own bundle. The distinction is
 ownership, not nesting.
 
+### The test that settles every case
+
+> **If I delete and reinstall this app, should this file survive?**
+> **Yes → the workspace. No → the app folder.**
+
+That is the one law restated as something you can apply in five seconds, and it
+rules out the tempting option: **never colocate user data with the app.** The
+concrete failure is not hypothetical — PROVIDER MANAGER keeps your machine
+names, capacity figures and weekly reset times in `overrides.json`. Colocated,
+reinstalling or forking that app would take all of it with you, and a fork would
+carry someone else's account labels into a stranger's copy.
+
+So the layout has four kinds and each is decided by that question alone:
+
+```
+<workspace>/          EVERYTHING here is yours and survives any app
+  media/              shared pool — things many apps read and write
+  specs/              shared pool
+  <app-id>/           app-scoped data that is still YOURS (fleet/, …)
+  <project>/          project-scoped data
+apps/<app-id>/        code, UI, and fixtures that SHIP with the app — nothing of yours
+```
+
+`<app-id>/` is the case people get wrong in both directions. It is not a
+violation — the canon explicitly permits an app to add its own subfolder, "like
+an app creating a folder in a user's home dir." What makes it legitimate is
+*where* it sits: inside the workspace, so an uninstall cannot reach it. Fleet
+state is the worked example — it is not media, not a project, and not the app's
+to keep, so it is `<workspace>/fleet/`.
+
 **Bind the workspace, not the media pool.** The pool is derived (`<workspace>/media`).
 Binding the pool directly makes the root mean "one app's files" and leaves
 nowhere for projects or a second app's data — which is the mistake this layout

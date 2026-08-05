@@ -79,6 +79,10 @@
     tr.ready td { background: color-mix(in srgb, var(--fresh) 7%, transparent); }
     /* An account that has just refilled is the answer to "what do I switch to",
        so it is the loudest thing on the page for as long as that is true. */
+    /* The picker has to look like the editable control it is — a bare
+       datetime-local inherits nothing and reads as static text. */
+    input.edit.reset { font-family: var(--mono, ui-monospace, monospace); font-size: 12px;
+      padding: 3px 5px; width: 100%; min-width: 175px; }
     tr.just-reset td { background: color-mix(in srgb, var(--fresh) 15%, transparent); box-shadow: inset 2px 0 0 var(--fresh); }
     .pick { white-space: nowrap; }
     .switch { padding: 3px 8px; margin-left: 6px; font-size: 13px; line-height: 1; }
@@ -162,6 +166,50 @@
       return `<span title="${esc(iso)}">${t.toLocaleString(undefined, {
         weekday: 'long', hour: 'numeric', minute: '2-digit'
       })}</span>`;
+    };
+
+    // PACIFIC, EXPLICITLY, NOT "the reader's timezone".
+    //
+    // A weekly reset is a fact about the ACCOUNT, not about where you happen to
+    // be reading — and this fleet's resets are quoted in Pacific. Rendering them
+    // in the browser's zone means the same reset reads as a different hour on a
+    // laptop that travelled, and the person retypes it "correctly" and is now
+    // wrong by the offset. So the picker is Pacific at both ends and says so.
+    const TZ = 'America/Los_Angeles';
+
+    // UTC instant -> the naive "YYYY-MM-DDTHH:mm" a datetime-local input wants,
+    // expressed as PACIFIC WALL TIME.
+    const toPacificInput = (iso) => {
+      if (!iso) return '';
+      const t = new Date(iso);
+      if (Number.isNaN(t.getTime())) return '';
+      const f = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, hour12: false,
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const g = Object.fromEntries(f.formatToParts(t).map((x) => [x.type, x.value]));
+      // en-CA gives 24h, but midnight can format as "24" — normalise it rather
+      // than emit a value the input silently rejects.
+      const hh = g.hour === '24' ? '00' : g.hour;
+      return `${g.year}-${g.month}-${g.day}T${hh}:${g.minute}`;
+    };
+
+    // The reverse. A datetime-local value is NAIVE — no zone — so it has to be
+    // read AS Pacific and converted back to an instant. Done by measuring the
+    // zone's offset at that moment rather than assuming a fixed one, because
+    // these resets straddle DST and a hardcoded -08:00 is wrong half the year.
+    const fromPacificInput = (v) => {
+      if (!v) return '';
+      const guess = new Date(`${v}:00Z`);              // provisional: treat as UTC
+      if (Number.isNaN(guess.getTime())) return '';
+      const offset = (d) => {
+        const asTz = new Date(d.toLocaleString('en-US', { timeZone: TZ }));
+        const asUtc = new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }));
+        return asUtc.getTime() - asTz.getTime();
+      };
+      // One correction pass, then re-measure: the offset at the provisional
+      // instant can differ from the offset at the real one across a DST edge.
+      let t = new Date(guess.getTime() + offset(guess));
+      t = new Date(guess.getTime() + offset(t));
+      return t.toISOString();
     };
 
     const when = (iso) => {
@@ -256,7 +304,7 @@
         <div class="table-wrap"><table>
         <thead><tr>
           <th>Account</th><th class="numeric">Capacity left</th><th>Source</th>
-          <th>Resets</th><th>Next reset</th><th>On</th>
+          <th>Next reset <span class="muted">(Pacific)</span></th><th>On</th>
         </tr></thead><tbody>
         ${rows.length ? rows.map(a => `<tr class="${a.justReset ? 'just-reset' : a.readyToSwitchTo ? 'ready' : ''}">
           <td class="name"><input class="edit" data-account="${esc(a.account)}" data-field="label"
@@ -269,15 +317,14 @@
               value="${a.capacityLeft === null || a.capacityLeft === undefined ? '' : esc(a.capacityLeft)}"
               placeholder="—"> %</td>
           <td class="muted">${esc(a.capacitySource === 'none' ? '—' : a.capacitySource || '')}</td>
-          <td>${a.provider === 'codex'
-                ? `<input class="edit" data-account="${esc(a.account)}" data-field="resetsWeeklyAt"
-                    value="${esc(a.resetObservedAt || '')}" placeholder="2026-08-09T04:09:00Z">`
-                : slot(a.nextResetAt)}</td>
-          <td>${a.nextResetAt ? when(a.nextResetAt) : '<span class="muted">—</span>'}</td>
+          <td><input class="edit reset" type="datetime-local"
+                data-account="${esc(a.account)}" data-field="resetsWeeklyAt"
+                value="${esc(toPacificInput(a.nextResetAt || a.resetsWeeklyAt || a.resetObservedAt))}"
+                title="the next weekly reset, in Pacific"></td>
           <td>${a.onBox ? esc(boxName(a.onBox))
                 : a.lastSeenOnHost ? `<span class="muted">last on ${esc(boxName(a.lastSeenOnHost))}</span>`
                 : '<span class="muted">parked</span>'}</td>
-        </tr>`).join('') : `<tr><td colspan="6" class="muted">None seen yet.</td></tr>`}
+        </tr>`).join('') : `<tr><td colspan="5" class="muted">None seen yet.</td></tr>`}
         </tbody></table></div></section>`;
 
       parts.push(accountTable('Claude accounts', accounts.filter(a => a.provider !== 'codex')));
@@ -402,7 +449,12 @@
         try {
           render(await post('/api/fleet/account', {
             account: inp.dataset.account,
-            [field]: field === 'capacityLeft' ? (inp.value === '' ? null : Number(inp.value)) : inp.value,
+            // The reset picker speaks PACIFIC WALL TIME; the store speaks ISO
+            // instants. Converting here rather than in the store keeps the
+            // timezone a presentation concern, which is what it is.
+            [field]: field === 'capacityLeft' ? (inp.value === '' ? null : Number(inp.value))
+                   : field === 'resetsWeeklyAt' ? fromPacificInput(inp.value)
+                   : inp.value,
           }));
         } catch (e) { note(`could not save that: ${e.message}`); }
       }
