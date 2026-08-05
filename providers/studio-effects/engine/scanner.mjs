@@ -272,13 +272,42 @@ export const SCANNER_PARAMS = {
                  says: "how many instants each column holds. 1 is a still — every column is a single moment. Above 1 the column becomes a WINDOW, and the stack plays back with every column advancing through its own window at once, so one continuous movement in the source becomes a row of bands each animating a different fragment of it" },
   fps:         { type: "int", min: 4, max: 30, default: 12, group: "output", pairsWith: ["frames"],
                  says: "playback rate of the frame stack; only means anything when frames is above 1" },
-  persistence: { type: "float", min: 0.9, max: 1, default: 1, group: "output",
-                 says: "1 means the tape retains, which is what a tape does; below 1 the recording fades as it is laid down" },
   // THE TEMPORAL-SHEAR KNOB. Two adjacent columns of the recording are separated
   // by `headWidth * sourceRate / (advance * 60)` seconds OF THE FOOTAGE, and this
   // is the only term in that numerator you can raise without also slowing the
   // sweep. Range matches what the surface will actually apply to a video element
   // rather than stopping at 4 and telling an agent 6 is out of bounds.
+  // ---- THE MOSH PASS -----------------------------------------------------
+  //
+  // A SECOND PASS OVER THE TAPE, not a write mode. The write pass never reads
+  // the tape -- that invariant is why a cut lands as a hard band: the strip is
+  // painted at full strength with no knowledge of what it is replacing, and
+  // headSoftness can only feather the seam, never blend across it.
+  //
+  // This is the other half of the instrument. The head is a flexible temporal
+  // SAMPLER; until now the painting side could only lay samples down in order.
+  // Here the tape becomes an ACCUMULATOR: it is dragged by the motion happening
+  // in the footage, and the freshly written strip is let in only partly. That is
+  // datamosh -- motion compensation without a reference refresh -- and it does
+  // the useful thing exactly where it is wanted, because AT A CUT MOTION
+  // ESTIMATION FAILS EVERYWHERE. Confidence collapses, the residual term stops
+  // correcting, and the old scene smears into the new one instead of abutting
+  // it. The cut becomes the effect rather than the defect.
+  //
+  // moshRefresh 1 is a NO-OP: the tape is taken whole every step, which is
+  // exactly what the scanner did before this existed.
+  moshRefresh: { type: "float", min: 0, max: 1, default: 1, group: "mosh",
+                 says: "how much of the freshly written tape is taken each step. 1 is the plain scanner and nothing melts. Lower it and what is already on the tape survives, dragged by the footage's motion, and cuts bloom instead of banding" },
+  moshResidual:{ type: "float", min: 0, max: 1, default: 0, group: "mosh",
+                 says: "extra fresh picture let in WHERE THE PREDICTION FAILED, which is what a real codec spends its bits on. Raise it to keep cuts legible while everything else melts; at 0 a cut is pure smear" },
+  moshStrength:{ type: "float", min: 0, max: 4, default: 1, group: "mosh",
+                 says: "how far the tape is dragged by each step of motion. Above 1 the error compounds faster than the footage moves, which is the runaway melt" },
+  moshBlock:   { type: "float", min: 4, max: 64, default: 16, group: "mosh",
+                 says: "macroblock size for the motion search, in pixels; 16 is what H.264 uses and the coarseness is what makes it read as compression rather than as a smooth warp" },
+  moshSearch:  { type: "float", min: 4, max: 64, default: 24, group: "mosh",
+                 says: "how far the search looks for a match, in pixels. Too small and fast motion is missed; too large and it finds false matches, which is its own look" },
+  persistence: { type: "float", min: 0.9, max: 1, default: 1, group: "output",
+                 says: "1 means the tape retains, which is what a tape does; below 1 the recording fades as it is laid down" },
   sourceRate:  { type: "float", min: 0, max: 16, default: 1, group: "output",
                  says: "clip time per unit of master clock; 0 freezes the frame into a still, 1 is normal playback, and high values are what make a recognisable picture undulate — the footage's own frame rate becomes the thing being interpolated across the tape" },
 };
@@ -535,6 +564,7 @@ const laneGroups = {
   // that climbs mid-scan is the point: the footage accelerates under a head that
   // does not.
   source:   ["rate"],
+  mosh:     ["refresh", "residual", "strength", "block", "search"],
 };
 const passthroughKeys = [
   ["response", "read", "read"], ["response", "invert", "invert"],
@@ -545,7 +575,7 @@ const passthroughKeys = [
   ["head", "axis", "axis"],
 ];
 const nameOf = (group, key) =>
-  group === "bed" || group === "head" || group === "source"
+  group === "bed" || group === "head" || group === "source" || group === "mosh"
     ? group + key[0].toUpperCase() + key.slice(1)
     : key;
 

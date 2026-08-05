@@ -133,13 +133,13 @@ glc.width = OUT_W; glc.height = OUT_H;
 const gl = glc.getContext('webgl2', { preserveDrawingBuffer: true });
 if (!gl) fail('this browser has no WebGL2 — the recording cannot be drawn');
 
-const UNIT_SRC = 0, UNIT_PREV = 1, UNIT_TAPE = 2;
+const UNIT_SRC = 0, UNIT_PREV = 1, UNIT_TAPE = 2, UNIT_FIELD = 3, UNIT_ACC = 4;
 
 let PARAMS = {}, PRESETS = {}, mediaRoot = null, specsDir = null;
 let vid = document.createElement('video');
 vid.muted = true; vid.loop = true; vid.playsInline = true; vid.crossOrigin = 'anonymous';
 let srcEl = null, isVideo = false, srcTex = null, srcW = 0, srcH = 0, lastStamp = NaN;
-let writeProg = null, blitProg = null, fadeProg = null;
+let writeProg = null, blitProg = null, fadeProg = null, motionProg = null, moshProg = null;
 let recording = false, scanTime = 0, lastWall = 0, rafId = null, duration = 12;
 let stepCount = 0, wallStart = 0, showAll = false, playAccum = 0, playing = true;
 // THE STACK PASS. When a stage holds a stack, the artifact is the STACK PLAYED
@@ -298,6 +298,140 @@ function keepPrev(st, src) {
   return ok;
 }
 
+// ---- THE MOSH PASS -------------------------------------------------------
+//
+// A SEPARATE PASS WITH ITS OWN TARGET, which is the only way to touch the tape:
+// the write pass may not read it. That invariant is exactly why a cut lands as a
+// hard band -- the strip is painted with no knowledge of what it replaces.
+//
+// Order matters and carries the idea: MOSH FIRST, THEN WRITE. The tape is
+// dragged by the motion in the footage, and only then does the fresh strip land
+// on top at full strength. So the column under the head is always sharp and
+// everything behind it melts -- the write is the I-frame, this is the P-frames.
+//
+// AT A CUT, BLOCK MATCHING FAILS EVERYWHERE. Confidence collapses across the
+// whole field, the residual term stops correcting, and the old scene is dragged
+// into the new one instead of abutting it. That is the whole point: the cut
+// stops being a seam and becomes a bloom.
+let fieldTex = null, fieldFbo = null, fieldW = 0, fieldH = 0;
+function ensureField(w, h, block) {
+  const fw = Math.max(1, Math.ceil(w / block)), fh = Math.max(1, Math.ceil(h / block));
+  if (fieldTex && fw === fieldW && fh === fieldH) return;
+  fieldW = fw; fieldH = fh;
+  fieldTex = mkTex(UNIT_FIELD, fw, fh);
+  if (!fieldFbo) fieldFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fieldFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fieldTex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+function ensureAlt(st, n) {
+  st.alt = st.alt || []; st.altFbos = st.altFbos || [];
+  while (st.alt.length > n) { st.alt.pop(); st.altFbos.pop(); }
+  while (st.alt.length < n) {
+    const t = mkTex(UNIT_ACC, OUT_W, OUT_H);
+    const f = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    st.alt.push(t); st.altFbos.push(f);
+  }
+}
+// PERSISTENCE, finally connected. fadeProg was compiled at boot and never once
+// used, so `persistence` was a published, spec-reachable knob that did nothing --
+// and the skill cites this very pass as the example of how a second pass should
+// be done. It needs the same alternate target the mosh pass introduced: reading
+// and writing one texture in a single draw is undefined, which is probably why it
+// was left unfinished.
+function fadePass(st, P) {
+  const k = P.persistence ?? 1;
+  if (k >= 0.999 || !fadeProg || !st.tapes.length) return;
+  ensureAlt(st, st.tapes.length);
+  gl.disable(gl.SCISSOR_TEST); gl.disable(gl.BLEND);
+  gl.viewport(0, 0, OUT_W, OUT_H);
+  gl.useProgram(fadeProg);
+  gl.uniform2f(gl.getUniformLocation(fadeProg, 'uOut'), OUT_W, OUT_H);
+  gl.uniform1f(gl.getUniformLocation(fadeProg, 'uPersistence'), k);
+  for (let i = 0; i < st.tapes.length; i++) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, st.altFbos[i]);
+    gl.activeTexture(gl.TEXTURE0+UNIT_TAPE); gl.bindTexture(gl.TEXTURE_2D, st.tapes[i]);
+    gl.uniform1i(gl.getUniformLocation(fadeProg, 'uTape'), UNIT_TAPE);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  const t = st.tapes, f = st.fbos;
+  st.tapes = st.alt; st.fbos = st.altFbos;
+  st.alt = t; st.altFbos = f;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+function moshPass(st, P) {
+  const refresh  = P.moshRefresh  ?? 1;
+  const residual = P.moshResidual ?? 0;
+  // EXACTLY THE OLD SCANNER when the knobs are at rest, and cheap to prove:
+  // refresh 1 takes the tape whole, so there is nothing to compute.
+  if (refresh >= 0.999) return;
+  if (!motionProg || !moshProg || !st.tapes.length) return;
+  const src = sourceFor(st);
+  if (!src.tex || !st.prevTex || !src.w) return;
+
+  const block  = Math.max(4, Math.round(P.moshBlock  ?? 16));
+  const search = Math.max(4, Math.round(P.moshSearch ?? 24));
+  ensureField(src.w, src.h, block);
+  ensureAlt(st, st.tapes.length);
+  gl.disable(gl.SCISSOR_TEST); gl.disable(gl.BLEND);
+
+  // 1. THE MOTION FIELD, at block resolution. One vector per macroblock, never
+  //    interpolated -- the coarseness is what makes it read as compression.
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fieldFbo);
+  gl.viewport(0, 0, fieldW, fieldH);
+  gl.useProgram(motionProg);
+  const mu = (n) => gl.getUniformLocation(motionProg, n);
+  gl.activeTexture(gl.TEXTURE0+UNIT_SRC);  gl.bindTexture(gl.TEXTURE_2D, src.tex);
+  gl.uniform1i(mu('uCur'), UNIT_SRC);
+  gl.activeTexture(gl.TEXTURE0+UNIT_PREV); gl.bindTexture(gl.TEXTURE_2D, st.prevTex);
+  gl.uniform1i(mu('uPrev'), UNIT_PREV);
+  gl.uniform2f(mu('uRes'), src.w, src.h);
+  gl.uniform1f(mu('uBlock'), block);
+  gl.uniform1f(mu('uSearch'), search);
+  gl.uniform1f(mu('uTaps'), 4);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  // 2. ADVECT EACH TAPE. uAcc is the tape being dragged; uSrc is the same tape
+  //    undragged, so `refresh` reads as how hard the recording RESISTS being
+  //    pulled about. Written to the alternate target, then swapped -- the pass
+  //    never reads the surface it is writing.
+  gl.useProgram(moshProg);
+  const au = (n) => gl.getUniformLocation(moshProg, n);
+  gl.viewport(0, 0, OUT_W, OUT_H);
+  gl.activeTexture(gl.TEXTURE0+UNIT_FIELD); gl.bindTexture(gl.TEXTURE_2D, fieldTex);
+  gl.uniform1i(au('uField'), UNIT_FIELD);
+  gl.uniform2f(au('uRes'), OUT_W, OUT_H);
+  gl.uniform1f(au('uSearch'), search);
+  gl.uniform1f(au('uBlock'), block);
+  gl.uniform1f(au('uStrength'), P.moshStrength ?? 1);
+  gl.uniform1f(au('uRefresh'), refresh);
+  gl.uniform1f(au('uResidual'), residual);
+  gl.uniform1f(au('uQuantise'), 0);
+  gl.uniform1f(au('uReset'), 0);
+  gl.uniform1f(au('uSliceLoss'), 0);
+  gl.uniform1f(au('uSliceHeight'), 1);
+  gl.uniform1f(au('uSliceShift'), 0);
+  gl.uniform1f(au('uSliceHold'), 1);
+  gl.uniform1f(au('uFrame'), stepCount);
+  for (let k = 0; k < st.tapes.length; k++) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, st.altFbos[k]);
+    gl.activeTexture(gl.TEXTURE0+UNIT_ACC);  gl.bindTexture(gl.TEXTURE_2D, st.tapes[k]);
+    gl.uniform1i(au('uAcc'), UNIT_ACC);
+    gl.activeTexture(gl.TEXTURE0+UNIT_TAPE); gl.bindTexture(gl.TEXTURE_2D, st.tapes[k]);
+    gl.uniform1i(au('uSrc'), UNIT_TAPE);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  // SWAP rather than copy back. A blit per tape per step would cost more than
+  // the pass itself.
+  const t = st.tapes, f = st.fbos;
+  st.tapes = st.alt; st.fbos = st.altFbos;
+  st.alt = t; st.altFbos = f;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
 function writeStage(st, P, adv) {
   const src = sourceFor(st);
   if (!src.tex || !writeProg) return;
@@ -405,7 +539,9 @@ function blitTo(st, which) {
 }
 function clearAll() {
   for (const st of stages) {
-    for (const f of st.fbos) {
+    // The alternate targets too. They are stale content that becomes VISIBLE at
+    // the next mosh swap, so leaving them is a clear that does not clear.
+    for (const f of [...st.fbos, ...(st.altFbos || [])]) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, f);
       gl.disable(gl.SCISSOR_TEST); gl.viewport(0,0,OUT_W,OUT_H);
       gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
@@ -500,6 +636,8 @@ function tick(now) {
     st.writeAt += adv * (dt*60) / span;
     if (st.writeAt >= 1) st.writeAt -= 1;
     if (st.writeAt < 0) st.writeAt += 1;
+    fadePass(st, P);
+    moshPass(st, P);
     writeStage(st, P, adv);
     blitTo(st, 0);
   }
@@ -877,6 +1015,13 @@ async function boot() {
     writeProg = build(w.vertex, w.fragment);
     const f = await (await fetch('/api/scanner/shader?pass=fade')).json();
     if (f.ok) fadeProg = build(f.vertex, f.fragment);
+    // THE MOSH PASS. Fetched from the same provider that serves the mosh effect
+    // family, so the scanner and that family share ONE definition of block
+    // matching rather than drifting apart.
+    const mo = await (await fetch('/api/scanner/shader?pass=motion')).json();
+    if (mo.ok) motionProg = build(mo.vertex, mo.fragment);
+    const mh = await (await fetch('/api/scanner/shader?pass=mosh')).json();
+    if (mh.ok) moshProg = build(mh.vertex, mh.fragment);
     blitProg = build(
       `#version 300 es
        void main(){ vec2 p=vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position=vec4(p*2.0-1.0,0.,1.); }`,

@@ -1,0 +1,12 @@
+{
+  "_": "MOSH THE CUTS. The scanner is a flexible temporal SAMPLER; this is the other half — a flexible way of PAINTING what it sampled. The write pass may never read the tape, which is exactly why a cut lands as a hard band: the strip is painted with no knowledge of what it replaces, and softness can feather a seam but never blend across one. So the tape becomes an ACCUMULATOR in a separate pass that runs BEFORE each write: it is dragged by the motion in the footage, then the fresh strip lands on top at full strength. The column under the head stays sharp and everything behind it melts — the write is the I-frame, the mosh pass is the P-frames. AT A CUT, BLOCK MATCHING FAILS EVERYWHERE: confidence collapses, the residual term stops correcting, and the old scene is dragged into the new one instead of abutting it. The cut becomes the effect. moshRefresh is the knob: 1 is the plain scanner and nothing melts; 0.75 is a smear that still reads; 0.4 is heavy bloom. Raise moshResidual to keep cuts legible while everything else melts. THIS SPEC WANTS FOOTAGE WITH CUTS — it is the opposite requirement to the water specs.",
+  "scan": { "duration": "10s" },
+  "stages": [
+    { "id": "a",
+      "source": { "rate": 1 },
+      "head": { "axis": "vertical", "position": { "ramp": [0, 1] }, "width": 6, "softness": 0.5 },
+      "response": { "read": "passthrough" },
+      "mosh": { "refresh": 0.75, "residual": 0.15, "strength": 1.4, "block": 16, "search": 24 },
+      "write": { "mode": "direct", "advance": 0, "frames": 16, "fps": 12 } }
+  ]
+}

@@ -436,8 +436,12 @@ http.createServer(async (req, res) => {
     if (url.pathname === "/api/scanner/shader") {
       const pass = url.searchParams.get("pass") || "write";
       const P = {
-        write: { vertex: SCANNER_VERTEX, fragment: SCANNER_WRITE_FRAGMENT },
-        fade:  { vertex: SCANNER_VERTEX, fragment: SCANNER_FADE_FRAGMENT },
+        write:  { vertex: SCANNER_VERTEX, fragment: SCANNER_WRITE_FRAGMENT },
+        fade:   { vertex: SCANNER_VERTEX, fragment: SCANNER_FADE_FRAGMENT },
+        // THE SAME motion engine the mosh family uses, served to the scanner
+        // rather than reimplemented for it. One definition of block matching.
+        motion: { vertex: MOTION_VERTEX,  fragment: MOTION_ESTIMATE_FRAGMENT },
+        mosh:   { vertex: MOTION_VERTEX,  fragment: MOSH_ACCUMULATE_FRAGMENT },
       };
       if (!P[pass]) return json(res, 404, { ok: false, error: `no scanner pass: ${pass}` });
       return json(res, 200, { ok: true, pass, ...P[pass] });

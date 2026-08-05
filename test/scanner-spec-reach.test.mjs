@@ -14,6 +14,7 @@
 // finds it in the schema, writes it into a spec, sees no error, and gets no effect.
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { SCANNER_PARAMS, SCANNER_WRITE_FRAGMENT, compileSpec }
   from "../providers/studio-effects/engine/scanner.mjs";
 
@@ -30,6 +31,7 @@ const EVERYTHING = {
                 invert: true, targetColor: "#c84a2a" },
     write: { mode: "direct", palette: "ember", displace: 40,
              advance: 4, frames: 3, fps: 12, persistence: 0.9 },
+    mosh: { refresh: 0.4, residual: 0.2, strength: 1.5, block: 16, search: 24 },
   }],
 };
 
@@ -49,6 +51,28 @@ test("every published parameter is reachable from a spec", () => {
   const unreachable = Object.keys(SCANNER_PARAMS).filter((k) => !produced.has(k));
   assert.deepEqual(unreachable, [],
     `published but unreachable from any spec: ${unreachable.join(", ")}`);
+});
+
+test("every published parameter is READ by the renderer, not merely reachable", () => {
+  // THE SECOND HALF, AND I CLAIMED THE FIRST HALF COVERED IT. It does not.
+  // Reachable-from-a-spec and read-at-render are different failures:
+  //
+  //   bedRate/headRate  unreachable AND unread   -> the first test catches these
+  //   headSoftness      REACHABLE, never read    -> it does not
+  //   persistence       REACHABLE, never read    -> it does not; fadeProg was
+  //                                                 compiled and never once used,
+  //                                                 and the skill cites that pass
+  //                                                 as the example of how to do it
+  //
+  // A grep is a weak instrument and this test does not pretend otherwise: it
+  // proves the name appears in the render path, NOT that the value changes the
+  // picture. Only looking proves that. But a parameter absent from the renderer
+  // entirely cannot possibly be doing anything, and that is worth failing on.
+  const surface = fs.readFileSync(
+    new URL("../apps/scanner/app/scanner.html", import.meta.url), "utf8");
+  const unread = Object.keys(SCANNER_PARAMS).filter((k) => !surface.includes(k));
+  assert.deepEqual(unread, [],
+    `published and reachable, but absent from the renderer: ${unread.join(", ")}`);
 });
 
 test("source.rate reaches sourceRate, because it is the whole temporal-shear knob", () => {
