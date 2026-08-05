@@ -9,7 +9,8 @@
 // wrote it was thinking about the file name and never asked where the directory
 // came from. Every review since examined the source check, found it careful, and
 // moved on — which is exactly why a validated source never implies a validated
-// destination (Ruling 17).
+// destination. Read and write are separate operations and each end of each one
+// needs its own answer.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
