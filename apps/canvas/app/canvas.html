@@ -290,14 +290,37 @@
     const paintView = () => {
       const { x,y,scale } = state.canvasView;
       world.style.transform = `translate(${x}px,${y}px) scale(${scale})`;
+      // The grid is the viewport's background and moves with the same view the
+      // items do — so the canvas has no edge to pan off. Offsetting the items and
+      // NOT the grid would be worse than the old fixed board: the ground would
+      // stay still while everything on it slid.
+      doc.body.style.backgroundSize = `${32 * scale}px ${32 * scale}px`;
+      doc.body.style.backgroundPosition = `${x}px ${y}px`;
       els.mode.textContent = `Canvas · ${Math.round(scale * 100)}% · paste to place`;
       refreshAnnotations();
     };
     paintView();
+    // SPACE OR MIDDLE-DRAG PANS FROM ANYWHERE, including over an item. Panning
+    // only from empty space is fine on a sparse board and useless once a big
+    // screenshot covers the part you happen to grab — which is the state every
+    // real board reaches. Held space is the gesture every canvas tool uses.
+    let spaceHeld = false;
+    const setPanCursor = () => doc.body.classList.toggle("panning", spaceHeld || state.canvasDrag?.kind === "pan");
+    doc.addEventListener("keydown", (event) => {
+      if (event.code !== "Space" || event.repeat) return;
+      const el = doc.activeElement;
+      if (el && el.matches?.("input, textarea, [contenteditable='true']")) return;
+      spaceHeld = true; setPanCursor(); event.preventDefault();
+    });
+    doc.addEventListener("keyup", (event) => { if (event.code === "Space") { spaceHeld = false; setPanCursor(); } });
+    doc.addEventListener("blur", () => { spaceHeld = false; setPanCursor(); });
+
     doc.addEventListener("pointerdown", (event) => {
-      const item = event.target.closest?.("[data-item-id]");
+      const forcePan = spaceHeld || event.button === 1;
+      const item = forcePan ? null : event.target.closest?.("[data-item-id]");
       state.canvasDrag = item ? { kind:"item", pointerId:event.pointerId, item, id:item.dataset.itemId, startX:event.clientX, startY:event.clientY, left:parseFloat(item.style.left), top:parseFloat(item.style.top) } : { kind:"pan", pointerId:event.pointerId, startX:event.clientX, startY:event.clientY, x:state.canvasView.x, y:state.canvasView.y };
       (item || doc.documentElement).setPointerCapture?.(event.pointerId); event.preventDefault();
+      setPanCursor();
     });
     doc.addEventListener("pointermove", (event) => {
       const drag = state.canvasDrag;
@@ -311,8 +334,9 @@
       if (!drag || drag.pointerId !== event.pointerId) return;
       state.canvasDrag = null;
       if (drag.kind === "item") moveItem(drag.id, { x:parseFloat(drag.item.style.left), y:parseFloat(drag.item.style.top) }, state.current.id, { refresh:false }).catch((error) => toast(error.message));
+      setPanCursor();
     });
-    doc.addEventListener("pointercancel", () => { state.canvasDrag = null; });
+    doc.addEventListener("pointercancel", () => { state.canvasDrag = null; setPanCursor(); });
     doc.addEventListener("wheel", (event) => {
       event.preventDefault();
       const before = state.canvasView.scale;
