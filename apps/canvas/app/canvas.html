@@ -33,6 +33,30 @@
   .action:hover,.icon-btn:hover { background:var(--raised); border-color:var(--line2); }
   .action.primary { color:#101014; background:var(--fg); border-color:var(--fg); font-weight:700; }
   main { min-height:0; display:grid; grid-template-columns:220px minmax(360px,1fr); }
+  /* COLLAPSED: a strip of type glyphs, not nothing. You lose the titles and keep
+     the ability to switch — which is the whole point of collapsing rather than
+     hiding. Same bargain the studio rail makes one level up. */
+  body.lib-collapsed main { grid-template-columns:46px minmax(360px,1fr); }
+  body.lib-collapsed .aside-head-row h2,
+  body.lib-collapsed .aside-head .label,
+  body.lib-collapsed .artifact-row strong,
+  body.lib-collapsed .artifact-row span,
+  body.lib-collapsed .delete-page { display:none; }
+  body.lib-collapsed .aside-head { padding:14px 0 10px; text-align:center; }
+  body.lib-collapsed .artifact-list { padding:6px 4px; }
+  body.lib-collapsed .artifact-row { padding:9px 0; text-align:center; }
+  /* span.artifact-glyph, not .artifact-glyph: the hide-everything rule above is
+     `body.lib-collapsed .artifact-row span` at (0,2,2) and a bare
+     .artifact-glyph is (0,2,1), so the glyph stayed hidden in the very state
+     it exists for. Second time tonight the same trap — a rule that reads as
+     an exception is not one unless it out-specifies what it is excepting. */
+  body.lib-collapsed .artifact-row span.artifact-glyph { display:block; font-size:15px; }
+  .artifact-glyph { display:none; }
+  #libToggle { flex:none; width:26px; height:24px; padding:0; display:inline-flex;
+    align-items:center; justify-content:center; border:1px solid var(--line);
+    background:var(--card); border-radius:2px; color:var(--dim); cursor:pointer; }
+  #libToggle:hover { color:var(--fg); border-color:var(--line2); }
+  body.lib-collapsed #libToggle svg { transform:scaleX(-1); }
   aside { min-height:0; overflow:auto; background:rgba(18,18,20,.6); border-right:1px solid var(--line); }
   .aside-head { position:sticky; top:0; z-index:3; padding:17px 14px 11px; background:#151519; border-bottom:1px solid var(--line); }
   .aside-head-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; }
@@ -45,7 +69,14 @@
   .artifact-row strong { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .artifact-row span { display:block; color:var(--faint); font-size:11px; margin-top:4px; }
   .artifact-row .artifact-type { display:inline-block; margin-top:7px; padding:2px 5px; border:1px solid var(--line); color:var(--dim); font-size:8px; letter-spacing:.1em; text-transform:uppercase; }
-  .delete-page { position:absolute; right:5px; top:50%; transform:translateY(-50%); z-index:2; border:0; background:transparent; color:var(--faint); padding:5px; border-radius:2px; font-size:8px; letter-spacing:.08em; text-transform:uppercase; }
+  /* A VISIBLE AFFORDANCE. This said "Delete" in 8px uppercase, in --faint, inside
+     58px of reserved padding — present in the DOM and invisible on screen, which
+     is indistinguishable from absent. It is a × you can see, and it is bordered on
+     hover so it reads as a button rather than a decoration. */
+  .delete-page { position:absolute; right:6px; top:50%; transform:translateY(-50%); z-index:2;
+    width:20px; height:20px; display:grid; place-items:center; border:1px solid transparent;
+    background:transparent; color:var(--dim); border-radius:2px; font-size:14px; line-height:1; cursor:pointer; }
+  .artifact-entry:hover .delete-page { color:var(--fg); border-color:var(--line); }
   .delete-page:hover { color:var(--coral); background:rgba(255,107,90,.1); }
   .stage { min-width:0; min-height:0; display:grid; grid-template-rows:39px minmax(0,1fr); background:rgba(5,7,12,.4); }
   .stagebar { display:flex; align-items:center; gap:9px; padding:0 12px; border-bottom:1px solid var(--line); color:var(--faint); }
@@ -86,7 +117,7 @@
        now; see declareHeader(). -->
   <main>
     <aside>
-      <div class="aside-head"><span class="label">Library</span><div class="aside-head-row"><h2>Documents &amp; boards</h2><button id="newBtn" class="icon-btn">＋ New</button></div></div>
+      <div class="aside-head"><span class="label">Library</span><div class="aside-head-row"><h2>Documents &amp; boards</h2><button id="libToggle" title="collapse the library to a strip" aria-label="collapse the library"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.25" y="2.75" width="13.5" height="10.5" rx="1.75" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.25 3.4v9.2" stroke="currentColor" stroke-width="1.3"/><path d="M2.6 4.4h2.3v7.2H2.6z" fill="currentColor" opacity=".85"/></svg></button><button id="newBtn" class="icon-btn">＋ New</button></div></div>
       <div id="artifactList" class="artifact-list"></div>
     </aside>
     <section class="stage">
@@ -207,13 +238,21 @@
 
   const loadArtifacts = async () => {
     state.artifacts = (await api("/api/artifacts")).artifacts;
-    els.list.innerHTML = state.artifacts.length ? state.artifacts.map((item) => `<div class="artifact-entry"><button class="artifact-row ${state.current?.id === item.id ? "active" : ""}" data-id="${esc(item.id)}"><strong>${esc(item.name)}</strong><span>${esc(item.id)}</span><span class="artifact-type">${item.type === "canvas" ? "Canvas" : "Document"}</span></button><button class="delete-page" data-delete-page="${esc(item.id)}" aria-label="Delete ${esc(item.name)}">Delete</button></div>`).join("") : '<div class="empty">No artifacts yet.</div>';
+    els.list.innerHTML = state.artifacts.length ? state.artifacts.map((item) => `<div class="artifact-entry"><button class="artifact-row ${state.current?.id === item.id ? "active" : ""}" data-id="${esc(item.id)}"><strong>${esc(item.name)}</strong><span>${esc(item.id)}</span><span class="artifact-type">${item.type === "canvas" ? "Canvas" : "Document"}</span><span class="artifact-glyph" aria-hidden="true">${item.type === "canvas" ? "◈" : "▤"}</span></button><button class="delete-page" data-delete-page="${esc(item.id)}" title="Delete ${esc(item.name)}" aria-label="Delete ${esc(item.name)}">×</button></div>`).join("") : '<div class="empty">No artifacts yet.</div>';
   };
   const openArtifact = async (id) => {
     const payload = await api(`/api/artifacts/item?id=${encodeURIComponent(id)}`);
     state.current = { ...payload.artifact, html:payload.html };
     state.items = state.current.type === "canvas" ? (await api(`/api/artifacts/assets?artifact=${encodeURIComponent(id)}`)).items : [];
-    state.canvasView = { x:24, y:24, scale:.55 };
+    // WHERE YOU WERE LOOKING SURVIVES REOPENING. This reset to a fixed 24,24,0.55
+    // every time, so panning and zooming were undone by switching boards and
+    // coming back — which is what "it does not save anything" meant. Items and
+    // marks were always persisted; the VIEW was the thing being thrown away.
+    //
+    // localStorage, not the artifact: a viewport is a fact about this person at
+    // this screen, and writing it into shared project data would mean one
+    // person's zoom followed everybody else into the board.
+    state.canvasView = loadView(id) || { x:24, y:24, scale:.55 };
     els.welcome.hidden = true; els.viewport.hidden = false; els.viewport.classList.toggle("canvas-mode", state.current.type === "canvas");
     els.stageTitle.textContent = state.current.name;
     canEdit = state.current.type !== "canvas"; declareHeader();
@@ -250,6 +289,25 @@
     await loadArtifacts();
     if (!state.current && state.artifacts[0]) await openArtifact(state.artifacts[0].id);
     toast("Artifact deleted"); return true;
+  };
+
+  const viewKey = (id) => `canvas.view.${id}`;
+  const loadView = (id) => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(viewKey(id)) || "null");
+      // Validated, not trusted: a hand-edited or half-written entry that produced
+      // NaN would blank the board with no error, and "my canvas is empty" is a
+      // much worse bug than "my zoom was forgotten".
+      return raw && [raw.x, raw.y, raw.scale].every(Number.isFinite) && raw.scale > 0 ? raw : null;
+    } catch { return null; }
+  };
+  let viewTimer = null;
+  const rememberView = () => {
+    if (!state.current || state.current.type !== "canvas") return;
+    clearTimeout(viewTimer);
+    viewTimer = setTimeout(() => {
+      try { localStorage.setItem(viewKey(state.current.id), JSON.stringify(state.canvasView)); } catch {}
+    }, 300);
   };
 
   const readImage = (file) => new Promise((resolve, reject) => {
@@ -298,6 +356,7 @@
       doc.body.style.backgroundPosition = `${x}px ${y}px`;
       els.mode.textContent = `Canvas · ${Math.round(scale * 100)}% · paste to place`;
       refreshAnnotations();
+      rememberView();
     };
     paintView();
     // SPACE OR MIDDLE-DRAG PANS FROM ANYWHERE, including over an item. Panning
@@ -377,14 +436,44 @@
     toast("Rendered view saved"); return `/api/artifacts/screenshot?artifact=${encodeURIComponent(state.current.id)}`;
   };
 
+  // PASTE FOLLOWS FOCUS, so this listens in both documents AND takes focus when
+  // you touch the board. It was bound here and in the artifact frame, which is
+  // right — but nothing ever focused either one, so whether a paste arrived
+  // depended on where you had last clicked. Click a header button and the event
+  // fired in the shell, where nobody was listening, and the paste vanished. That
+  // is the "works sometimes" report.
   window.addEventListener("paste", handlePaste);
-  els.frame.addEventListener("load", () => els.frame.contentDocument?.addEventListener("paste", handlePaste));
+  const focusBoard = () => { try { els.frame.contentWindow?.focus(); } catch {} };
+  els.frame.addEventListener("load", () => {
+    const doc = els.frame.contentDocument;
+    if (!doc) return;
+    doc.addEventListener("paste", handlePaste);
+    doc.addEventListener("pointerdown", focusBoard, true);
+    if (state.current?.type === "canvas") focusBoard();
+  });
+  // Touching anything in this surface also brings focus back to the board, so the
+  // next paste has somewhere to land without the user knowing any of this.
+  document.addEventListener("pointerdown", (event) => {
+    if (state.current?.type !== "canvas") return;
+    if (event.target.closest("input, textarea, [contenteditable='true'], dialog")) return;
+    focusBoard();
+  });
   els.list.addEventListener("click", (event) => {
     const deleting = event.target.closest("[data-delete-page]");
     if (deleting) return deleteArtifact(deleting.dataset.deletePage).catch((error) => toast(error.message));
     const row = event.target.closest("[data-id]");
     if (row) openArtifact(row.dataset.id).catch((error) => toast(error.message));
   });
+  // Remembered per browser, not per artifact: how much room you want the library
+  // to take is a fact about you, not about the board you happen to have open.
+  const setLib = (collapsed) => {
+    document.body.classList.toggle("lib-collapsed", collapsed);
+    $("#libToggle").title = collapsed ? "expand the library" : "collapse the library to a strip";
+    try { localStorage.setItem("canvas.lib", collapsed ? "1" : "0"); } catch {}
+  };
+  setLib((() => { try { return localStorage.getItem("canvas.lib") === "1"; } catch { return false; } })());
+  $("#libToggle").addEventListener("click", () => setLib(!document.body.classList.contains("lib-collapsed")));
+
   $("#newBtn").addEventListener("click", () => {
     $("#editorTitle").textContent = "New artifact"; els.form.dataset.mode = "new"; els.idField.hidden = false; els.typeField.hidden = false;
     els.type.value = "document"; els.htmlField.hidden = false; els.html.required = true; els.name.value = ""; els.id.value = ""; els.html.value = sampleHtml; els.dialog.showModal(); els.name.focus();
