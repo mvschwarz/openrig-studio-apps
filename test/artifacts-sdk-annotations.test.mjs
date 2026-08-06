@@ -8,8 +8,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SURFACE = path.join(REPO, "apps", "artifacts", "app", "artifacts.html");
-const APP = path.join(REPO, "apps", "artifacts", "app.json");
+const SURFACE = path.join(REPO, "apps", "canvas", "app", "canvas.html");
+const APP = path.join(REPO, "apps", "canvas", "app.json");
 const PROVIDER = path.join(REPO, "providers", "studio-artifacts", "provider.json");
 const SERVER = path.join(REPO, "providers", "studio-artifacts", "artifacts-server.mjs");
 

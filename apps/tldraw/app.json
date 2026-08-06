@@ -1,0 +1,74 @@
+{
+  "manifest_version": 1,
+  "id": "tldraw",
+  "name": "TLDRAW",
+  "summary": "A freeform canvas a human and an agent drive together — pin media, sketch, arrange.",
+  "category": "create",
+  "maker": {
+    "name": "OpenRig",
+    "url": "https://github.com/mvschwarz"
+  },
+  "surface": {
+    "entry": "app/tldraw.html",
+    "path": "/surfaces/tldraw.html",
+    "glyph": "◈",
+    "hint": "freeform canvas — pin media, sketch, arrange"
+  },
+  "roots": {
+    "canvas": {
+      "required": true
+    },
+    "media": {
+      "required": true
+    },
+    "project": {
+      "required": true
+    }
+  },
+  "calls": {
+    "/api/canvas": {
+      "required": true
+    },
+    "/api/canvas/apply": {
+      "required": true
+    },
+    "/api/canvases": {
+      "required": true
+    },
+    "/api/library": {
+      "required": true
+    },
+    "/api/media": {
+      "required": true
+    },
+    "/api/thumb": {
+      "required": true
+    }
+  },
+  "_focus_note": "/api/focus IS NOT DECLARED IN calls{} AND ITS ABSENCE IS DELIBERATE. `calls` says what this app needs a PROVIDER to answer, and no provider answers focus: it is reserved to the runtime (with /api/drive, /api/contract, /api/events, /api/factory/state) and served unconditionally. Declaring it here was harmless only while @openrig/studio-video also declared it — that declaration was itself the defect the reservation removed, and with it gone a `required: true` focus call makes the box REFUSE TO START for a verb that is always present. KNOWN GAP, NOT A CLOSED QUESTION: the resolver answers 'does an installed PROVIDER declare this?' and never asks 'does the RUNTIME serve it?', so today there is no honest way to say 'I depend on the runtime for this'. When it resolves against providers UNION runtime-owned verbs, these declarations can come back as required and mean it. See the rebind/dependency design filed with the SDK. The manifest format was never wrong here; the resolver is.",
+  "_calls_note": "What this app CALLS — a different fact from what a provider ANSWERS. It was `verbs`, a flat list doing double duty: authored by the app to mean a dependency, consumed by the composer as provider routing. That double duty is how a route could exist only because some unrelated app declared it.",
+  "vendor": [
+    "tldraw-v5.2.5"
+  ],
+  "_vendor_note": "3.4MB vendored deliberately — the box never calls cdn.tldraw.com.",
+  "requires": {
+    "binaries": [
+      "ffmpeg",
+      "ffprobe"
+    ],
+    "ffmpeg_filters": [
+      "scale",
+      "concat"
+    ],
+    "_filters_note": "REQUIRED vs PREFERRED, and the split is the point. scale/concat are load-bearing: no cut renders without them. drawtext only writes the LABEL on a placeholder slate, and the assembler now renders an unlabelled slate and reports the degradation instead of failing the export. So drawtext must NOT block an install — the Linux ffmpeg-static build (7.0.2) lacks it while the macOS one (6.0) has it, and losing a caption on an unshot beat is not worth refusing a working studio.",
+    "ffmpeg_filters_preferred": [
+      "drawtext"
+    ]
+  },
+  "provider": {
+    "package": "@openrig/studio-video",
+    "required": true,
+    "_note": "A REFERENCE, not a run spec. How to start this backend, which byte routes it serves and which verbs it answers are declared by the provider itself in providers/studio-video/provider.json. This app carried a byte-identical copy of that run spec alongside two sibling apps; three copies of one fact drift silently, which is how retiring an app once deleted a platform capability from every other surface."
+  },
+  "_rename_note": "WAS `canvas`. Renamed to what it actually IS — a tldraw board — so the generic word could go to the app that earns it. The PROVIDER side is untouched on purpose: this still calls /api/canvas, /api/canvases and /api/canvas/apply and still binds the `canvas` root kind, because those are @openrig/studio-video's contract and a verb that moves breaks every consumer, whereas an app name is a label on a rail. Renaming both at once would have made one reversible change look like two."
+}

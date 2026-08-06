@@ -2,72 +2,52 @@
   "manifest_version": 1,
   "id": "canvas",
   "name": "CANVAS",
-  "summary": "A freeform canvas a human and an agent drive together — pin media, sketch, arrange.",
-  "category": "create",
+  "summary": "Documents and canvases you and an agent can assemble and mark up together. Every drawing stays attached to a named element.",
+  "category": "studio",
   "maker": {
     "name": "OpenRig",
-    "url": "https://github.com/mvschwarz"
+    "url": "https://github.com/openrig"
   },
   "surface": {
     "entry": "app/canvas.html",
     "path": "/surfaces/canvas.html",
-    "glyph": "◈",
-    "hint": "freeform canvas — pin media, sketch, arrange"
+    "glyph": "✎",
+    "hint": "paste images into a document or canvas, arrange them, and share structured annotations with an agent"
   },
   "roots": {
-    "canvas": {
-      "required": true
-    },
-    "media": {
-      "required": true
-    },
-    "project": {
+    "artifacts": {
       "required": true
     }
   },
   "calls": {
-    "/api/canvas": {
+    "/api/annotations": {
       "required": true
     },
-    "/api/canvas/apply": {
+    "/api/artifacts": {
       "required": true
     },
-    "/api/canvases": {
+    "/api/artifacts/item": {
       "required": true
     },
-    "/api/library": {
+    "/api/artifacts/annotations": {
       "required": true
     },
-    "/api/media": {
+    "/api/artifacts/annotations/migrate": {
       "required": true
     },
-    "/api/thumb": {
+    "/api/artifacts/assets": {
+      "required": true
+    },
+    "/api/artifacts/items": {
+      "required": true
+    },
+    "/api/artifacts/screenshot": {
       "required": true
     }
   },
-  "_focus_note": "/api/focus IS NOT DECLARED IN calls{} AND ITS ABSENCE IS DELIBERATE. `calls` says what this app needs a PROVIDER to answer, and no provider answers focus: it is reserved to the runtime (with /api/drive, /api/contract, /api/events, /api/factory/state) and served unconditionally. Declaring it here was harmless only while @openrig/studio-video also declared it — that declaration was itself the defect the reservation removed, and with it gone a `required: true` focus call makes the box REFUSE TO START for a verb that is always present. KNOWN GAP, NOT A CLOSED QUESTION: the resolver answers 'does an installed PROVIDER declare this?' and never asks 'does the RUNTIME serve it?', so today there is no honest way to say 'I depend on the runtime for this'. When it resolves against providers UNION runtime-owned verbs, these declarations can come back as required and mean it. See the rebind/dependency design filed with the SDK. The manifest format was never wrong here; the resolver is.",
-  "_calls_note": "What this app CALLS — a different fact from what a provider ANSWERS. It was `verbs`, a flat list doing double duty: authored by the app to mean a dependency, consumed by the composer as provider routing. That double duty is how a route could exist only because some unrelated app declared it.",
-  "vendor": [
-    "tldraw-v5.2.5"
-  ],
-  "_vendor_note": "3.4MB vendored deliberately — the box never calls cdn.tldraw.com.",
-  "requires": {
-    "binaries": [
-      "ffmpeg",
-      "ffprobe"
-    ],
-    "ffmpeg_filters": [
-      "scale",
-      "concat"
-    ],
-    "_filters_note": "REQUIRED vs PREFERRED, and the split is the point. scale/concat are load-bearing: no cut renders without them. drawtext only writes the LABEL on a placeholder slate, and the assembler now renders an unlabelled slate and reports the degradation instead of failing the export. So drawtext must NOT block an install — the Linux ffmpeg-static build (7.0.2) lacks it while the macOS one (6.0) has it, and losing a caption on an unshot beat is not worth refusing a working studio.",
-    "ffmpeg_filters_preferred": [
-      "drawtext"
-    ]
-  },
   "provider": {
-    "package": "@openrig/studio-video",
-    "required": true,
-    "_note": "A REFERENCE, not a run spec. How to start this backend, which byte routes it serves and which verbs it answers are declared by the provider itself in providers/studio-video/provider.json. This app carried a byte-identical copy of that run spec alongside two sibling apps; three copies of one fact drift silently, which is how retiring an app once deleted a platform capability from every other surface."
-  }
+    "package": "@openrig/studio-artifacts",
+    "required": true
+  },
+  "_rename_note": "WAS `artifacts`. The word collided with Claude's own artifacts, which is a real cost in a studio you drive by talking to agents: two different things called the same name in the same sentence. The PROVIDER keeps its name and its verbs — @openrig/studio-artifacts, /api/artifacts*, the /artifacts/ byte route and the `artifacts` root kind are all unchanged, because they describe what is STORED (saved views, marks, assets) rather than what the surface is CALLED. An app is a label on a rail; a verb is a contract with every consumer."
 }

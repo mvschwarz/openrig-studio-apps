@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROVIDER = path.join(REPO, "providers", "studio-video", "provider.json");
-const CONSUMERS = ["canvas", "media-manager", "mini-nle"];
+const CONSUMERS = ["tldraw", "media-manager", "mini-nle"];
 const app = (id) => JSON.parse(fs.readFileSync(path.join(REPO, "apps", id, "app.json"), "utf8"));
 
 test("the video provider declares how to run itself, and ships what it declares", () => {
@@ -92,7 +92,7 @@ test("the canvas license byte route is declared, because nothing else can route 
   // on a production https non-loopback origin, so canvas looks perfect on 127.0.0.1
   // and dies five seconds in on a deployed box.
   const p = JSON.parse(fs.readFileSync(PROVIDER, "utf8"));
-  const canvasHtml = fs.readFileSync(path.join(REPO, "apps", "canvas", "app", "canvas.html"), "utf8");
+  const canvasHtml = fs.readFileSync(path.join(REPO, "apps", "tldraw", "app", "tldraw.html"), "utf8");
 
   assert.match(canvasHtml, /fetch\("\/canvas-license\.json"\)/,
     "positive control: canvas no longer fetches the license, so this route may be droppable");

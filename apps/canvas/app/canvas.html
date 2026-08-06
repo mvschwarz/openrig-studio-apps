@@ -1,540 +1,413 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenRig Canvas</title>
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="/vendor/tldraw-v5.2.5/tldraw.css">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Canvas</title>
 <style>
-  /* dark chrome  wrapped around
-     the tldraw editor. The canvas is a THINKING surface: media cards, ink,
-     notes, arrows, frames — storyboarding, not graphic design. The value
-     ladder: ground #121214 · panel/card white-translucent · active = INVERT
-     (solid white bg, black text). Coral = needs-human/error, indigo = routing.
-     BOUNDARY: --well stays the dark obsidian well so the vendored tldraw
-     editor (#editor .tl-container) keeps its own dark theme, untouched. */
   :root {
-    --bg: #121214; --panel: rgba(255,255,255,.05); --well: #12100c;
-    --line: rgba(255,255,255,.10); --hairline: rgba(255,255,255,.16);
-    --ink: rgba(255,255,255,.95); --dim: rgba(255,255,255,.52);
-    --coral: #ff6b5a; --indigo: #8b93ff;
-    --sans: Helvetica, "Helvetica Neue", Arial, sans-serif;
+    color-scheme:dark;
+    --bg:#121214; --fg:rgba(255,255,255,.95); --body:rgba(255,255,255,.68);
+    --dim:rgba(255,255,255,.52); --faint:rgba(255,255,255,.38);
+    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.16);
+    --card:rgba(255,255,255,.07); --raised:rgba(255,255,255,.12);
+    --coral:#ff6b5a; --indigo:#8b93ff; --sage:#7ea36f;
+    --sans:Helvetica,"Helvetica Neue",Arial,sans-serif;
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); overflow: hidden; }
-  /* The board tabs, the sync line and PIN -> AGENT were styled here when this
-     surface drew its own bar. They are declared to the shell now, which styles
-     them, so their CSS is gone rather than left behind matching nothing. */
-
-  /* 100vh, not calc(100vh - 62px): that 62 was this surface's own header, and
-     leaving it would reserve a strip for a bar that is no longer drawn. A
-     stale magic number is the usual souvenir of deleting chrome. */
-  .body { display: grid; grid-template-columns: 230px minmax(0, 1fr); height: 100vh; }
-
-  /* ---- assets rail: the unified index; tags optional, never required ---- */
-  #rail { border-right: 1px solid var(--line); overflow-y: auto; padding: 8px 0; background: var(--panel); }
-  #rail h3 { margin: 8px 12px 4px; font: 600 9.5px var(--sans); letter-spacing: 0.1em;
-    color: var(--dim); text-transform: uppercase; }
-  #rail .filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 12px 6px; }
-  #rail .chip { font-size: 9.5px; border: 1px solid var(--line); border-radius: 2px; padding: 1px 6px;
-    color: var(--dim); cursor: pointer; }
-  #rail .chip.on { background: var(--ink); border-color: var(--ink); color: #111; font-weight: 600; }
-  #rail input[type="search"] { width: calc(100% - 24px); margin: 0 12px 6px; background: rgba(255,255,255,.05);
-    color: var(--ink); border: 1px solid transparent; border-radius: 2px; font: 11px var(--sans); padding: 4px 8px; }
-  .atile { display: flex; gap: 8px; align-items: center; padding: 4px 12px; cursor: grab; }
-  .atile:hover { background: rgba(255,255,255,.06); }
-  .atile img { width: 52px; height: 34px; object-fit: cover; background: #000;
-    border: 1px solid var(--line); border-radius: 2px; flex: none; }
-  .atile .ph { width: 52px; height: 34px; display: grid; place-items: center; background: #000;
-    border: 1px solid var(--line); border-radius: 2px; color: var(--dim); flex: none; font-size: 13px; }
-  .atile .nm { font-size: 10.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap; min-width: 0; }
-  .atile .k { font-size: 9px; color: var(--dim); }
-  .empty { color: var(--dim); padding: 16px 12px; font-size: 11px; }
-
-  /* ---- editor mount ---- */
-  #editor { position: relative; min-width: 0; }
-  #editor .tl-container { background: var(--well); }
-
-  /* ---- the ask modal (house prompt) ---- */
-  #askwrap { display: none; position: fixed; inset: 0; z-index: 600;
-    background: rgba(0,0,0,.65); align-items: center; justify-content: center; }
-  #askwrap.open { display: flex; }
-  #ask { width: min(420px, 90vw); background: var(--panel); border: 1px solid var(--line);
-    border-radius: 2px; padding: 16px; }
-  #ask h2 { margin: 0 0 12px; font: 600 11.5px var(--sans); color: var(--ink); letter-spacing: .05em; line-height: 1.5; }
-  #ask input { width: 100%; padding: 8px 10px; font-size: 12px; background: rgba(255,255,255,.05);
-    color: var(--ink); border: 1px solid transparent; border-radius: 2px; font-family: var(--sans); }
-  #rail input[type="search"]:focus, #ask input:focus { outline: none;
-    border-color: rgba(255,255,255,.20); box-shadow: 0 0 0 2px rgba(255,255,255,.20); }
-  #ask .row { display: flex; gap: 8px; margin-top: 12px; }
-  #ask .spacer { flex: 1; }
-  #ask button { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
-    border-radius: 2px; font: 11.5px var(--sans); padding: 4px 10px; cursor: pointer; }
-  #ask button.primary { background: var(--ink); border-color: var(--ink); color: #111; font-weight: 600; }
-</style>
-<style>
-  /* dark-scheme scrollbars without color-scheme the
-     browser paints LIGHT scrollbars on our dark surfaces */
-  html { color-scheme: dark; }
-  * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
-  ::-webkit-scrollbar { width: 9px; height: 9px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 4px; border: 2px solid transparent; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.32); }
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  html,body { height:100%; margin:0; overflow:hidden; }
+  body { color:var(--fg); background:var(--bg); font:13.5px/1.4 var(--sans); -webkit-font-smoothing:antialiased; }
+  body::before { content:""; position:fixed; inset:-10%; z-index:-1; pointer-events:none;
+    background:radial-gradient(42% 55% at 18% 22%,rgba(139,147,255,.08),transparent 70%),radial-gradient(48% 60% at 82% 18%,rgba(255,107,90,.05),transparent 70%);
+    filter:blur(56px) saturate(1.2) brightness(.9); transform:scale(1.1); }
+  button,input,textarea,select { font:inherit; }
+  button { color:inherit; }
+  button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible { outline:2px solid var(--indigo); outline-offset:2px; }
+  /* One row, not 54px + the rest: that 54 was this surface's own header, and
+     leaving it would reserve a strip for a bar nothing draws. A stale magic
+     number is the usual souvenir of deleting chrome. */
+  .shell { height:100%; display:grid; grid-template-rows:minmax(0,1fr); }
+  .label { color:var(--faint); text-transform:uppercase; letter-spacing:.14em; font-size:10px; font-weight:700; }
+  .action,.icon-btn { border:1px solid var(--line); background:var(--card); border-radius:2px; min-height:30px; padding:0 11px; cursor:pointer; transition:.12s; font-size:9px; letter-spacing:.14em; text-transform:uppercase; font-weight:600; }
+  .action:hover,.icon-btn:hover { background:var(--raised); border-color:var(--line2); }
+  .action.primary { color:#101014; background:var(--fg); border-color:var(--fg); font-weight:700; }
+  main { min-height:0; display:grid; grid-template-columns:220px minmax(360px,1fr); }
+  aside { min-height:0; overflow:auto; background:rgba(18,18,20,.6); border-right:1px solid var(--line); }
+  .aside-head { position:sticky; top:0; z-index:3; padding:17px 14px 11px; background:#151519; border-bottom:1px solid var(--line); }
+  .aside-head-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; }
+  .aside-head h2 { font-size:15px; margin:0; letter-spacing:-.01em; }
+  .artifact-list { padding:8px; display:grid; gap:5px; }
+  .artifact-entry { position:relative; }
+  .artifact-row { width:100%; text-align:left; border:1px solid transparent; border-radius:2px; background:transparent; color:var(--body); padding:10px 58px 10px 10px; cursor:pointer; }
+  .artifact-row:hover { background:var(--card); color:var(--fg); }
+  .artifact-row.active { border-color:var(--line2); background:var(--card); color:var(--fg); }
+  .artifact-row strong { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .artifact-row span { display:block; color:var(--faint); font-size:11px; margin-top:4px; }
+  .artifact-row .artifact-type { display:inline-block; margin-top:7px; padding:2px 5px; border:1px solid var(--line); color:var(--dim); font-size:8px; letter-spacing:.1em; text-transform:uppercase; }
+  .delete-page { position:absolute; right:5px; top:50%; transform:translateY(-50%); z-index:2; border:0; background:transparent; color:var(--faint); padding:5px; border-radius:2px; font-size:8px; letter-spacing:.08em; text-transform:uppercase; }
+  .delete-page:hover { color:var(--coral); background:rgba(255,107,90,.1); }
+  .stage { min-width:0; min-height:0; display:grid; grid-template-rows:39px minmax(0,1fr); background:rgba(5,7,12,.4); }
+  .stagebar { display:flex; align-items:center; gap:9px; padding:0 12px; border-bottom:1px solid var(--line); color:var(--faint); }
+  .stagebar .title { color:var(--body); font-weight:600; margin-right:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .status-dot { width:6px; height:6px; border-radius:50%; background:var(--sage); box-shadow:0 0 10px rgba(126,163,111,.7); }
+  .viewport-wrap { min-height:0; padding:20px; display:grid; place-items:center; overflow:auto; }
+  .viewport { position:relative; width:min(100%,1120px); height:min(100%,760px); min-height:420px; background:#fff; border:1px solid rgba(255,255,255,.2); box-shadow:0 18px 70px rgba(0,0,0,.42); }
+  .viewport.canvas-mode { width:100%; height:100%; max-width:none; min-height:0; background:#d8d5cd; }
+  iframe { display:block; width:100%; height:100%; border:0; background:white; }
+  .empty { color:var(--faint); line-height:1.55; padding:20px 14px; }
+  .welcome { display:grid; place-items:center; height:100%; text-align:center; padding:30px; color:var(--body); }
+  .welcome-inner { max-width:450px; }
+  .welcome .glyph { font-size:50px; font-weight:200; color:var(--fg); line-height:1; margin-bottom:18px; }
+  .welcome h1 { margin:0 0 10px; color:var(--fg); font-size:25px; letter-spacing:-.035em; }
+  .welcome p { margin:0 auto 20px; line-height:1.55; }
+  dialog { color:var(--fg); width:min(780px,calc(100vw - 40px)); border:1px solid var(--line2); border-radius:3px; padding:0; background:#19191e; box-shadow:0 30px 100px rgba(0,0,0,.65); }
+  dialog::backdrop { background:rgba(0,0,0,.66); backdrop-filter:blur(3px); }
+  .dialog-head { display:flex; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); }
+  .dialog-head h2 { margin:0; font-size:16px; }
+  .dialog-head button { margin-left:auto; }
+  .form { padding:16px; display:grid; gap:12px; }
+  .field { display:grid; gap:6px; }
+  .field input,.field textarea,.field select { color:var(--fg); background:#101014; border:1px solid var(--line2); border-radius:2px; padding:9px; }
+  .field textarea { min-height:360px; resize:vertical; font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; tab-size:2; }
+  .dialog-actions { display:flex; justify-content:flex-end; gap:7px; padding:0 16px 16px; }
+  .toast { position:fixed; left:50%; bottom:24px; z-index:20; transform:translate(-50%,12px); opacity:0; pointer-events:none; color:#111; background:var(--fg); padding:9px 13px; border-radius:2px; font-weight:700; transition:.18s; }
+  .toast.show { transform:translate(-50%,0); opacity:1; }
+  @media(max-width:760px) { header { padding-right:90px; } main { grid-template-columns:170px minmax(300px,1fr); } }
 </style>
 </head>
 <body>
-<!-- NO TITLE BAR HERE ON PURPOSE. The shell already draws one; this surface
-     DECLARES its half (contract/shell-protocol.md). Board tabs, the sync line
-     and PIN → AGENT all still exist — they are sent as the app's title, crumb
-     and actions rather than painted into a second bar. See declareHeader(). -->
-<div class="body">
-  <nav id="rail">
-    <h3>Assets</h3>
-    <input id="search" type="search" placeholder="filter…">
-    <div class="filters" id="groupChips"></div>
-    <div class="filters" id="tagChips"></div>
-    <div id="atiles"><div class="empty">Loading…</div></div>
-  </nav>
-  <div id="editor"></div>
+<div class="shell">
+  <!-- NO TITLE BAR HERE ON PURPOSE. The shell draws one and this surface DECLARES
+       its half (contract/shell-protocol.md). It had to go with the rename anyway:
+       left alone it would have said ARTIFACTS in its own bar while the shell said
+       CANVAS above it — one app claiming two names, which is the exact confusion
+       the rename exists to remove. Edit HTML and Save view are header actions
+       now; see declareHeader(). -->
+  <main>
+    <aside>
+      <div class="aside-head"><span class="label">Library</span><div class="aside-head-row"><h2>Documents &amp; boards</h2><button id="newBtn" class="icon-btn">＋ New</button></div></div>
+      <div id="artifactList" class="artifact-list"></div>
+    </aside>
+    <section class="stage">
+      <div class="stagebar"><span class="status-dot"></span><span id="stageTitle" class="title">No artifact open</span><span id="modeText">Browse</span></div>
+      <div class="viewport-wrap">
+        <div id="welcome" class="welcome"><div class="welcome-inner"><div class="glyph">✎</div><h1>Draw where the work is.</h1><p>Open a document or canvas, then use MARKUP in the Studio header. Human and agent marks share one structured thread.</p><button id="exampleBtn" class="action primary">Make an example page</button></div></div>
+        <div id="viewport" class="viewport" hidden><iframe id="artifactFrame" title="Artifact preview"></iframe></div>
+      </div>
+    </section>
+  </main>
 </div>
 
-<div id="askwrap"><div id="ask">
-  <h2 id="askTitle"></h2>
-  <input type="text" id="askInput">
-  <div class="row"><span class="spacer"></span>
-    <button id="askCancel">cancel</button><button id="askOk" class="primary">OK</button>
-  </div>
-</div></div>
+<dialog id="editorDialog">
+  <div class="dialog-head"><h2 id="editorTitle">New artifact</h2><button class="icon-btn" data-close>×</button></div>
+  <form id="editorForm" class="form">
+    <div class="field"><label class="label" for="artifactName">Name</label><input id="artifactName" required maxlength="120"></div>
+    <div id="idField" class="field"><label class="label" for="artifactId">ID</label><input id="artifactId" required pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="launch-page"></div>
+    <div id="typeField" class="field"><label class="label" for="artifactType">Type</label><select id="artifactType"><option value="document">Document</option><option value="canvas">Canvas</option></select></div>
+    <div id="artifactHtmlField" class="field"><label class="label" for="artifactHtml">HTML</label><textarea id="artifactHtml" spellcheck="false" required></textarea></div>
+  </form>
+  <div class="dialog-actions"><button class="action" data-close>Cancel</button><button id="saveEditor" class="action primary">Save page</button></div>
+</dialog>
+<div id="toast" class="toast"></div>
 
-<script src="/vendor/tldraw-v5.2.5/tldraw-bundle.js"></script>
 <script>
 (() => {
-  const { tldraw, React, ReactDOMClient } = window.TldrawBundle;
-  const { Tldraw, loadSnapshot, getSnapshot, createShapeId, AssetRecordType } = tldraw;
-  const $ = (id) => document.getElementById(id);
-  const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
-  // self-hosted fonts: the vendored bundle's ONLY runtime asset need —
-  // the box never calls cdn.tldraw.com
-  const FONT_BASE = "/vendor/tldraw-v5.2.5/fonts";
-  const FONTS = {
-    tldraw_mono: "IBMPlexMono-Medium", tldraw_mono_italic: "IBMPlexMono-MediumItalic",
-    tldraw_mono_bold: "IBMPlexMono-Bold", tldraw_mono_italic_bold: "IBMPlexMono-BoldItalic",
-    tldraw_serif: "IBMPlexSerif-Medium", tldraw_serif_italic: "IBMPlexSerif-MediumItalic",
-    tldraw_serif_bold: "IBMPlexSerif-Bold", tldraw_serif_italic_bold: "IBMPlexSerif-BoldItalic",
-    tldraw_sans: "IBMPlexSans-Medium", tldraw_sans_italic: "IBMPlexSans-MediumItalic",
-    tldraw_sans_bold: "IBMPlexSans-Bold", tldraw_sans_italic_bold: "IBMPlexSans-BoldItalic",
-    tldraw_draw: "Shantell_Sans-Informal_Regular", tldraw_draw_italic: "Shantell_Sans-Informal_Regular_Italic",
-    tldraw_draw_bold: "Shantell_Sans-Informal_Bold", tldraw_draw_italic_bold: "Shantell_Sans-Informal_Bold_Italic",
+  const $ = (selector) => document.querySelector(selector);
+  const state = { artifacts:[], current:null, items:[], canvasView:{x:0,y:0,scale:1}, canvasDrag:null, annotationContext:null, annotationsReady:Promise.resolve() };
+  const els = {
+    list:$("#artifactList"), frame:$("#artifactFrame"), viewport:$("#viewport"), welcome:$("#welcome"),
+    stageTitle:$("#stageTitle"), mode:$("#modeText"), dialog:$("#editorDialog"), form:$("#editorForm"),
+    name:$("#artifactName"), id:$("#artifactId"), html:$("#artifactHtml"), idField:$("#idField"),
+    type:$("#artifactType"), typeField:$("#typeField"), htmlField:$("#artifactHtmlField"),
   };
-  const assetUrls = { fonts: Object.fromEntries(Object.entries(FONTS).map(([k, f]) => [k, `${FONT_BASE}/${f}.woff2`])) };
-
-  const state = {
-    editor: null,
-    canvas: null,       // active board slug (tabs); pages organize WITHIN a board
-    canvases: [],
-    sync: "",           // the sync line, declared into the shell header's crumb
-    rev: 0,
-    lastSynced: null,   // the document at the last successful sync — 3-way merge base
-    dirty: false,
-    saving: false,
-    loading: true,      // suppresses autosave while a doc is being loaded/switched
-    emptyDoc: null,     // pristine store snapshot, for opening a blank board
-    assets: [], libAssets: [], tags: {}, byAsset: {},
-    group: "all", tag: null,
-  };
-  const canvasQS = () => `canvas=${encodeURIComponent(state.canvas || "")}`;
-
-  function ask(title, placeholder = "", value = "") {
-    return new Promise((resolve) => {
-      $("askTitle").textContent = title;
-      const inp = $("askInput");
-      inp.placeholder = placeholder; inp.value = value;
-      $("askwrap").classList.add("open"); inp.focus();
-      const done = (v) => { $("askwrap").classList.remove("open");
-        inp.onkeydown = $("askOk").onclick = $("askCancel").onclick = null; resolve(v); };
-      $("askOk").onclick = () => done(inp.value.trim());
-      $("askCancel").onclick = () => done(null);
-      inp.onkeydown = (e) => {
-        if (e.key === "Enter") done(inp.value.trim());
-        if (e.key === "Escape") { e.stopPropagation(); done(null); }
-      };
-    });
-  }
-
-  async function api(pathname, opts) {
-    const res = await fetch(pathname, opts);
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) { const err = new Error(payload.error || `HTTP ${res.status}`); err.payload = payload; err.status = res.status; throw err; }
-    return payload;
-  }
-  const post = (pathname, body) => api(pathname, { method: "POST",
-    headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-
-  // The sync line rides the crumb — the app's one line of free text in the
-  // header it declares. `dirty` no longer has a colour to set, so it is folded
-  // into the words: a state you can only see as a shade is a state a screenshot
-  // cannot report.
-  const setSync = (text, dirty) => {
-    state.sync = dirty && text ? `⚠ ${text}` : (text || "");
-    declareHeader();
-  };
-
-  /* ================= sync engine: autosave + rev discipline ================ */
-
-  const docOf = () => getSnapshot(state.editor.store).document;
-
-  let saveTimer = null;
-  function scheduleSave() {
-    // loading guard: loadSnapshot (boot/switch) flushes into the user-source
-    // listener a tick later — without this, every reload cost a phantom rev
-    if (state.loading) return;
-    state.dirty = true;
-    setSync(`rev ${state.rev} · unsaved`, true);
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(save, 1500);
-  }
-
-  async function save(reason = "ui autosave") {
-    if (!state.editor || state.saving || state.loading) { if (state.dirty) { clearTimeout(saveTimer); saveTimer = setTimeout(save, 800); } return; }
-    state.saving = true;
-    const savingCanvas = state.canvas;
-    const document = docOf();
-    try {
-      const r = await post(`/api/canvas/apply?${canvasQS()}`, { baseRev: state.rev, document, reason });
-      if (savingCanvas !== state.canvas) return; // switched mid-save; the new board owns state now
-      state.rev = r.rev; state.lastSynced = document; state.dirty = false;
-      setSync(`rev ${state.rev} · saved`, false);
-    } catch (e) {
-      if (savingCanvas !== state.canvas) return;
-      if (e.status === 409 && e.payload && e.payload.document) mergeAndResave(e.payload);
-      else setSync(`save failed: ${e.message}`.slice(0, 60), true);
-    } finally { state.saving = false; }
-  }
-
-  // record-level 3-way merge, OURS (the human at the surface) wins conflicts:
-  // start from the server doc, overlay every record we changed vs base, drop
-  // every record we deleted vs base that the server left untouched.
-  function mergeAndResave(server) {
-    const base = state.lastSynced?.store || {};
-    const ours = docOf();
-    const merged = { ...server.document, store: { ...server.document.store } };
-    for (const [id, rec] of Object.entries(ours.store)) {
-      if (JSON.stringify(base[id]) !== JSON.stringify(rec)) merged.store[id] = rec;
-    }
-    for (const id of Object.keys(base)) {
-      if (!(id in ours.store) && JSON.stringify(base[id]) === JSON.stringify(server.document.store[id])) {
-        delete merged.store[id];
-      }
-    }
-    state.rev = server.rev;
-    applyRemote(merged);
-    state.dirty = true;
-    clearTimeout(saveTimer); saveTimer = setTimeout(() => save("merge after concurrent edit"), 200);
-  }
-
-  // apply a full target document to the live store as a REMOTE change
-  // (listener has source:"user", so this never echoes into autosave)
-  function applyRemote(target) {
-    const store = state.editor.store;
-    store.mergeRemoteChanges(() => {
-      const current = getSnapshot(store).document.store;
-      const puts = [], removes = [];
-      for (const [id, rec] of Object.entries(target.store)) {
-        if (JSON.stringify(current[id]) !== JSON.stringify(rec)) puts.push(rec);
-      }
-      for (const id of Object.keys(current)) if (!(id in target.store)) removes.push(id);
-      if (puts.length) store.put(puts);
-      if (removes.length) store.remove(removes);
-    });
-  }
-
-  // quiet poll: agent edits surface live under the human (7s, skip while
-  // dirty — the 409 merge path owns that case)
-  setInterval(async () => {
-    if (!state.editor || state.dirty || state.saving || state.loading) return;
-    try {
-      const ping = await api(`/api/canvas?${canvasQS()}&since=${state.rev}`);
-      if (!ping.changed || ping.canvas !== state.canvas) return;
-      const full = await api(`/api/canvas?${canvasQS()}`);
-      if (!full.document || full.canvas !== state.canvas) return;
-      applyRemote(full.document);
-      state.rev = full.rev; state.lastSynced = full.document;
-      setSync(`rev ${state.rev} · updated by ${full.updated_by || "agent"}`, false);
-    } catch {}
-  }, 7000);
-
-  /* ================= boards: tabs + switching ================= */
 
   // ---- our half of the shell's header ---------------------------------------
   //
-  // DECLARED, never drawn. The boards are the interesting case: they were a row
-  // of tab buttons this surface painted, and they are actions now — one per
-  // board, with `on` marking the open one, plus "+" and PIN → AGENT. The shell
-  // does not know what any of them mean; it renders a label and posts the click
-  // back, which is the whole contract.
-  //
-  // Re-declared on every board change, because actions are cleared when the
-  // shown surface changes and a tab row that survived a switch-away would be
-  // showing a board list from before.
-  // THE SHELL RENDERS AT MOST SIX ACTIONS AND DROPS THE REST SILENTLY, so what
-  // goes in those six is decided here rather than left to however many boards
-  // happen to exist. Fixed controls first, then the ACTIVE board (which must
-  // never be the one that falls off — a board switcher that cannot show you
-  // which board you are on is worse than no switcher), then the others in order.
-  // Anything that does not fit is COUNTED in the crumb, so a truncated row says
-  // it is truncated instead of looking like the whole list.
-  const HEADER_ACTION_CAP = 6;
+  // DECLARED, never drawn — the shell renders it, so there is one header on
+  // screen instead of two. Edit HTML and Save view were buttons in this
+  // surface's own bar; they are actions now, and "Edit HTML" is ABSENT rather
+  // than disabled on a drawing board, which is what els.edit.hidden used to do.
+  // An action that cannot act is worse than no action.
+  let canEdit = true;
   function declareHeader() {
-    const fixed = [{ id: "pin", label: "PIN → AGENT" }, { id: "board:new", label: "+" }];
-    const boards = [...state.canvases].sort((a, b) =>
-      (b.slug === state.canvas) - (a.slug === state.canvas));
-    const room = Math.max(0, HEADER_ACTION_CAP - fixed.length);
-    const shown = boards.slice(0, room);
-    const actions = [...fixed, ...shown.map((c) => ({
-      id: `board:${c.slug}`, label: c.slug, on: c.slug === state.canvas,
-    }))];
-    const hidden = boards.length - shown.length;
-    const crumb = [state.sync || "", hidden ? `+${hidden} more board${hidden > 1 ? "s" : ""}` : ""]
-      .filter(Boolean).join("  ·  ");
-    parent.postMessage({ t: "header", title: "CANVAS", crumb, actions }, "*");
+    const actions = [];
+    if (canEdit) actions.push({ id: "edit", label: "Edit HTML" });
+    actions.push({ id: "capture", label: "Save view" });
+    const crumb = state.current ? state.current.name : "";
+    parent.postMessage({ t: "header", title: "CANVAS", actions,
+      ...(crumb ? { crumb } : {}) }, "*");
   }
   window.addEventListener("message", (e) => {
     if (e.data?.t !== "header-action") return;
-    const id = String(e.data.id || "");
-    if (id === "pin") return pinToAgent();
-    if (id === "board:new") return newBoard();
-    if (id.startsWith("board:")) return switchCanvas(id.slice("board:".length));
+    if (e.data.id === "edit") openEditor();
+    if (e.data.id === "capture") saveScreenshot().catch((error) => toast(error.message));
   });
+  const sampleHtml = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{margin:0;background:#f3efe7;color:#171719;font:16px/1.45 Helvetica,Arial,sans-serif}.page{min-height:100vh;padding:7vw}.kicker{text-transform:uppercase;letter-spacing:.15em;font-size:11px;font-weight:700;color:#705d50}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:5vw;align-items:end;padding:8vh 0;border-bottom:1px solid #bdb3a5}h1{font-size:clamp(48px,8vw,104px);line-height:.88;letter-spacing:-.07em;margin:0}.lede{font-size:20px;color:#5d554f}.actions{display:flex;gap:10px;margin-top:28px}button{border:1px solid #171719;background:transparent;padding:13px 18px;font-weight:700;cursor:pointer}#publish{background:#171719;color:white}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding-top:24px}.card{min-height:120px;border:1px solid #bdb3a5;padding:18px}.card strong{display:block;font-size:22px;margin-bottom:7px}@media(max-width:700px){.hero{grid-template-columns:1fr}.grid{grid-template-columns:1fr}}</style></head><body><main class="page"><div class="kicker">OpenRig / Launch note</div><section class="hero"><div><h1>Make the work visible.</h1></div><div><p class="lede">A small page for choosing what ships next.</p><div class="actions"><button id="preview">Preview</button><button id="publish">Publish</button></div></div></section><section class="grid"><article class="card"><strong>01</strong>Build the smallest useful thing.</article><article class="card"><strong>02</strong>Look at the real pixels.</article><article class="card"><strong>03</strong>Change your mind quickly.</article></section></main></body></html>`;
 
-  async function newBoard() {
-    const name = await ask("Name the new board", "brand v3");
-    if (!name) return;
-    const r = await post("/api/canvases", { name });
-    state.canvases = r.canvases;
-    switchCanvas(r.slug);
-  }
-
-  function renderTabs() { declareHeader(); }
-
-  async function loadCanvasDoc(slug) {
-    state.loading = true;
-    const full = await api(`/api/canvas?canvas=${encodeURIComponent(slug)}`);
-    state.canvas = full.canvas;
-    loadSnapshot(state.editor.store, { document: full.document || state.emptyDoc });
-    // settle: let the loadSnapshot flush pass before autosave re-arms
-    await new Promise((r) => setTimeout(r, 250));
-    state.rev = full.rev;
-    state.lastSynced = docOf();
-    state.dirty = false;
-    state.loading = false;
-    try { localStorage.setItem("canvasLast", state.canvas); } catch {}
-    setSync(`rev ${state.rev} · saved`, false);
-    renderTabs();
-  }
-
-  async function switchCanvas(slug) {
-    if (!state.editor || slug === state.canvas) return;
-    if (state.dirty) await save("switching board");
-    try { await loadCanvasDoc(slug); } catch (e) { setSync(`switch failed: ${e.message}`.slice(0, 60), true); state.loading = false; }
-  }
-
-  /* ================= focus contract (byte-identical shape) ================= */
-
-  let focusTimer = null, lastFocusKey = "";
-  function reportFocus() {
-    clearTimeout(focusTimer);
-    focusTimer = setTimeout(() => {
-      if (!state.editor) return;
-      const shapes = state.editor.getSelectedShapes();
-      const selection = shapes.map((s) => s.meta?.assetName || s.id).slice(0, 200);
-      const key = selection.join(",");
-      if (key === lastFocusKey) return;
-      lastFocusKey = key;
-      fetch("/api/focus", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ surface: "canvas", selection,
-          view: `${state.canvas || ""}/${state.editor.getCurrentPage()?.name || ""}`.slice(0, 40) }) }).catch(() => {});
-    }, 600);
-  }
-
-  async function pinToAgent() {
-    const shapes = state.editor ? state.editor.getSelectedShapes() : [];
-    const assets = shapes.map((s) => s.meta?.assetName).filter(Boolean);
-    if (!assets.length) { setSync("select media cards first", true); return; }
-    const name = await ask("Name this selection (optional — e.g. 'act 2 boards')", "act 2 boards");
-    if (name === null) return;
-    await post("/api/selections", { name, assets, surface: "canvas" });
-    // A PIN IS ALSO A STATEMENT OF FOCUS, and the surface makes it — the
-    // selections verb used to write focus as a side effect, which made it a
-    // second focus writer that blanked `view` and basenamed every path. Naming
-    // only surface/selection/note leaves `view` (the board and page this
-    // surface reports) exactly as it was.
-    fetch("/api/focus", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ surface: "canvas", selection: assets, note: name || "" }) }).catch(() => {});
-    try { parent.postMessage({ t: "open-agent" }, "*"); } catch {}
-    setSync(`pinned ${assets.length} → agent`, false);
-  }
-
-  /* ================= media placement from the unified index ================ */
-
-  async function loadRail() {
-    try {
-      const [proj, lib, tags] = await Promise.all([
-        api("/api/project-assets").catch(() => ({ assets: [] })),
-        api("/api/library").catch(() => ({ assets: [] })),
-        api("/api/tags").catch(() => ({ tags: {}, byAsset: {} })),
-      ]);
-      state.assets = (proj.assets || [])
-        .filter((a) => a.exists !== false && ["video", "image"].includes(a.media_type))
-        .map((a) => ({ name: a.ref.split("/").pop(), kind: a.media_type, title: a.title || a.ref,
-          src: `/api/media?path=${encodeURIComponent(a.path)}`,
-          thumb: `/api/thumb?src=${encodeURIComponent(a.ref)}&t=1`, path: a.path }));
-      state.libAssets = (lib.assets || [])
-        .filter((a) => ["video", "image"].includes(a.kind))
-        .map((a) => ({ name: a.name, kind: a.kind, title: a.name, lib: true,
-          src: `/api/library/media?path=${encodeURIComponent(a.path)}`,
-          thumb: `/api/thumb?abs=${encodeURIComponent(a.path)}&t=1`, path: a.path }));
-      state.tags = tags.tags || {}; state.byAsset = tags.byAsset || {};
-      renderRail();
-    } catch (e) { $("atiles").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
-  }
-
-  function railPool() {
-    let pool = state.group === "library" ? state.libAssets
-      : state.group === "all" ? state.assets.concat(state.libAssets) : state.assets;
-    if (state.group === "video" || state.group === "image") pool = pool.filter((a) => a.kind === state.group && !a.lib);
-    if (state.tag) pool = pool.filter((a) => (state.byAsset[a.name] || []).includes(state.tag));
-    const q = $("search").value.toLowerCase();
-    if (q) pool = pool.filter((a) => [a.name, a.title, ...(state.byAsset[a.name] || [])].join(" ").toLowerCase().includes(q));
-    return pool;
-  }
-
-  function renderRail() {
-    const groups = [["all", "All"], ["image", "Image"], ["video", "Video"], ["library", "Library"]];
-    $("groupChips").innerHTML = groups.map(([id, name]) =>
-      `<span class="chip${state.group === id ? " on" : ""}" data-g="${id}">${name}</span>`).join("");
-    $("groupChips").querySelectorAll(".chip").forEach((c) => c.onclick = () => { state.group = c.dataset.g; renderRail(); });
-    const tagNames = Object.keys(state.tags).sort();
-    $("tagChips").innerHTML = tagNames.map((t) =>
-      `<span class="chip${state.tag === t ? " on" : ""}" data-t="${esc(t)}">${esc(t)}</span>`).join("");
-    $("tagChips").querySelectorAll(".chip").forEach((c) => c.onclick = () => { state.tag = state.tag === c.dataset.t ? null : c.dataset.t; renderRail(); });
-    const pool = railPool();
-    const tiles = $("atiles"); tiles.innerHTML = pool.length ? "" : '<div class="empty">Nothing matches. Tags are optional — clear filters or ask the agent.</div>';
-    for (const a of pool.slice(0, 400)) {
-      const d = document.createElement("div");
-      d.className = "atile"; d.draggable = true;
-      d.innerHTML = `<img loading="lazy" src="${esc(a.thumb)}" onerror="this.outerHTML='<span class=ph>${a.kind === "video" ? "▤" : "▣"}</span>'">
-        <span class="nm" title="${esc(a.title)}">${esc(a.name)}<br><span class="k">${esc(a.kind)}${a.lib ? " · library" : ""}</span></span>`;
-      d.onclick = () => placeAsset(a, null);
-      d.ondragstart = (e) => { e.dataTransfer.setData("text/x-canvas-asset", JSON.stringify(a)); e.dataTransfer.effectAllowed = "copy"; };
-      tiles.appendChild(d);
+  const api = async (url, options = {}) => {
+    const response = await fetch(url, options);
+    const type = response.headers.get("content-type") || "";
+    const payload = type.includes("json") ? await response.json() : await response.text();
+    if (!response.ok) throw new Error(payload.error || payload || `HTTP ${response.status}`);
+    return payload;
+  };
+  const send = (url, value) => api(url, { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(value) });
+  const remove = (url) => api(url, { method:"DELETE" });
+  const postShell = (value) => { if (parent !== window) parent.postMessage(value, "*"); };
+  const annotations = () => parent !== window ? parent.studioAnnotations : null;
+  const waitFor = async (read, timeout = 5000) => {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const value = read();
+      if (value) return value;
+      await new Promise((resolve) => setTimeout(resolve, 20));
     }
-  }
-  $("search").addEventListener("input", renderRail);
-
-  // measure natural aspect from the poster; cards land at 480 wide
-  function measure(a) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve({ w: img.naturalWidth || 480, h: img.naturalHeight || 270 });
-      img.onerror = () => resolve({ w: 480, h: 270 });
-      img.src = a.thumb;
+    throw new Error("Studio annotations did not become ready");
+  };
+  const annotationApi = () => waitFor(() => annotations());
+  const sameRecordIds = (left, right) => JSON.stringify(left.map((item) => item.id).sort()) === JSON.stringify(right.map((item) => item.id).sort());
+  const declareAnnotationTarget = () => postShell({ t:"annotation-target", frame:state.current ? "artifactFrame" : null });
+  const refreshAnnotations = () => postShell({ t:"annotation-refresh" });
+  const syncAnnotationContext = async (artifactId) => {
+    const layer = await annotationApi();
+    const before = layer.state().scope;
+    const same = state.annotationContext === artifactId;
+    state.annotationContext = artifactId;
+    postShell({ t:"annotation-context", id:artifactId });
+    declareAnnotationTarget();
+    const scoped = await waitFor(() => {
+      const value = layer.state();
+      return value.surfaceId === "artifacts" && value.scope && (same || value.scope !== before) ? value : null;
     });
-  }
-
-  async function placeAsset(a, pagePoint) {
-    if (!state.editor) return;
-    while (state.loading) await new Promise((r) => setTimeout(r, 50)); // never place into a mid-load store
-    const editor = state.editor;
-    const dims = await measure(a);
-    const W = 480, H = Math.max(40, Math.round(W * dims.h / dims.w));
-    let at = pagePoint;
-    if (!at) {
-      const b = editor.getViewportPageBounds();
-      at = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+    const migration = await send(`/api/artifacts/annotations/migrate?artifact=${encodeURIComponent(artifactId)}`, { scope:scoped.scope });
+    if (migration.migrated) {
+      postShell({ t:"annotation-context", id:null });
+      await waitFor(() => layer.state().scope !== scoped.scope);
+      postShell({ t:"annotation-context", id:artifactId });
     }
-    const assetId = AssetRecordType.createId();
-    editor.createAssets([{
-      id: assetId, typeName: "asset", type: a.kind,
-      props: { name: a.name, src: a.src, w: dims.w, h: dims.h, mimeType: a.kind === "video" ? "video/mp4" : "image/jpeg", isAnimated: false },
-      meta: { assetPath: a.path, assetName: a.name },
-    }]);
-    editor.createShape({
-      id: createShapeId(), type: a.kind, x: at.x - W / 2, y: at.y - H / 2,
-      props: { assetId, w: W, h: H },
-      meta: { assetPath: a.path, assetName: a.name },
+    await waitFor(() => {
+      const value = layer.state();
+      return value.scope === migration.scope && sameRecordIds(layer.list(), migration.records) ? value : null;
     });
-    setSync(`placed ${a.name}`, true);
-  }
+    return layer;
+  };
+  const clearAnnotationContext = () => {
+    state.annotationContext = null;
+    postShell({ t:"annotation-target", frame:null });
+    postShell({ t:"annotation-context", id:null });
+  };
+  const toast = (message) => {
+    const node = $("#toast"); node.textContent = message; node.classList.add("show");
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => node.classList.remove("show"), 1900);
+  };
+  const slug = (value) => String(value || "artifact").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,64) || "artifact";
+  const esc = (value) => String(value ?? "").replace(/[&<>\"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[char]));
+  const frameLoaded = () => new Promise((resolve) => els.frame.addEventListener("load", resolve, { once:true }));
 
-  $("editor").addEventListener("dragover", (e) => {
-    if ([...e.dataTransfer.types].includes("text/x-canvas-asset")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }
-  });
-  $("editor").addEventListener("drop", (e) => {
-    const raw = e.dataTransfer.getData("text/x-canvas-asset");
-    if (!raw) return;
-    e.preventDefault(); e.stopPropagation();
-    let at = null;
-    try { at = state.editor.screenToPage({ x: e.clientX, y: e.clientY }); } catch {}
-    placeAsset(JSON.parse(raw), at);
-  }, true);
-
-  /* ================= mount ================= */
-
-  async function boot() {
-    // boards first: pick the remembered tab, else the first board
-    try {
-      state.canvases = (await api("/api/canvases")).canvases;
-    } catch { state.canvases = [{ slug: "main", rev: 0 }]; }
-    let last = null;
-    try { last = localStorage.getItem("canvasLast"); } catch {}
-    const startSlug = state.canvases.some((c) => c.slug === last) ? last : state.canvases[0].slug;
-    renderTabs();
-    // unkeyed tldraw UNMOUNTS the editor after 5s on a production origin
-    // (https non-loopback). The key is a runtime prop; the box carries it
-    // as a file so keying needs no redeploy: echo '{"licenseKey":"…"}' >
-    // ~/studio/app/canvas-license.json
-    let licenseKey;
-    try { licenseKey = (await (await fetch("/canvas-license.json")).json()).licenseKey; } catch {}
-
-    const root = ReactDOMClient.createRoot($("editor"));
-    root.render(React.createElement(Tldraw, {
-      assetUrls,
-      ...(licenseKey ? { licenseKey } : {}),
-      inferDarkMode: false,
-      onMount: (editor) => {
-        state.editor = editor;
-        state.emptyDoc = docOf();   // pristine snapshot: what a blank board loads
-        editor.user.updateUserPreferences({ colorScheme: "dark" });
-        editor.store.listen(() => scheduleSave(), { scope: "document", source: "user" });
-        editor.store.listen(() => reportFocus(), { scope: "session", source: "user" });
-        loadCanvasDoc(startSlug).catch((e) => { setSync(`load failed: ${e.message}`.slice(0, 60), true); state.loading = false; });
-      },
-    }));
-    loadRail();
-    // tab freshness: other sessions/agents create boards too
-    setInterval(async () => {
-      try {
-        const canvases = (await api("/api/canvases")).canvases;
-        if (JSON.stringify(canvases) !== JSON.stringify(state.canvases)) { state.canvases = canvases; renderTabs(); }
-      } catch {}
-    }, 15000);
-  }
-
-  // testability handles (probe law): automated probes
-  window.__canvas = {
-    state,
-    save: () => save("probe"),
-    place: (a, at) => placeAsset(a, at),
-    doc: () => (state.editor ? docOf() : null),
-    switchCanvas,
-    createCanvas: async (name) => { const r = await post("/api/canvases", { name }); state.canvases = r.canvases; await switchCanvas(r.slug); return r.slug; },
+  const loadArtifacts = async () => {
+    state.artifacts = (await api("/api/artifacts")).artifacts;
+    els.list.innerHTML = state.artifacts.length ? state.artifacts.map((item) => `<div class="artifact-entry"><button class="artifact-row ${state.current?.id === item.id ? "active" : ""}" data-id="${esc(item.id)}"><strong>${esc(item.name)}</strong><span>${esc(item.id)}</span><span class="artifact-type">${item.type === "canvas" ? "Canvas" : "Document"}</span></button><button class="delete-page" data-delete-page="${esc(item.id)}" aria-label="Delete ${esc(item.name)}">Delete</button></div>`).join("") : '<div class="empty">No artifacts yet.</div>';
+  };
+  const openArtifact = async (id) => {
+    const payload = await api(`/api/artifacts/item?id=${encodeURIComponent(id)}`);
+    state.current = { ...payload.artifact, html:payload.html };
+    state.items = state.current.type === "canvas" ? (await api(`/api/artifacts/assets?artifact=${encodeURIComponent(id)}`)).items : [];
+    state.canvasView = { x:24, y:24, scale:.55 };
+    els.welcome.hidden = true; els.viewport.hidden = false; els.viewport.classList.toggle("canvas-mode", state.current.type === "canvas");
+    els.stageTitle.textContent = state.current.name;
+    canEdit = state.current.type !== "canvas"; declareHeader();
+    els.mode.textContent = state.current.type === "canvas" ? "Canvas · paste an image" : "Document · use MARKUP to annotate";
+    const loaded = frameLoaded();
+    els.frame.src = `/artifacts/${encodeURIComponent(id)}/artifact.html?at=${Date.now()}`;
+    await loaded;
+    setupCanvasInteractions();
+    state.annotationsReady = syncAnnotationContext(id);
+    await Promise.all([loadArtifacts(), state.annotationsReady]);
+    return state.current;
+  };
+  const createArtifact = async ({ id, name, html = "", type = "document" }) => {
+    const payload = await send("/api/artifacts", { id, name, html, type });
+    await loadArtifacts(); await openArtifact(payload.artifact.id); return payload.artifact;
+  };
+  const updateArtifact = async ({ id = state.current?.id, name, html }) => {
+    const payload = await send(`/api/artifacts/item?id=${encodeURIComponent(id)}`, { name, html });
+    if (state.current?.id === id) await openArtifact(id);
+    return payload.artifact;
+  };
+  const deleteArtifact = async (id = state.current?.id, { confirm:ask = true } = {}) => {
+    if (!id) throw new Error("open an artifact first or pass artifact");
+    const artifact = state.artifacts.find((item) => item.id === id);
+    if (ask && !window.confirm(`Delete “${artifact?.name || id}” and all of its annotations?`)) return false;
+    if (state.current?.id === id) clearAnnotationContext();
+    await remove(`/api/artifacts/item?id=${encodeURIComponent(id)}`);
+    if (state.current?.id === id) {
+      state.current = null; state.items = [];
+      els.frame.removeAttribute("src"); els.viewport.hidden = true; els.welcome.hidden = false;
+      els.stageTitle.textContent = "No artifact open"; els.mode.textContent = "Browse";
+      canEdit = true; declareHeader();
+    }
+    await loadArtifacts();
+    if (!state.current && state.artifacts[0]) await openArtifact(state.artifacts[0].id);
+    toast("Artifact deleted"); return true;
   };
 
-  boot();
+  const readImage = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+    reader.onerror = () => reject(reader.error || new Error("image could not be read"));
+    reader.readAsDataURL(file);
+  });
+  const addImage = async ({ artifact = state.current?.id, name = "Pasted image", mime = "image/png", data, x, y, width = 420 }) => {
+    if (!artifact) throw new Error("open an artifact first or pass artifact");
+    if (!data) throw new Error("base64 image data is required");
+    if (state.current?.id === artifact && state.current.type === "canvas") {
+      const view = state.canvasView;
+      if (!Number.isFinite(Number(x))) x = (els.frame.clientWidth / 2 - view.x) / view.scale - width / 2;
+      if (!Number.isFinite(Number(y))) y = (els.frame.clientHeight / 2 - view.y) / view.scale - 180;
+    }
+    const payload = await send(`/api/artifacts/assets?artifact=${encodeURIComponent(artifact)}`, { name, mime, data, x, y, width });
+    if (state.current?.id === artifact) await openArtifact(artifact);
+    toast(state.current?.type === "canvas" ? "Image placed on canvas" : "Image added to document");
+    return payload.item;
+  };
+  const moveItem = async (item, position, artifact = state.current?.id, { refresh = true } = {}) => {
+    if (!artifact || !item) throw new Error("artifact and item name are required");
+    const payload = await send(`/api/artifacts/items?artifact=${encodeURIComponent(artifact)}`, { item, ...position });
+    if (state.current?.id === artifact) {
+      const at = state.items.findIndex((entry) => entry.id === payload.item.id);
+      if (at >= 0) state.items[at] = payload.item;
+      if (refresh) await openArtifact(artifact); else refreshAnnotations();
+    }
+    return payload.item;
+  };
+  const setupCanvasInteractions = () => {
+    if (state.current?.type !== "canvas") return;
+    const doc = els.frame.contentDocument;
+    const world = doc?.querySelector("[data-canvas-world]");
+    if (!doc || !world || doc.documentElement.dataset.artifactsInteractions === "ready") return;
+    doc.documentElement.dataset.artifactsInteractions = "ready";
+    const paintView = () => {
+      const { x,y,scale } = state.canvasView;
+      world.style.transform = `translate(${x}px,${y}px) scale(${scale})`;
+      els.mode.textContent = `Canvas · ${Math.round(scale * 100)}% · paste to place`;
+      refreshAnnotations();
+    };
+    paintView();
+    doc.addEventListener("pointerdown", (event) => {
+      const item = event.target.closest?.("[data-item-id]");
+      state.canvasDrag = item ? { kind:"item", pointerId:event.pointerId, item, id:item.dataset.itemId, startX:event.clientX, startY:event.clientY, left:parseFloat(item.style.left), top:parseFloat(item.style.top) } : { kind:"pan", pointerId:event.pointerId, startX:event.clientX, startY:event.clientY, x:state.canvasView.x, y:state.canvasView.y };
+      (item || doc.documentElement).setPointerCapture?.(event.pointerId); event.preventDefault();
+    });
+    doc.addEventListener("pointermove", (event) => {
+      const drag = state.canvasDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const dx = event.clientX-drag.startX, dy = event.clientY-drag.startY;
+      if (drag.kind === "item") { drag.item.style.left = `${drag.left + dx/state.canvasView.scale}px`; drag.item.style.top = `${drag.top + dy/state.canvasView.scale}px`; refreshAnnotations(); }
+      else { state.canvasView.x = drag.x+dx; state.canvasView.y = drag.y+dy; paintView(); }
+    });
+    doc.addEventListener("pointerup", (event) => {
+      const drag = state.canvasDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      state.canvasDrag = null;
+      if (drag.kind === "item") moveItem(drag.id, { x:parseFloat(drag.item.style.left), y:parseFloat(drag.item.style.top) }, state.current.id, { refresh:false }).catch((error) => toast(error.message));
+    });
+    doc.addEventListener("pointercancel", () => { state.canvasDrag = null; });
+    doc.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const before = state.canvasView.scale;
+      const next = Math.max(.25,Math.min(2.5,before*Math.exp(-event.deltaY*.0015)));
+      const worldX = (event.clientX-state.canvasView.x)/before, worldY = (event.clientY-state.canvasView.y)/before;
+      state.canvasView.x = event.clientX-worldX*next; state.canvasView.y = event.clientY-worldY*next; state.canvasView.scale = next; paintView();
+    }, { passive:false });
+  };
+  const handlePaste = async (event) => {
+    const file = [...(event.clipboardData?.items || [])].find((item) => item.kind === "file" && item.type.startsWith("image/"))?.getAsFile();
+    if (!file) return;
+    event.preventDefault();
+    try { await addImage({ name:file.name || `Pasted image ${new Date().toLocaleTimeString()}`, mime:file.type, data:await readImage(file) }); }
+    catch(error) { toast(error.message); }
+  };
+
+  const saveScreenshot = async () => {
+    if (!state.current) throw new Error("open an artifact first");
+    await state.annotationsReady;
+    const doc = els.frame.contentDocument;
+    if (!doc) throw new Error("artifact is not loaded");
+    const width = els.frame.clientWidth, height = els.frame.clientHeight;
+    const clone = doc.documentElement.cloneNode(true);
+    clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+    const serialized = new XMLSerializer().serializeToString(clone);
+    const activeFrame = parent.studioShell?.active?.().frame;
+    const annotationRoot = parent.document?.querySelector?.(".studio-annotations");
+    const annotationCanvas = annotationRoot?.querySelector?.(".studio-annotations__canvas");
+    const surfaceRect = activeFrame?.getBoundingClientRect?.();
+    const rootRect = annotationRoot?.getBoundingClientRect?.();
+    const nestedRect = els.frame.getBoundingClientRect();
+    const dx = (surfaceRect?.left || 0) + nestedRect.left - (rootRect?.left || 0);
+    const dy = (surfaceRect?.top || 0) + nestedRect.top - (rootRect?.top || 0);
+    const defs = annotationCanvas?.querySelector("defs")?.outerHTML || "";
+    const marks = annotationCanvas?.querySelector("[data-marks]")?.innerHTML || "";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%">${serialized}</foreignObject><svg width="100%" height="100%"><style>.shape{fill:rgba(255,107,90,.10);stroke:#ff6b5a;stroke-width:2.5}.agent .shape{fill:rgba(139,147,255,.10);stroke:#8b93ff}.studio-annotations__badge{fill:#ff6b5a}.agent .studio-annotations__badge{fill:#8b93ff}.studio-annotations__badge-text,.studio-annotations__label{fill:#fff;font:bold 11px Helvetica}</style>${defs}<g transform="translate(${-dx} ${-dy})">${marks}</g></svg></svg>`;
+    await send(`/api/artifacts/screenshot?artifact=${encodeURIComponent(state.current.id)}`, { svg });
+    toast("Rendered view saved"); return `/api/artifacts/screenshot?artifact=${encodeURIComponent(state.current.id)}`;
+  };
+
+  window.addEventListener("paste", handlePaste);
+  els.frame.addEventListener("load", () => els.frame.contentDocument?.addEventListener("paste", handlePaste));
+  els.list.addEventListener("click", (event) => {
+    const deleting = event.target.closest("[data-delete-page]");
+    if (deleting) return deleteArtifact(deleting.dataset.deletePage).catch((error) => toast(error.message));
+    const row = event.target.closest("[data-id]");
+    if (row) openArtifact(row.dataset.id).catch((error) => toast(error.message));
+  });
+  $("#newBtn").addEventListener("click", () => {
+    $("#editorTitle").textContent = "New artifact"; els.form.dataset.mode = "new"; els.idField.hidden = false; els.typeField.hidden = false;
+    els.type.value = "document"; els.htmlField.hidden = false; els.html.required = true; els.name.value = ""; els.id.value = ""; els.html.value = sampleHtml; els.dialog.showModal(); els.name.focus();
+  });
+  $("#exampleBtn").addEventListener("click", () => createArtifact({ id:`launch-page-${Date.now().toString().slice(-5)}`, name:"Launch page", html:sampleHtml }).catch((error) => toast(error.message)));
+  function openEditor() {
+    if (!state.current) return toast("Open a page first");
+    $("#editorTitle").textContent = "Edit artifact"; els.form.dataset.mode = "edit"; els.idField.hidden = true; els.typeField.hidden = true; els.htmlField.hidden = false; els.html.required = true;
+    els.name.value = state.current.name; els.id.value = state.current.id; els.html.value = state.current.html; els.dialog.showModal();
+  }
+  $("#saveEditor").addEventListener("click", async () => {
+    if (!els.form.reportValidity()) return;
+    try {
+      if (els.form.dataset.mode === "new") await createArtifact({ id:slug(els.id.value || els.name.value), name:els.name.value, html:els.type.value === "canvas" ? "" : els.html.value, type:els.type.value });
+      else await updateArtifact({ id:state.current.id, name:els.name.value, html:els.html.value });
+      els.dialog.close(); toast("Page saved");
+    } catch(error) { toast(error.message); }
+  });
+  els.name.addEventListener("input", () => { if (els.form.dataset.mode === "new" && !els.id.dataset.touched) els.id.value = slug(els.name.value); });
+  els.id.addEventListener("input", () => { els.id.dataset.touched = "true"; });
+  els.type.addEventListener("change", () => { const canvas = els.type.value === "canvas"; els.htmlField.hidden = canvas; els.html.required = !canvas; });
+  document.querySelectorAll("[data-close]").forEach((button) => button.addEventListener("click", () => els.dialog.close()));
+
+  const withArtifact = async (artifact, task) => {
+    if (artifact && artifact !== state.current?.id) await openArtifact(artifact);
+    if (!state.current) throw new Error("open an artifact first or pass artifact");
+    const layer = await state.annotationsReady;
+    return task(layer);
+  };
+  declareHeader();
+  const ready = loadArtifacts().then(() => state.artifacts[0] ? openArtifact(state.artifacts[0].id) : null);
+  window.artifacts = Object.freeze({
+    ready,
+    list:async () => (await api("/api/artifacts")).artifacts,
+    open:openArtifact,
+    create:createArtifact,
+    update:updateArtifact,
+    delete:(artifact, options) => deleteArtifact(artifact, { confirm:false, ...options }),
+    addImage,
+    moveItem,
+    items:async (artifact = state.current?.id) => (await api(`/api/artifacts/assets?artifact=${encodeURIComponent(artifact)}`)).items,
+    annotate:({ artifact = state.current?.id, ...mark } = {}) => withArtifact(artifact, (layer) => layer.annotate(mark)),
+    deleteAnnotation:(id, artifact = state.current?.id) => withArtifact(artifact, (layer) => layer.remove(id)),
+    annotations:(artifact = state.current?.id) => withArtifact(artifact, (layer) => layer.list()),
+    screenshot:saveScreenshot,
+    state:() => ({ current:state.current?.id || null, items:structuredClone(state.items), annotations:annotations()?.list?.() || [], annotationScope:annotations()?.state?.().scope || null }),
+  });
 })();
 </script>
 </body>
