@@ -91,6 +91,73 @@ test("nothing in the closure names a machine, an account path or a credential", 
   assert.deepEqual(hits, []);
 });
 
+// The app's closure is what a browser loads for it: the declared entry page, anything that page
+// references by src, href or import, and any vendor directory the manifest ships. Nothing may come
+// from another origin, so a page can't quietly pull code or data from somewhere unreviewed.
+const appDir = path.resolve(here, "../apps/observatory");
+const REF_RE = /\b(?:src|href)\s*=\s*["']([^"'#]+)["']|\bimport\s*(?:[^"'`]*?from\s*)?["']([^"']+)["']|@import\s+(?:url\()?["']?([^"')]+)/g;
+
+export function appClosure(dir) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(dir, "app.json"), "utf8"));
+  const files = [path.join(dir, "app.json")];
+  const problems = [];
+  const queue = [path.resolve(dir, manifest.surface.entry)];
+  for (const v of manifest.vendor ?? []) {
+    const vd = path.join(dir, "vendor", v);
+    if (!fs.existsSync(vd)) { problems.push(`vendor/${v} is declared but missing`); continue; }
+    for (const f of fs.readdirSync(vd, { recursive: true })) { const p = path.join(vd, f); if (fs.statSync(p).isFile()) files.push(p); }
+  }
+  const seen = new Set();
+  while (queue.length) {
+    const file = queue.shift();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    if (!file.startsWith(dir + path.sep)) { problems.push(`${file} is outside the app`); continue; }
+    if (!fs.existsSync(file)) { problems.push(`${path.relative(dir, file)} is loaded but missing`); continue; }
+    files.push(file);
+    if (!/\.(html|m?js|css)$/.test(file)) continue;
+    for (const m of fs.readFileSync(file, "utf8").matchAll(REF_RE)) {
+      const ref = (m[1] ?? m[2] ?? m[3]).trim();
+      if (/^(https?:)?\/\//i.test(ref)) { problems.push(`${path.relative(dir, file)} loads ${ref} from another origin`); continue; }
+      if (ref.startsWith("/") || ref.startsWith("data:")) continue; // same-origin runtime routes and inline data
+      queue.push(path.resolve(path.dirname(file), ref));
+    }
+  }
+  return { files, problems };
+}
+
+test("the app's closure loads nothing from another origin and nothing missing", () => {
+  const { files, problems } = appClosure(appDir);
+  assert.deepEqual(problems, []);
+  const rel = files.map((f) => path.relative(appDir, f)).sort();
+  assert.deepEqual(rel, ["app.json", path.join("app", "observatory.html")]);
+});
+
+test("nothing in the app's closure names a machine, an account path or a credential", () => {
+  const { files } = appClosure(appDir);
+  const patterns = [...PATTERNS, ...extraPatterns()];
+  const hits = [];
+  for (const file of files) {
+    fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+      for (const p of patterns) if (p.re.test(line)) hits.push(`${path.relative(appDir, file)}:${i + 1} ${p.name}`);
+    });
+  }
+  assert.deepEqual(hits, []);
+});
+
+test("the app check does catch a page that loads from another origin", () => {
+  const tmp = fs.mkdtempSync(path.join(fs.realpathSync(path.resolve(here, "..")), ".closure-"));
+  try {
+    fs.mkdirSync(path.join(tmp, "app"));
+    fs.writeFileSync(path.join(tmp, "app.json"), JSON.stringify({ surface: { entry: "app/x.html" }, vendor: [] }));
+    fs.writeFileSync(path.join(tmp, "app", "x.html"), '<script src="https://cdn.example/lib.js"></script><script type="module">import "./gone.mjs";</script>');
+    const { problems } = appClosure(tmp);
+    assert.equal(problems.length, 2, problems.join("; "));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("the pattern check does catch a planted path", () => {
   // Without this, a regular expression that never matches would keep the test
   // above green whatever the provider contained.

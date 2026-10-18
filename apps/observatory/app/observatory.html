@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Observatory</title>
+  <style>
+    /* Same tokens and table idiom as the other glanceable tables in the studio. */
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e13;
+      --panel: #121722;
+      --line: #252c3a;
+      --text: #f3f5f8;
+      --muted: #929cad;
+      --fresh: #47d18c;
+      --stale: #ffb44a;
+      --unknown: #77808f;
+      --hot: #ff795f;
+      --info: #6d9eff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      background: radial-gradient(circle at 80% 0%, #172032 0, transparent 34%), var(--bg);
+      color: var(--text);
+      font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    main { width: min(1200px, 100%); margin: 0 auto; padding: 28px 16px; }
+    header { margin-bottom: 20px; }
+    .eyebrow { color: var(--fresh); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 4px 0 6px; font: 600 clamp(28px, 5vw, 46px)/1.05 system-ui, sans-serif; letter-spacing: -.04em; }
+    .lede { color: var(--muted); font-size: 12px; max-width: 80ch; }
+    section { margin-top: 24px; }
+    h2 { margin: 0 0 6px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+    .scope { color: var(--muted); font-size: 11px; margin: 0 0 8px; }
+    .table-wrap, .notice { border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); border-radius: 8px; }
+    .table-wrap { overflow-x: auto; margin-bottom: 10px; }
+    .notice { padding: 12px 14px; font-size: 12px; color: #cbd1db; margin-bottom: 10px; }
+    table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; }
+    th { padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--muted); background: rgba(255,255,255,.018); font-size: 9px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+    td { padding: 9px 12px; border-bottom: 1px solid var(--line); color: #cbd1db; font-size: 11px; vertical-align: top; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .name { color: var(--text); font-weight: 650; white-space: nowrap; }
+    .sub { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+    .muted { color: var(--muted); }
+    .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .status { white-space: nowrap; font-weight: 650; }
+    .status.ok { color: var(--fresh); }
+    .status.bad { color: var(--hot); }
+    .status.unknown, .unknown { color: var(--unknown); }
+    .stale { color: var(--stale); }
+    .placeholder { color: var(--muted); font-size: 12px; }
+    footer { margin-top: 28px; color: var(--muted); font-size: 11px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">Observatory</div>
+      <h1>Your machines</h1>
+      <div class="lede" id="lede">Reading…</div>
+    </header>
+    <div id="content"></div>
+    <footer id="foot"></footer>
+  </main>
+
+  <script type="module">
+    // Everything that turns a reading into words lives in these exported functions, so it can
+    // be checked without a browser. The boot at the bottom runs only in a page.
+    //
+    // The rules the whole page follows:
+    //  - A machine or reading that couldn't be read says so, and why. It never shows as
+    //    empty, zero or healthy.
+    //  - The age of a reading is how long ago the SOURCE measured it, not when this page asked.
+    //    Where the source reports no time, the page says "time not reported".
+    //  - A queue list is a filtered, bounded slice of one machine's queue, never a total.
+    //  - Activity is activity. It is not a measure of productivity.
+
+    export const esc = (v) => String(v ?? '').replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]);
+    const unknown = (label = 'unknown') => `<span class="unknown">${esc(label)}</span>`;
+
+    const STATUS_WORDS = {
+      ok: 'read',
+      partial: 'partly read',
+      unreachable: 'unreachable',
+      guarded: 'needs a token (not read)',
+      'unsupported-transport': 'not readable over HTTP',
+      'http-error': 'error',
+    };
+    export function statusText(status) {
+      const cls = status === 'ok' ? 'ok' : status === 'partial' ? 'unknown' : 'bad';
+      return `<span class="status ${cls}">${esc(STATUS_WORDS[status] ?? status ?? 'unknown')}</span>`;
+    }
+
+    // How old a measurement is, from the source's own time. polledAt is deliberately not a
+    // parameter: a sample fetched a second ago can still be an hour old.
+    export function ageText(observedAt, now) {
+      if (!observedAt) return unknown('time not reported');
+      const t = Date.parse(observedAt);
+      if (Number.isNaN(t)) return unknown('time not reported');
+      const s = Math.round((now - t) / 1000);
+      if (s < 0) return `<span title="${esc(observedAt)}">just now</span>`;
+      const text = s < 90 ? `${s} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
+      return `<span title="${esc(observedAt)}">${text}</span>`;
+    }
+
+    export const hostName = (h) => (h.hostId ? esc(h.hostId) : unknown('identity not reported'));
+    const hostCell = (h) => `<span class="name">${hostName(h)}</span><span class="sub">listed as ${esc((h.labels ?? []).join(', '))}</span>`;
+    const why = (r) => [r?.detail, r?.httpStatus ? `HTTP ${r.httpStatus}` : null].filter(Boolean).map(esc).join(' · ');
+
+    function notRead(h, r, what) {
+      return `<div class="notice"><b>${hostName(h)}</b>: ${esc(what)} not read: ${statusText(r?.status ?? h.status)}${why(r ?? h) ? ` · ${why(r ?? h)}` : ''}. This is a failure to read, not an empty result.</div>`;
+    }
+
+    export function renderHosts(fleet) {
+      const rows = (fleet.hosts ?? []).map((h) => `<tr>
+        <td>${hostCell(h)}</td>
+        <td>${statusText(h.status)}${h.status !== 'ok' && why(h) ? `<span class="sub">${why(h)}</span>` : ''}</td>
+        <td>${h.healthz?.version ? esc(h.healthz.version) : unknown()}</td>
+        <td>${esc(h.transport ?? '')}<span class="sub">${esc(h.url ?? '')}</span></td>
+        <td>${h.identitySource === 'self-reported' ? 'reported by the machine' : h.identitySource === 'declared' ? 'declared in the host list' : unknown('not reported')}${(h.identityConflicts ?? []).length ? `<span class="sub stale">listed as ${esc(h.identityConflicts.map((c) => c.declared).join(', '))}, reports ${esc(h.hostId)}</span>` : ''}</td>
+      </tr>`).join('');
+      const c = fleet.coverage ?? {};
+      const reg = fleet.registry ?? {};
+      const regNote = reg.status === 'ok' ? `the host list names ${esc(reg.listed)} other machine${reg.listed === 1 ? '' : 's'}` : `the host list could not be read: ${statusText(reg.status)}${why(reg) ? ` · ${why(reg)}` : ''}`;
+      return `<section id="hosts"><h2>Machines</h2>
+        <p class="scope">${esc(c.hostsRead ?? 0)} of ${esc(c.hostsKnown ?? 0)} machines read · ${regNote}${c.complete ? '' : ' · <span class="stale">this view is incomplete</span>'} · asked at ${esc(fleet.polledAt ?? '')}</p>
+        <div class="table-wrap"><table><thead><tr><th>Machine</th><th>Status</th><th>OpenRig</th><th>Reached by</th><th>Identity</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+    }
+
+    const pct = (v) => (v === null || v === undefined ? unknown() : `${esc(v)}%`);
+    const count = (v) => (v === null || v === undefined ? unknown() : esc(v));
+
+    export function renderSeats(fleet, now) {
+      const parts = [];
+      const rows = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.seats;
+        if (!r || r.data === null || r.data === undefined) { parts.push(notRead(h, r, 'seats')); continue; }
+        if (r.status === 'partial') parts.push(`<div class="notice"><b>${hostName(h)}</b>: seats partly read. Rigs not read: ${esc((r.coverage?.rigsFailed ?? []).map((x) => `${x.rigName ?? x.rigId} (${STATUS_WORDS[x.status] ?? x.status})`).join(', '))}.</div>`);
+        if (!r.data.length) parts.push(`<div class="notice"><b>${hostName(h)}</b>: read, and it reports no rigs running.</div>`);
+        for (const s of r.data) {
+          const a = s.activity ?? {};
+          const ctx = s.context;
+          rows.push(`<tr>
+            <td><span class="name">${esc(s.rigName ?? '')}/${esc(s.logicalId ?? '')}</span><span class="sub">on ${hostName(h)}</span></td>
+            <td>${a.state && a.state !== 'unknown' ? esc(a.state) : unknown()}${a.reason ? `<span class="sub">${esc(a.reason)}</span>` : ''}</td>
+            <td>${a.method ? esc(a.method) : unknown('method not reported')}</td>
+            <td>${ageText(a.observedAt, now)}${a.stale ? ' <span class="stale">stale (the source says)</span>' : ''}</td>
+            <td>${ctx && ctx.availability === 'known' ? `${pct(ctx.usedPercentage)}${ctx.windowSize ? ` of ${esc(ctx.windowSize)}` : ''}<span class="sub">${ageText(ctx.observedAt, now)}${ctx.fresh ? '' : ' · <span class="stale">not fresh</span>'}</span>` : unknown()}</td>
+            <td class="numeric">${count(s.work?.assigned)} / ${count(s.work?.inProgress)} / ${count(s.work?.blocked)}</td>
+          </tr>`);
+        }
+      }
+      const table = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Seat</th><th>Activity</th><th>Method</th><th>Measured</th><th>Context used</th><th>Work: assigned / in progress / blocked</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>` : '';
+      return `<section id="seats"><h2>Seats</h2><p class="scope">Activity is what each seat was doing when its machine last sampled it. It is not a measure of productivity.</p>${parts.join('')}${table}</section>`;
+    }
+
+    export function renderQueues(fleet, now) {
+      const blocks = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.queues;
+        if (!r || r.data === null || r.data === undefined) { blocks.push(notRead(h, r, 'queue')); continue; }
+        const cov = r.coverage ?? {};
+        const scope = `<p class="scope"><b>${hostName(h)}</b>: filtered and bounded; not a total. States ${esc((cov.filter?.state ?? []).join(', '))}, at most ${esc(cov.limit)} rows, ${esc(cov.returned)} returned.${cov.possiblyTruncated ? ' <span class="stale">The page is full, so more rows may exist.</span>' : ''}</p>`;
+        const rows = r.data.map((q) => `<tr>
+          <td><span class="name">${esc(q.id)}</span>${q.summary ? `<span class="sub">${esc(q.summary)}</span>` : ''}</td>
+          <td>${esc(q.state)}${q.blockedOn ? `<span class="sub">on ${esc(q.blockedOn)}</span>` : ''}</td>
+          <td>${esc(q.priority ?? '')}</td>
+          <td>${esc(q.from ?? '')} → ${esc(q.to ?? '')}</td>
+          <td>${ageText(q.updatedAt, now)}</td>
+          <td>${q.delivery ? esc(q.delivery) : unknown()}</td>
+        </tr>`).join('');
+        blocks.push(scope + (rows ? `<div class="table-wrap"><table><thead><tr><th>Item</th><th>State</th><th>Priority</th><th>From → to</th><th>Updated</th><th>Delivery</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">No rows matched this filter on ${hostName(h)}.</div>`));
+      }
+      return `<section id="queues"><h2>Queues</h2>${blocks.join('')}</section>`;
+    }
+
+    const summaryLine = (label, part, body, now) => `<tr><td class="name">${esc(label)}</td><td>${part.status === 'ok' ? body(part.data) : `${statusText(part.status)}${why(part) ? ` · ${why(part)}` : ''}`}</td><td>${part.status === 'ok' ? ageText(part.observedAt, now) : ''}</td></tr>`;
+    const kv = (o) => Object.entries(o ?? {}).map(([k, v]) => `${esc(k)} ${esc(v)}`).join(', ') || unknown('none reported');
+
+    export function renderHealth(fleet, now) {
+      const blocks = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.health;
+        if (!r || !r.data) { blocks.push(notRead(h, r, 'health')); continue; }
+        const d = r.data;
+        const summary = `<div class="table-wrap"><table><thead><tr><th>${hostName(h)}</th><th>Summary</th><th>Measured</th></tr></thead><tbody>
+          ${summaryLine('Seats', d.nodes, (x) => `${esc(x.total)} seats · ${kv(x.byLifecycle)} · ${esc(x.attentionRequired)} need attention`, now)}
+          ${summaryLine('Context', d.context, (x) => `${esc(x.critical)} critical, ${esc(x.warning)} warning, ${esc(x.stale)} stale of ${esc(x.total)}`, now)}
+          ${summaryLine('Gateway', d.gateway, (x) => esc(x.state), now)}
+        </tbody></table></div>`;
+        const f = d.findings;
+        let findings;
+        if (f.status !== 'ok' || !Array.isArray(f.data)) findings = `<div class="notice">Findings not read: ${statusText(f.status)}${why(f) ? ` · ${why(f)}` : ''}. This is a failure to read, not a clean bill of health.</div>`;
+        else {
+          const cov = f.coverage ?? {};
+          const partialSources = (cov.sources ?? []).filter((s) => s.partial || s.status === 'unavailable');
+          const scope = `<p class="scope">Findings evaluated ${ageText(f.observedAt, now)} · showing ${esc(f.data.length)} of ${count(cov.total)}${cov.truncated ? ' <span class="stale">(truncated)</span>' : ''}${partialSources.length ? ` · <span class="stale">sources not fully evaluated: ${esc(partialSources.map((s) => s.source).join(', '))}</span>` : ''}</p>`;
+          const rows = f.data.map((x) => `<tr><td>${esc(x.severity ?? '')}</td><td class="name">${esc(x.detector ?? '')}</td><td>${esc(x.summary ?? '')}</td><td>${ageText(x.lastObservedAt, now)}</td><td>${esc(x.status ?? '')}</td></tr>`).join('');
+          findings = scope + (rows ? `<div class="table-wrap"><table><thead><tr><th>Severity</th><th>Detector</th><th>Finding</th><th>Last seen</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">No active findings among those evaluated.</div>`);
+        }
+        blocks.push(summary + findings);
+      }
+      return `<section id="health"><h2>Health</h2>${blocks.join('')}</section>`;
+    }
+
+    export function renderLater() {
+      return `<section id="later"><h2>Not set up yet</h2><p class="placeholder">Ceremony against what ships, subscriptions and the observatory's agent come in later versions. Nothing here estimates them.</p></section>`;
+    }
+
+    export function renderPage({ hosts, seats, queues, health }, now) {
+      return [hosts ? renderHosts(hosts) : '', seats ? renderSeats(seats, now) : '', queues ? renderQueues(queues, now) : '', health ? renderHealth(health, now) : '', renderLater()].join('');
+    }
+
+    if (typeof document !== 'undefined') {
+      const content = document.querySelector('#content');
+      const lede = document.querySelector('#lede');
+      const foot = document.querySelector('#foot');
+      const verbs = { hosts: '/api/observatory/hosts', seats: '/api/observatory/seats', queues: '/api/observatory/queues', health: '/api/observatory/health' };
+      async function load() {
+        const got = {};
+        const failed = [];
+        await Promise.all(Object.entries(verbs).map(async ([k, path]) => {
+          try {
+            const r = await fetch(path);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            got[k] = await r.json();
+          } catch (e) { failed.push(`${k}: ${e.message}`); }
+        }));
+        lede.textContent = 'Each machine as its own OpenRig daemon reports it. Ages are from when the machine measured, not when this page asked.';
+        content.innerHTML = (failed.length ? `<div class="notice"><b>Could not read:</b> ${esc(failed.join('; '))}. This is a failure, not an empty fleet.</div>` : '') + renderPage(got, Date.now());
+        foot.textContent = `Page refreshed ${new Date().toISOString()}. Read only: nothing on any machine is changed from here.`;
+      }
+      load();
+      setInterval(load, 30000);
+    }
+  </script>
+</body>
+</html>
