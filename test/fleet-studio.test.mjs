@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseYaml } from "./observatory-yaml.mjs";
+import { loadRig, rigProblems, composeProblems } from "./observatory-rig.test.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rigDir = path.resolve(here, "../rigs/fleet-studio");
@@ -148,11 +149,35 @@ test("the know-how never prices usage, never measures it with a model request, a
   assert.match(usage, /Unknown is unknown\./);
 });
 
-test("the Fleet Studio rig has one ops seat on the shared agent, no services yet, and the know-how step", () => {
+const FLEET_RIG = { project: "openrig-fleet-studio", port: 9450, providerRoute: "/api/fleet-view/" };
+const fleetRigProblems = (r) => [...rigProblems(r, FLEET_RIG), ...composeProblems(r, { provider: "studio-fleet-view" })];
+
+test("the Fleet Studio rig runs the Fleet page in its own Compose project and port, pinned, with the provider's healthcheck", () => {
+  const r = loadRig(rigDir);
+  assert.deepEqual(fleetRigProblems(r), []);
+  assert.equal(r.compose.name, "openrig-fleet-studio");
+  assert.deepEqual(Object.keys(r.compose.volumes), ["fleet-studio-data"]);
+  assert.deepEqual(r.rig.services.surfaces.urls, [{ name: "Fleet", url: "http://127.0.0.1:9450/surfaces/fleet.html" }]);
+  assert.match(r.dockerfile, /^COPY apps\/fleet \/studio\/apps\/apps\/fleet$/m);
+  assert.match(r.dockerfile, /install-app\.mjs \/studio\/apps\/apps\/fleet --enable/);
+  assert.match(r.dockerfile, /CMD \["node", "tools\/studio\.mjs", "--port", "9450"\]/);
+  assert.doesNotMatch(r.dockerfile, /observatory/i, "the Fleet image carries nothing of the Observatory");
+  const ignore = read(path.join(rigDir, "Dockerfile.dockerignore")).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+  assert.deepEqual(ignore, ["*", "!apps/fleet/**", "!providers/studio-fleet-view/**", "!providers/shared/**"]);
+});
+
+test("the Fleet rig checks catch a shared project, a wait on the provider, the Observatory's healthcheck, and a credential mount", () => {
+  const plant = (edit) => { const r = loadRig(rigDir); edit(r); return fleetRigProblems(r); };
+  assert.ok(plant((r) => { r.rig.services.project_name = "openrig-observatory"; }).some((m) => /project_name/.test(m)));
+  assert.ok(plant((r) => { r.rig.services.wait_for = [{ url: "http://127.0.0.1:9450/api/fleet-view/ready" }]; }).some((m) => /wait on the provider|wait for the studio/.test(m)));
+  assert.ok(plant((r) => { r.compose.services.studio.healthcheck.test = ["CMD", "node", "/studio/apps/providers/studio-observatory/healthcheck.mjs"]; }).some((m) => /healthcheck/.test(m)));
+  assert.ok(plant((r) => { r.compose.services.studio.volumes = ["/home/u/.claude:/x"]; }).some((m) => /credential|named volumes/.test(m)));
+});
+
+test("the Fleet Studio rig has one ops seat on the shared agent, the Fleet link, and the know-how step", () => {
   const rig = parseYaml(read(path.join(rigDir, "rig.yaml")));
   assert.equal(rig.version, "0.2");
   assert.equal(rig.name, "fleet-studio");
-  assert.equal(rig.services, undefined, "no services until the app that shows the fleet is chosen");
   const members = rig.pods.flatMap((p) => p.members);
   assert.equal(members.length, 1);
   assert.equal(members[0].agent_ref, "local:../agents/starter-ops");
@@ -165,6 +190,8 @@ test("the Fleet Studio rig has one ops seat on the shared agent, no services yet
   }
   assert.match(startup, /`rig context add context\/fleet-ops\/<name>`/);
   assert.match(startup, /Add only the ones that are missing/);
+  assert.match(startup, /127\.0\.0\.1:9450\/surfaces\/fleet\.html/);
+  assert.match(startup, /restart `studio` once/);
   assert.doesNotMatch(read(path.join(rigDir, "rig.yaml")), /openrig-observatory|observatory[./-](compose|startup)|rigs\/observatory/, "Fleet Studio references no Observatory files or project");
 });
 

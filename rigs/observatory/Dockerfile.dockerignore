@@ -2,3 +2,4 @@
 *
 !apps/observatory/**
 !providers/studio-observatory/**
+!providers/shared/**

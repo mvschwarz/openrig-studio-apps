@@ -4,7 +4,7 @@
 // generation history as the whole one. Stand-in daemons, invented data.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFleet, readSeat, findSeat } from "../providers/studio-observatory/lib/fleet-reader.mjs";
+import { readFleet, readSeat, findSeat } from "../providers/shared/fleet-reader.mjs";
 import { createObservatoryServer } from "../providers/studio-observatory/observatory-server.mjs";
 import { startFakeDaemon, seat, qitem } from "./observatory-fake-daemon.mjs";
 import { loadPage } from "./observatory-page.mjs";
@@ -168,6 +168,11 @@ test("a kept seat never outlives its machine's status in the fleet read", async 
     assert.equal((await (await fetch(`${base}/api/observatory/seat?key=${key}`)).json()).status, "ok");
     await b.close(); started.splice(started.indexOf(b), 1);
     clock += 3_000; // past the fleet keep time, well inside the seat keep time
+    // The first answer after the keep time comes from the kept read, and says it is stale...
+    const first = await (await fetch(`${base}/api/observatory/seat?key=${key}`)).json();
+    assert.equal(first.fleetServed.stale, true);
+    await server.fleet.pending();
+    // ...and once the refresh lands, the stopped machine's seat is not served from the older read.
     const body = await (await fetch(`${base}/api/observatory/seat?key=${key}`)).json();
     assert.notEqual(body.status, "ok", "a stopped machine's seat is not served from an older read");
     assert.equal(body.status, "seat_host_not_read");

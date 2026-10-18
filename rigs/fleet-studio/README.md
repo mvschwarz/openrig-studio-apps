@@ -25,7 +25,10 @@ From a checkout of this repository:
 rig up rigs/fleet-studio/rig.yaml
 ```
 
-An app for viewing the fleet is not part of this rig yet. The Observatory (`rigs/observatory/`) is an optional,
+The rig also runs the Fleet page in its own container (Compose project `openrig-fleet-studio`, port
+9450): open http://127.0.0.1:9450/surfaces/fleet.html. It answers which accounts have room, which
+machines report here and what the rigs are doing, from what OpenRig's own daemons report. It is read
+only, needs no other app, and never asks for a sign-in or reads a token. The Observatory (`rigs/observatory/`) is an optional,
 separate launch rig; Fleet Studio does not need it. Both rigs use the same starter operations agent
 (`rigs/agents/starter-ops/`), each with its own startup context.
 

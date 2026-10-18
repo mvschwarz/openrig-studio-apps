@@ -1,0 +1,11 @@
+{
+  "name": "@openrig/studio-fleet-view",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Fleet readings for the Fleet page: machines, rigs, seats and subscription usage from each OpenRig daemon, with where and when each was measured.",
+  "scripts": {
+    "start": "node fleet-view-server.mjs",
+    "test": "node --test ../../test/fleet-app.test.mjs"
+  }
+}

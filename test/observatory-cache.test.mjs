@@ -2,7 +2,7 @@
 // table that says which OpenRig it was checked against. Stand-in daemons, invented data.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFleet } from "../providers/studio-observatory/lib/fleet-reader.mjs";
+import { readFleet } from "../providers/shared/fleet-reader.mjs";
 import { createFleetCache, createObservatoryServer, FLEET_VERBS as VERBS } from "../providers/studio-observatory/observatory-server.mjs";
 import { startFakeDaemon } from "./observatory-fake-daemon.mjs";
 import { loadPage } from "./observatory-page.mjs";
@@ -32,8 +32,11 @@ test("all seven verbs inside the keep time cost one read of the daemon", async (
     }
     clock += 11_000; // past the keep time
     const later = await (await fetch(base + VERBS[1])).json();
-    assert.equal(later.served.fromCache, false);
-    assert.equal(healthzCalls(a), 2, "a new read after the keep time");
+    // Answered at once from the kept read, labelled stale; the refresh runs outside the request.
+    assert.equal(later.served.fromCache, true);
+    assert.equal(later.served.stale, true);
+    await server.fleet.pending();
+    assert.equal(healthzCalls(a), 2, "one new read, started by the request after the keep time");
   } finally {
     await new Promise((r) => { server.closeAllConnections?.(); server.close(r); });
   }
@@ -79,6 +82,10 @@ test("the page shows a kept read's age, never as fresh", async () => {
   const out = text(page.renderHosts(fleet, now));
   assert.match(out, /read by the provider 10 s ago \(a kept read, 10 s old; reads are kept up to 15 s\)/);
   assert.doesNotMatch(out, /just now|\b0 s ago/);
+  // Past the keep time the kept read is still shown at once, and says it is the last good read.
+  const stale = text(page.renderHosts({ ...fleet, served: { ...fleet.served, cacheAgeSeconds: 40, stale: true, refreshing: true } }, now));
+  assert.match(stale, /\(the last good read, 40 s old, past the 15 s keep; a fresh read is on its way\)/);
+  assert.doesNotMatch(stale, /reads are kept up to/);
 });
 
 test("a daemon restart between reads is flagged, by boot epoch where the daemon gives one", async () => {

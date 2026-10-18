@@ -119,6 +119,7 @@
       const sv = fleet.served;
       if (!sv) return `asked at ${esc(fleet.polledAt ?? '')}`;
       const age = Math.max(sv.cacheAgeSeconds ?? 0, Math.round((now - Date.parse(sv.servedAt)) / 1000) + (sv.cacheAgeSeconds ?? 0));
+      if (sv.stale) return `read by the provider ${ageText(sv.polledAt, now)} <span class="stale">(the last good read, ${esc(age)} s old, past the ${esc(sv.keptForSeconds)} s keep${sv.refreshing ? '; a fresh read is on its way' : ''})</span>`;
       return `read by the provider ${ageText(sv.polledAt, now)}${sv.fromCache ? ` (a kept read, ${esc(age)} s old; reads are kept up to ${esc(sv.keptForSeconds)} s)` : ''}`;
     }
 

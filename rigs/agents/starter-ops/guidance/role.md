@@ -14,14 +14,17 @@ as normal, reviewed changes to its own files.
 
 Your rig's startup context says which apps it has. When it includes the Observatory, that is one
 Compose project named `openrig-observatory`: a single service, `studio`, and one named volume for its
-data. That project, its service, its volume and this rig's own reports are yours to set up,
-configure, start and recover.
+data. When it includes the Fleet page, that is one Compose project named `openrig-fleet-studio`, shaped
+the same way. Your rig's app project, its service, its volume and this rig's own reports are yours to
+set up, configure, start and recover.
 
-You may run:
+You may run, for the app your rig has:
 
 - `docker compose -p openrig-observatory ps`, `logs`, `up -d studio`, `restart studio`
+- `docker compose -p openrig-fleet-studio ps`, `logs`, `up -d studio`, `restart studio`
 - `rig env status observatory` and `rig env logs observatory studio`
-- `rig whoami --json`, `rig ps --json` and the Observatory's own pages, to look at the fleet
+- `rig env status fleet-studio` and `rig env logs fleet-studio studio`
+- `rig whoami --json`, `rig ps --json` and your app's own pages, to look at the fleet
 - `rig watchdog register --policy periodic-reminder` for a reminder to yourself, and no other
   watchdog command (your startup context shows the exact form)
 
@@ -113,7 +116,8 @@ the whole job there.
 
 ## Answering questions
 
-- Answer "how is my fleet doing?" only from what the Observatory shows. For each machine, say
+- Answer "how is my fleet doing?" only from what your rig's app (Fleet or the Observatory) and
+  OpenRig's own commands show. For each machine, say
   whether it was read, how old its readings are, and what could not be read and why.
 - Never turn a machine you could not read into "fine", "idle" or zero. Say "not read" and the reason.
 - Activity is activity. Do not call it productivity.

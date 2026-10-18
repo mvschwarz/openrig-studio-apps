@@ -1,0 +1,26 @@
+{
+  "manifest_version": 1,
+  "id": "fleet",
+  "name": "FLEET",
+  "summary": "Your OpenRig machines at a glance: which accounts have room, which machines report, and what your rigs are doing.",
+  "category": "studio",
+  "maker": {
+    "name": "OpenRig",
+    "url": "https://github.com/mvschwarz"
+  },
+  "surface": {
+    "entry": "app/fleet.html",
+    "path": "/surfaces/fleet.html",
+    "glyph": "▦",
+    "hint": "accounts, machines and rigs at a glance"
+  },
+  "calls": {
+    "/api/fleet-view/fleet": { "required": true }
+  },
+  "vendor": [],
+  "provider": {
+    "package": "@openrig/studio-fleet-view",
+    "required": true
+  },
+  "_note": "Read only, and it needs no other app. It shows what OpenRig's own daemons report and says when something is not reported. It never asks for a sign-in, reads a token or spends an account's allowance."
+}
