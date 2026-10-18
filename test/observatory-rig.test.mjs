@@ -45,6 +45,7 @@ export function rigProblems({ dir, rig, compose }) {
     if (w.service !== undefined && (w.condition !== "healthy" || !compose.services?.[w.service])) p.push(`wait_for service ${w.service} must be a compose service with condition healthy`);
   }
   if (!(s.surfaces?.urls ?? []).length) p.push("surfaces.urls names no link for the person");
+  if (!waits.some((w) => w.url === "http://127.0.0.1:9440/api/observatory/ready")) p.push("wait_for must ask the provider's ready verb through the studio's port");
   const pods = rig.pods ?? [];
   const members = pods.flatMap((pod) => pod.members ?? []);
   if (members.length !== 1) p.push(`expected one agent member, found ${members.length}`);
@@ -70,6 +71,8 @@ export function composeProblems({ compose, dockerfile }) {
     // Without an init as PID 1 the studio itself is PID 1, which the kernel protects from signals sent
     // inside the container, so a crash could not be tested and children would not be reaped.
     if (svc.init !== true) p.push(`${name}: init must be true`);
+    // Health is the provider's ready verb through the studio's port, not the studio alone.
+    if (!(svc.healthcheck?.test ?? []).some((a) => String(a).endsWith("/providers/studio-observatory/healthcheck.mjs"))) p.push(`${name}: the healthcheck must run the provider's healthcheck (ready verb through the studio)`);
     if (svc.privileged) p.push(`${name}: privileged`);
     for (const v of svc.volumes ?? []) {
       const source = String(v).split(":")[0];
@@ -165,6 +168,11 @@ test("guidance that lets the agent bring down another rig is caught", () => {
   assert.ok(planted((r) => { r.role = r.role.replace("- `rig env status observatory`", "- `rig down other-rig`\n- `rig env status observatory`"); }).some((m) => /lets the agent run `rig down other-rig`/.test(m)));
   assert.ok(planted((r) => { r.role = r.role.replace("- `docker compose -p openrig-observatory ps`", "- `docker compose ps`"); }).some((m) => /lets the agent run|without the app's project/.test(m)));
   assert.ok(planted((r) => { r.role = r.role.replace(/leave it\s+stopped/i, "start it again"); }).some((m) => /intentional stop/.test(m)));
+});
+
+test("readiness that only proves the studio is caught", () => {
+  assert.ok(planted((r) => { r.compose.services.studio.healthcheck.test = ["CMD", "node", "-e", "fetch('http://127.0.0.1:9440/api/contract')"]; }).some((m) => /provider's healthcheck/.test(m)));
+  assert.ok(planted((r) => { r.rig.services.wait_for[0].url = "http://127.0.0.1:9440/api/contract"; }).some((m) => /ready verb/.test(m)));
 });
 
 test("removing the init is caught", () => {

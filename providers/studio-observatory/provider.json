@@ -12,7 +12,8 @@
     "/api/observatory/messaging",
     "/api/observatory/ceremony",
     "/api/observatory/subscriptions",
-    "/api/observatory/seat"
+    "/api/observatory/seat",
+    "/api/observatory/ready"
   ],
   "_note": "Read only. Every verb reads OpenRig daemons' open GET routes when asked: the daemon on this machine (OBSERVATORY_DAEMON_URL, default http://127.0.0.1:7433) and each HTTP host in its host list. A host that can't be read is reported as such, never left out. Nothing polls in the background, and no token is read, stored or sent."
 }

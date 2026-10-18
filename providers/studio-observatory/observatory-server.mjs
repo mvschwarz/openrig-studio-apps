@@ -12,8 +12,14 @@
 // its own daemon. Those reads are kept for a shorter time of their own, and only a bounded number of
 // seats are remembered at once.
 //
+// GET /api/observatory/ready says only that this provider process is loaded and serving. It makes no
+// daemon call and no fleet read; it reports the last fleet read the provider already made, as that read
+// came out. A container healthcheck asks it through the studio's port, so "ready" there means the studio
+// and this provider are both answering, which /api/contract alone (the studio's runtime) cannot show.
+//
 // Nothing here writes to a daemon, starts anything on one, or holds a token.
 import http from "node:http";
+import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { readFleet, readSeat, READS } from "./lib/fleet-reader.mjs";
 
@@ -35,8 +41,12 @@ export const VERBS = [
   "/api/observatory/ceremony",
   "/api/observatory/subscriptions",
   "/api/observatory/seat",
+  "/api/observatory/ready",
 ];
-export const FLEET_VERBS = VERBS.filter((v) => v !== "/api/observatory/seat");
+export const FLEET_VERBS = VERBS.filter((v) => v !== "/api/observatory/seat" && v !== "/api/observatory/ready");
+const PACKAGE = (() => { try { return JSON.parse(fs.readFileSync(new URL("./package.json", import.meta.url), "utf8")); } catch { return {}; } })();
+const STARTED_AT = new Date().toISOString();
+export const READY_MEANING = "this provider process is loaded and serving; it says nothing about whether any OpenRig daemon can be read";
 const SEAT_KEEP_MS = 10_000;
 const SEATS_REMEMBERED = 64;
 const ALL_READS = [...READS, "subscriptions"];
@@ -50,13 +60,18 @@ export function createFleetCache({ daemon, read = readFleet, ttlMs = cacheSecond
   let kept = null;      // { fleet, at }
   let inFlight = null;  // Promise<{ fleet, at }>
   let previous = null;  // the last read that reached the configured daemon, for the restart signal
+  let last = null;      // how the last fleet read came out, kept or not: what /ready reports
   async function fresh() {
-    const fleet = await read({ daemonUrl: daemon, reads: ALL_READS, previous });
+    let fleet;
+    try { fleet = await read({ daemonUrl: daemon, reads: ALL_READS, previous }); }
+    catch (err) { last = { polledAt: new Date(now()).toISOString(), ok: false, status: "error", detail: String(err?.message ?? err) }; throw err; }
     const at = now();
-    if (fleet?.hosts?.[0]?.status === "ok") { kept = { fleet, at }; previous = fleet; }
+    const status = fleet?.hosts?.[0]?.status ?? "unknown";
+    last = { polledAt: fleet?.polledAt ?? new Date(at).toISOString(), ok: status === "ok", status };
+    if (status === "ok") { kept = { fleet, at }; previous = fleet; }
     return { fleet, at };
   }
-  return async function get() {
+  async function get() {
     const t = now();
     let entry, fromCache;
     if (kept && t - kept.at < ttlMs) { entry = kept; fromCache = true; }
@@ -70,7 +85,10 @@ export function createFleetCache({ daemon, read = readFleet, ttlMs = cacheSecond
       ...entry.fleet,
       served: { servedAt: new Date(servedAt).toISOString(), polledAt: entry.fleet.polledAt, cacheAgeSeconds: Math.max(0, Math.round((servedAt - entry.at) / 1000)), keptForSeconds: Math.round(ttlMs / 1000), fromCache },
     };
-  };
+  }
+  // What the provider already knows, without reading anything.
+  get.lastRead = () => last;
+  return get;
 }
 
 export function createSeatCache({ fleet, readOne = readSeat, ttlMs = SEAT_KEEP_MS, max = SEATS_REMEMBERED, now = Date.now } = {}) {
@@ -96,12 +114,24 @@ export function createSeatCache({ fleet, readOne = readSeat, ttlMs = SEAT_KEEP_M
 export function createObservatoryServer({ daemon = daemonUrl, read = readFleet, ttlMs = cacheSeconds * 1000, now = Date.now, readOne = readSeat } = {}) {
   const fleet = createFleetCache({ daemon, read, ttlMs, now });
   const seat = createSeatCache({ fleet, readOne, now });
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     if (!VERBS.includes(url.pathname)) return json(res, 404, { error: `no observatory route ${url.pathname}` });
     if (req.method !== "GET" && req.method !== "HEAD") {
       res.setHeader("allow", "GET, HEAD");
       return json(res, 405, { error: "read only: GET" });
+    }
+    if (url.pathname === "/api/observatory/ready") {
+      const body = {
+        schema: "openrig.observatory.ready/v1",
+        ready: !server.draining,
+        meaning: READY_MEANING,
+        provider: PACKAGE.name ?? null, version: PACKAGE.version ?? null,
+        startedAt: STARTED_AT, servedAt: new Date(now()).toISOString(),
+        lastFleetRead: fleet.lastRead(),
+        ...(server.draining ? { reason: "the provider is shutting down" } : {}),
+      };
+      return json(res, server.draining ? 503 : 200, body);
     }
     try {
       if (url.pathname === "/api/observatory/seat") {
@@ -115,10 +145,14 @@ export function createObservatoryServer({ daemon = daemonUrl, read = readFleet, 
       return json(res, 500, { error: String(err?.message ?? err) });
     }
   });
+  server.draining = false;
+  return server;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  createObservatoryServer().listen(port, "127.0.0.1", () => {
+  const server = createObservatoryServer();
+  for (const sig of ["SIGTERM", "SIGINT"]) process.on(sig, () => { server.draining = true; server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); });
+  server.listen(port, "127.0.0.1", () => {
     console.log(`studio-observatory on 127.0.0.1:${port} · daemon ${daemonUrl} · reads kept ${cacheSeconds} s`);
   });
 }

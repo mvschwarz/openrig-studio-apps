@@ -47,7 +47,8 @@ const IMPORT_RE = /(?:^|[^\w.])(?:import|export)\s[^"'`]*?from\s*["']([^"']+)["'
 
 export function runtimeClosure(dir) {
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, "provider.json"), "utf8"));
-  const roots = [manifest.run.entry, ...(manifest.run.companions ?? []).map((c) => c.entry)];
+  // Plus the container healthcheck script, which runs inside the image too.
+  const roots = [manifest.run.entry, ...(manifest.run.companions ?? []).map((c) => c.entry), ...(fs.existsSync(path.join(dir, "healthcheck.mjs")) ? ["healthcheck.mjs"] : [])];
   const seen = new Set();
   const problems = [];
   const queue = roots.map((r) => path.resolve(dir, r));
@@ -76,6 +77,7 @@ test("the closure is found by following imports from what provider.json starts",
   // check below would pass on one file.
   assert.ok(rel.includes("observatory-server.mjs"));
   assert.ok(rel.includes(path.join("lib", "fleet-reader.mjs")), `the reader must be in the closure, got ${rel.join(", ")}`);
+  assert.ok(rel.includes("healthcheck.mjs"), "the healthcheck the container runs is checked too");
 });
 
 test("nothing in the closure names a machine, an account path or a credential", () => {

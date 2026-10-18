@@ -25,9 +25,11 @@ services:
     volumes:
       - observatory-data:/data
     healthcheck:
-      # The app's own health only: the studio answering on its port. A daemon that is down is a
-      # reading the app shows, not a reason to restart the app.
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9440/api/contract').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      # The app's own health only: the studio AND the observatory provider answering, asked through the
+      # studio's port (the provider's ready verb makes no daemon call). A daemon that is down is a
+      # reading the app shows, not a reason to call the app unhealthy. Docker does not restart an
+      # unhealthy container; this status is for `rig env status` and the app's agent to act on.
+      test: ["CMD", "node", "/studio/apps/providers/studio-observatory/healthcheck.mjs"]
       interval: 15s
       timeout: 5s
       retries: 3

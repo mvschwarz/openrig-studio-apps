@@ -12,7 +12,7 @@ services:
   project_name: openrig-observatory
   down_policy: down
   wait_for:
-    - url: http://127.0.0.1:9440/api/contract
+    - url: http://127.0.0.1:9440/api/observatory/ready
     - service: studio
       condition: healthy
   surfaces:

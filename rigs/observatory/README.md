@@ -32,6 +32,13 @@ read. Machines reachable only over ssh are listed but not read.
   `e7346bbdbd01539e6003ccccb38c44763236545b`. The app and provider come from the checkout you start
   it from.
 
+## Health
+
+The container is healthy when the studio and the observatory provider both answer
+(`/api/observatory/ready`, through the studio's port). The ready check never reads a daemon: an
+unreachable OpenRig daemon is a reading the app shows, not an unhealthy app. Docker does not restart an
+unhealthy container; the app's agent notices and restarts it once.
+
 ## Stop it
 
 `rig down observatory` stops the agent and the container and keeps the volume.
