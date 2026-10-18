@@ -70,3 +70,10 @@ test("run from stdin as documented, with nothing to kill, it exits non-zero and 
   assert.equal(r.status, 2);
   assert.match(r.stderr, /nothing was killed/);
 });
+
+test("it announces the pid before killing, so the line survives the container going down", () => {
+  const src = fs.readFileSync(new URL("../rigs/observatory/p6/kill-studio.cjs", import.meta.url), "utf8");
+  const announce = src.indexOf("fs.writeSync(1, `killing pid");
+  const kill = src.indexOf('process.kill(target.pid, "SIGKILL")');
+  assert.ok(announce > 0 && kill > 0 && announce < kill, "the pid is written, synchronously, before the kill");
+});

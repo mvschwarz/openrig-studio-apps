@@ -45,7 +45,8 @@ docker compose -p openrig-observatory -f rigs/observatory/observatory.compose.ya
   exec -T studio node - < rigs/observatory/p6/kill-studio.cjs
 ```
 
-The script kills the studio process inside the container and prints its pid. Compose then restarts the
+The script prints the studio's pid and then kills that process inside the container; the exec may
+end with the container rather than cleanly. Compose then restarts the
 container (`restart: unless-stopped`; `init: true` makes the studio a child of PID 1, so this is a
 real crash). `docker stop` and `docker kill` are not crash tests: Docker treats both as a deliberate
 stop and does not restart the container.

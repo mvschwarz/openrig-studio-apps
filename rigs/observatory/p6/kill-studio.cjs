@@ -10,8 +10,10 @@
 // the container to PID 1 itself is ignored by the kernel unless PID 1 handles it, and `docker stop` or
 // `docker kill` mark the container as stopped on purpose, so none of those test a crash.)
 //
-// It finds the process by its arguments in /proc, never kills itself, prints the pid it killed, and
-// exits non-zero if nothing matched, so a no-op is never mistaken for a crash. No ps or pgrep needed.
+// It finds the process by its arguments in /proc, never kills itself, prints the pid it is about to
+// kill BEFORE killing it (the kill stops the container, which can end this exec before a later line is
+// written), and exits non-zero if nothing matched, so a no-op is never mistaken for a crash. No ps or
+// pgrep needed.
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
@@ -56,8 +58,9 @@ function main() {
     console.error(target.error);
     process.exit(2);
   }
+  // Written synchronously, so the line is out before the container goes down with the studio.
+  fs.writeSync(1, `killing pid ${target.pid}: ${target.argv.join(" ")}\n`);
   process.kill(target.pid, "SIGKILL");
-  console.log(`killed pid ${target.pid}: ${target.argv.join(" ")}`);
 }
 
 module.exports = { pickTarget, listProcesses, ENTRY };
