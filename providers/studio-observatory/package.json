@@ -1,0 +1,11 @@
+{
+  "name": "@openrig/studio-observatory",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Fleet readings for the Observatory: hosts, seats, queues and health from each OpenRig daemon, with where and when each was measured.",
+  "scripts": {
+    "start": "node observatory-server.mjs",
+    "test": "node --test ../../test/observatory-fleet-reader.test.mjs ../../test/observatory-closure.test.mjs"
+  }
+}
