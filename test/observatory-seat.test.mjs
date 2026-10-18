@@ -102,7 +102,7 @@ test("ordinary generation history shows its coverage and drops the native sessio
   assert.equal(s.generations.status, "ok");
   assert.deepEqual(s.generations.rows.map((g) => g.ordinal), ["2", "1"]);
   assert.ok(!JSON.stringify(s.generations).includes("native-invented"));
-  assert.match(text(page.renderSeat(s, NOW)), /Generations, newest first, from the daemon's bounded telemetry: coverage retained_window, completeness unknown/);
+  assert.match(text(page.renderSeat(s, NOW)), /Generations, newest first, from the daemon's bounded telemetry \(at most 20 per page\): coverage retained_window, completeness unknown/);
 });
 
 test("a daemon without the series route reads 'not available'; money never passes through", async () => {
@@ -182,4 +182,55 @@ test("a generation start stored as SQLite UTC text is read as UTC, not local tim
   assert.equal(s.generations.rows[0].startedAt, "2030-01-02T09:00:00Z");
   assert.equal(s.generations.rows[0].startedAtAsStored, "2030-01-02 09:00:00");
   assert.equal(Date.parse(s.generations.rows[0].startedAt), Date.UTC(2030, 0, 2, 9, 0, 0));
+});
+
+// --- older generations --------------------------------------------------------------------------
+
+const gen = (ordinal) => ({ ordinal: String(ordinal), kind: ordinal === 1 ? "initial" : "fresh", generation: `g${ordinal}`, startedAt: at(1000 - ordinal) });
+const genPage = (ordinals, { hasMore = false, nextCursor = null, status = "ok" } = {}) => ({ status, rows: status === "ok" ? ordinals.map(gen) : null, coverage: { status: status === "ok" ? "retained_window" : "unavailable", historyCompleteness: "unknown", gaps: [], gapCount: 0, hasMore, nextCursor } });
+
+test("the older-generations control appears only when the daemon says older ones exist", async () => {
+  const page = await loadPage();
+  const { s } = await fleetAndSeat({});
+  s.generations = genPage([3, 2]);
+  assert.doesNotMatch(page.renderSeat(s, NOW), /Load older generations/);
+  s.generations = genPage([3, 2], { hasMore: true, nextCursor: "cur-older" });
+  const html = page.renderSeat(s, NOW);
+  assert.match(html, /data-older-cursor="cur-older"/);
+  assert.match(text(html), /older generations exist/);
+});
+
+test("an older page adds only rows not already shown, newest first, and carries the next cursor", async () => {
+  const page = await loadPage();
+  const merged = page.mergeGenerationPages(genPage([5, 4, 3], { hasMore: true, nextCursor: "c1" }), [genPage([3, 2, 1], { hasMore: false })]);
+  assert.deepEqual(merged.rows.map((r) => r.ordinal), ["5", "4", "3", "2", "1"]);
+  assert.equal(merged.pages, 2);
+  assert.equal(merged.hasMore, false);
+  assert.equal(merged.nextCursor, null);
+});
+
+test("an older page that comes back unverified stops the history and is never shown as more of it", async () => {
+  const page = await loadPage();
+  const { s } = await fleetAndSeat({});
+  s.generations = genPage([5, 4], { hasMore: true, nextCursor: "c1" });
+  const older = [genPage([], { status: "history-unverified" })];
+  const merged = page.mergeGenerationPages(s.generations, older);
+  assert.equal(merged.unverified, true);
+  assert.deepEqual(merged.rows.map((r) => r.ordinal), ["5", "4"]);
+  const out = text(page.renderSeat(s, NOW, older));
+  assert.match(out, /Older generations: history unverified across a daemon restart/);
+  assert.doesNotMatch(out, /Load older generations/);
+});
+
+test("the seat verb passes the route's own cursor through to the daemon", async () => {
+  const a = await daemon({ selfHostId: "box-a" });
+  const server = createObservatoryServer({ daemon: a.url, ttlMs: 15_000, now: () => NOW });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  try {
+    const key = encodeURIComponent("box-a/alpha/dev.impl");
+    await fetch(`http://127.0.0.1:${server.address().port}/api/observatory/seat?key=${key}&cursor=cur-older`);
+    assert.ok(a.calls.some((c) => c.path.endsWith("/tenures") && /cursor=cur-older/.test(c.query)));
+  } finally {
+    await new Promise((r) => { server.closeAllConnections?.(); server.close(r); });
+  }
 });

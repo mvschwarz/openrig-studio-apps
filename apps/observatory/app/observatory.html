@@ -356,7 +356,27 @@
       return `<svg viewBox="0 0 400 100" width="400" height="100" role="img" aria-label="context used over time">${lines}</svg>`;
     }
 
-    export function renderSeat(seat, now) {
+    // Generation pages, newest first. Older pages come from the route's own cursor; a row already shown
+    // is not shown twice, and a page that comes back unverified (a cursor from before a daemon restart)
+    // stops the history there rather than being added to it.
+    export function mergeGenerationPages(first, older = []) {
+      if (!first || first.status !== 'ok') return { status: first?.status ?? 'unknown', rows: null, hasMore: false, nextCursor: null, unverified: first?.status === 'history-unverified', pages: 0 };
+      const seen = new Set();
+      const rows = [];
+      const add = (list) => { for (const r of list ?? []) { const k = String(r.ordinal); if (!seen.has(k)) { seen.add(k); rows.push(r); } } };
+      add(first.rows);
+      let last = first, unverified = false, pages = 1;
+      for (const page of older) {
+        if (page?.status === 'history-unverified') { unverified = true; break; }
+        if (page?.status !== 'ok') break;
+        add(page.rows);
+        last = page; pages++;
+      }
+      rows.sort((a, b) => Number(b.ordinal) - Number(a.ordinal));
+      return { status: 'ok', rows, hasMore: !unverified && last.coverage?.hasMore === true && !!last.coverage?.nextCursor, nextCursor: unverified ? null : last.coverage?.nextCursor ?? null, unverified, pages, coverage: first.coverage };
+    }
+
+    export function renderSeat(seat, now, olderPages = []) {
       if (!seat) return '';
       if (seat.status !== 'ok') return `<section id="seat"><h2>Seat</h2><div class="notice">${esc(seat.error ?? seat.status)}</div></section>`;
       const c = seat.current ?? {};
@@ -376,11 +396,16 @@
         if (rows) parts.push(`<div class="table-wrap"><table><thead><tr><th>Sampled</th><th>Context used</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table></div>`);
       }
       const g = seat.generations ?? {};
+      const merged = mergeGenerationPages(g, olderPages);
       if (g.status === 'history-unverified') parts.push(`<div class="notice">Generation history: <span class="stale">history unverified across a daemon restart</span>. ${esc(g.coverage?.note ?? '')}. Nothing from before the restart is shown as the whole history.</div>`);
       else if (g.status !== 'ok') parts.push(`<div class="notice">Generation history not read: ${statusText(g.status)}${why(g) ? ` · ${why(g)}` : ''}.</div>`);
       else {
-        const rows = (g.rows ?? []).map((x) => `<tr><td class="numeric">${esc(x.ordinal)}</td><td>${esc(x.kind ?? '')}</td><td>${ageText(x.startedAt, now)}</td><td>${esc(String(x.generation ?? '').slice(0, 8))}</td></tr>`).join('');
-        parts.push(`<p class="scope">Generations, newest first, from the daemon's bounded telemetry: coverage ${esc(g.coverage?.status)}, completeness ${esc(g.coverage?.historyCompleteness)}${g.coverage?.gapCount ? ` · gaps: ${esc(g.coverage.gaps.join(', '))}` : ''}${g.coverage?.hasMore ? ' · older generations exist' : ''}.</p>` + (rows ? `<div class="table-wrap"><table><thead><tr><th>#</th><th>Kind</th><th>Started</th><th>Generation</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">No generations reported.</div>`));
+        const rows = (merged.rows ?? []).map((x) => `<tr><td class="numeric">${esc(x.ordinal)}</td><td>${esc(x.kind ?? '')}</td><td>${ageText(x.startedAt, now)}</td><td>${esc(String(x.generation ?? '').slice(0, 8))}</td></tr>`).join('');
+        const pagesNote = merged.pages > 1 ? ` · ${esc(merged.pages)} pages read` : '';
+        const more = merged.hasMore ? ' · older generations exist' : '';
+        parts.push(`<p class="scope">Generations, newest first, from the daemon's bounded telemetry (at most 20 per page): coverage ${esc(g.coverage?.status)}, completeness ${esc(g.coverage?.historyCompleteness)}${g.coverage?.gapCount ? ` · gaps: ${esc(g.coverage.gaps.join(', '))}` : ''}${pagesNote}${more}.</p>` + (rows ? `<div class="table-wrap"><table><thead><tr><th>#</th><th>Kind</th><th>Started</th><th>Generation</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">No generations reported.</div>`));
+        if (merged.unverified) parts.push(`<div class="notice">Older generations: <span class="stale">history unverified across a daemon restart</span>. The daemon restarted since the first page was read, so nothing older is added.</div>`);
+        if (merged.hasMore) parts.push(`<p><button type="button" data-older-cursor="${esc(merged.nextCursor)}">Load older generations</button></p>`);
       }
       const q = seat.queue ?? {};
       if (!Array.isArray(q.rows)) parts.push(`<div class="notice">This seat's queue rows: not read (${statusText(q.status)}).</div>`);
@@ -402,15 +427,28 @@
       const lede = document.querySelector('#lede');
       const foot = document.querySelector('#foot');
       const verbs = { hosts: '/api/observatory/hosts', seats: '/api/observatory/seats', queues: '/api/observatory/queues', health: '/api/observatory/health', messaging: '/api/observatory/messaging', ceremony: '/api/observatory/ceremony', subscriptions: '/api/observatory/subscriptions' };
+      let seatView = null; // { key, seat, older: [] }
       async function loadSeat() {
         const m = location.hash.match(/^#seat=(.+)$/);
         const box = document.querySelector('#seat-detail');
-        if (!m) { box.innerHTML = ''; return; }
+        if (!m) { box.innerHTML = ''; seatView = null; return; }
+        const key = decodeURIComponent(m[1]);
         try {
-          const r = await fetch(`/api/observatory/seat?key=${encodeURIComponent(decodeURIComponent(m[1]))}`);
-          box.innerHTML = renderSeat(await r.json(), Date.now());
+          const r = await fetch(`/api/observatory/seat?key=${encodeURIComponent(key)}`);
+          seatView = { key, seat: await r.json(), older: [] };
+          box.innerHTML = renderSeat(seatView.seat, Date.now(), seatView.older);
         } catch (e) { box.innerHTML = `<div class="notice"><b>Could not read this seat:</b> ${esc(e.message)}.</div>`; }
       }
+      document.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest?.('[data-older-cursor]');
+        if (!btn || !seatView) return;
+        btn.disabled = true;
+        try {
+          const r = await fetch(`/api/observatory/seat?key=${encodeURIComponent(seatView.key)}&cursor=${encodeURIComponent(btn.dataset.olderCursor)}`);
+          seatView.older.push((await r.json()).generations);
+        } catch (e) { seatView.older.push({ status: 'unreachable', detail: e.message }); }
+        document.querySelector('#seat-detail').innerHTML = renderSeat(seatView.seat, Date.now(), seatView.older);
+      });
       window.addEventListener('hashchange', loadSeat);
       loadSeat();
       async function load() {
