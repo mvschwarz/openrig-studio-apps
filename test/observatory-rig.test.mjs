@@ -135,11 +135,22 @@ export function scopeProblems({ role }) {
   if (!/The oversight team defines ceremony and productivity\./.test(role) || !/never make up your own/.test(role)) p.push("the guidance does not leave ceremony and productivity definitions to the oversight team");
   if (/productivity (score|metric|measure) (is|=|means)|define (a |your own )?productivity/i.test(role)) p.push("the guidance has the agent define productivity");
 
+  // The role: a starter operations agent that may grow its own rig, not an Observatory-only role.
+  const opening = role.split("\n## ")[0];
+  if (!/You are the starter operations agent for this person's OpenRig setup\./.test(opening)) p.push("the role does not open as the starter operations agent");
+  if (/Observatory[- ]only|only (job|role|purpose) is the Observatory|you (only|just) run the Observatory|exists (only|just) (to|for) (run|the) (the )?Observatory/i.test(role)) p.push("the role reads as Observatory-only");
+  if (!/You may add to and change this rig \(its members, its services and its app data\)/.test(yours)) p.push("the role does not let the agent grow its own rig");
+  // Growing its own rig never reaches another one.
+  if (!/for another rig, seat or daemon/.test(notYours) || !/change another rig/.test(notYours)) p.push("another rig is not kept out of reach");
+  // The intended role is not live permission.
+  if (!/It is not, by itself, permission on any particular\s+machine: what you may do on a given machine is what its owner has actually enabled there\./.test(role)) p.push("the role does not separate itself from live permissions");
+
   // Rotation only once its owner has enabled it; otherwise nothing moves.
   const rotation = role.match(/## Subscription rotation([\s\S]*?)\n## /)?.[1] ?? "";
   if (!/only when its owner has separately enabled it for you/.test(rotation) || !/Unless it has been enabled, you never move seats or accounts\./.test(rotation)) p.push("subscription rotation is not conditional on a separate enablement");
   for (const sentence of role.split(/(?<=\.)\s+/).filter((t) => /rotation/i.test(t))) {
     if (!/only when|only once|enabled|never/i.test(sentence)) p.push(`an unconditional rotation sentence: ${sentence.trim().slice(0, 80)}`);
+    if (/Observatory/.test(sentence)) p.push(`rotation is tied to the Observatory: ${sentence.trim().slice(0, 80)}`);
   }
   if (!/stopped on purpose/i.test(role) || !/leave it\s+stopped/i.test(role)) p.push("the guidance does not tell an intentional stop apart from a failure");
   // The path for a provider that is not serving: see unhealthy, read the logs, restart once, report.
@@ -225,6 +236,23 @@ test("guidance in which the agent defines productivity is caught", () => {
 
 test("customizing outside the app's own files is caught", () => {
   assert.ok(planted((r) => { r.role = r.role.replace("- `providers/studio-observatory/` (the reader behind it)", "- `providers/studio-fleet/` (another provider)"); }).some((m) => /reaches outside the app/.test(m)));
+});
+
+test("an Observatory-only role is caught", () => {
+  assert.ok(planted((r) => { r.role = r.role.replace("The Observatory is one\napp you run and shape here; your other work does not depend on it.", "You are the Observatory-only agent:\nyou run the Observatory and nothing else."); }).some((m) => /Observatory-only/.test(m)));
+});
+
+test("growing its own rig is allowed, and removing that is caught", () => {
+  assert.deepEqual(scopeProblems(loadRig()).filter((m) => /grow its own rig/.test(m)), []);
+  assert.ok(planted((r) => { r.role = r.role.replace("You may add to and change this rig (its members, its services and its app data)\nas normal, reviewed changes to its own files.", "Leave this rig as it is."); }).some((m) => /grow its own rig/.test(m)));
+});
+
+test("removing the line that separates the role from live permissions is caught", () => {
+  assert.ok(planted((r) => { r.role = r.role.replace("This describes the role you are built for. It is not, by itself, permission on any particular\nmachine: what you may do on a given machine is what its owner has actually enabled there.\n\n", ""); }).some((m) => /live permissions/.test(m)));
+});
+
+test("rotation tied to the Observatory is caught", () => {
+  assert.ok(planted((r) => { r.role = r.role.replace("Unless it has been enabled, you never move seats or accounts.", "Unless it has been enabled, you never move seats or accounts. The Observatory needs rotation enabled to work."); }).some((m) => /rotation is tied to the Observatory/.test(m)));
 });
 
 test("removing the init is caught", () => {

@@ -1,4 +1,4 @@
-# Startup context: the Observatory
+# Startup context: this rig and its Observatory
 
 ## Where things are
 
@@ -29,8 +29,9 @@
 ## Shaping the app
 
 Changing the Observatory itself (its panels, views, reports and settings, in `apps/observatory/` and
-`providers/studio-observatory/`) is part of the job. Your role lists what that covers and what it
-never covers. The subscription-rotation job is yours to run only if its owner has enabled it for you.
+`providers/studio-observatory/`) and growing this rig are part of the job. Your role lists what that
+covers and what it never covers. The subscription-rotation job is yours to run only if its owner has
+enabled it for you. What you may do on this machine is what its owner has actually enabled here.
 
 ## Limits to say out loud when they matter
 
