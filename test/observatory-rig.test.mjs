@@ -67,6 +67,9 @@ export function composeProblems({ compose, dockerfile }) {
     if (/:latest$|:main$|^[^:]+$/.test(image)) p.push(`${name}: image "${image}" is not pinned to a version`);
     if (svc.restart !== "unless-stopped") p.push(`${name}: restart must be unless-stopped, got ${svc.restart}`);
     if (!Array.isArray(svc.healthcheck?.test) || !svc.healthcheck.test.length) p.push(`${name}: no healthcheck`);
+    // Without an init as PID 1 the studio itself is PID 1, which the kernel protects from signals sent
+    // inside the container, so a crash could not be tested and children would not be reaped.
+    if (svc.init !== true) p.push(`${name}: init must be true`);
     if (svc.privileged) p.push(`${name}: privileged`);
     for (const v of svc.volumes ?? []) {
       const source = String(v).split(":")[0];
@@ -162,6 +165,10 @@ test("guidance that lets the agent bring down another rig is caught", () => {
   assert.ok(planted((r) => { r.role = r.role.replace("- `rig env status observatory`", "- `rig down other-rig`\n- `rig env status observatory`"); }).some((m) => /lets the agent run `rig down other-rig`/.test(m)));
   assert.ok(planted((r) => { r.role = r.role.replace("- `docker compose -p openrig-observatory ps`", "- `docker compose ps`"); }).some((m) => /lets the agent run|without the app's project/.test(m)));
   assert.ok(planted((r) => { r.role = r.role.replace(/leave it\s+stopped/i, "start it again"); }).some((m) => /intentional stop/.test(m)));
+});
+
+test("removing the init is caught", () => {
+  assert.ok(planted((r) => { delete r.compose.services.studio.init; }).some((m) => /init must be true/.test(m)));
 });
 
 test("the rig's restart and healthcheck checks are not decorative", () => {

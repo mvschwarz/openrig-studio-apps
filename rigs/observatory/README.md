@@ -35,3 +35,17 @@ read. Machines reachable only over ssh are listed but not read.
 ## Stop it
 
 `rig down observatory` stops the agent and the container and keeps the volume.
+
+## Checking that it recovers from a crash
+
+A crash test has to crash the studio process, not stop the container:
+
+```sh
+docker compose -p openrig-observatory -f rigs/observatory/observatory.compose.yaml \
+  exec -T studio node - < rigs/observatory/p6/kill-studio.cjs
+```
+
+The script kills the studio process inside the container and prints its pid. Compose then restarts the
+container (`restart: unless-stopped`; `init: true` makes the studio a child of PID 1, so this is a
+real crash). `docker stop` and `docker kill` are not crash tests: Docker treats both as a deliberate
+stop and does not restart the container.

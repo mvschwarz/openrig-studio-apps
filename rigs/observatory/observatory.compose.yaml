@@ -15,6 +15,10 @@ services:
       dockerfile: rigs/observatory/Dockerfile
     image: openrig-observatory-studio:0.1.0
     network_mode: host
+    # Docker's init (tini) runs as PID 1, forwards signals, and reaps the studio's child processes. It
+    # also makes a crash testable: the studio is init's child, so killing it ends the container with a
+    # non-zero status and the restart policy brings it back (see p6/kill-studio.cjs).
+    init: true
     restart: unless-stopped
     environment:
       OBSERVATORY_DAEMON_URL: ${OBSERVATORY_DAEMON_URL:-http://127.0.0.1:7433}
