@@ -116,8 +116,30 @@ export function scopeProblems({ role }) {
     if (!ALLOWED.some((re) => re.test(cmd))) p.push(`the guidance lets the agent run \`${cmd}\``);
   }
   const notYours = role.match(/## What is not yours([\s\S]*?)\n## /)?.[1] ?? "";
-  for (const must of ["other Compose project", "rig up", "rig down", "daemon settings", "credentials"]) {
-    if (!notYours.includes(must)) p.push(`the guidance does not rule out: ${must}`);
+  for (const must of ["other Compose project", "rig up", "rig down", "daemon settings", "credentials",
+    "publish or push the app's code upstream", "another rig", "a host service", "the OpenRig daemon", "alert or retention policy",
+    "any other\n  team's live stack", "new collector", "credential store", "new upstream API", "control plane"]) {
+    if (!notYours.includes(must)) p.push(`the guidance does not rule out: ${must.replace(/\s+/g, " ")}`);
+  }
+
+  // Customizing: the app's own code and data only, and the reading rules that go with it.
+  const custom = role.match(/## Customizing the Observatory([\s\S]*?)\n## /)?.[1] ?? "";
+  if (!custom) p.push("the guidance does not grant customizing the app");
+  const OWN = new Set(["apps/observatory/", "providers/studio-observatory/", "observatory-data"]);
+  for (const ref of [...custom.matchAll(/`([^`]+)`/g)].map((m) => m[1])) if (!OWN.has(ref)) p.push(`customizing reaches outside the app: \`${ref}\``);
+  for (const line of custom.split("\n").filter((l) => /^\s*-/.test(l))) {
+    if (/collector|credential store|upstream API|control plane/i.test(line)) p.push(`a customization grant mentions what it must never add: ${line.trim()}`);
+  }
+  if (!/A customization never adds a new collector, a credential store, a new upstream API or a control\s+plane\./.test(custom)) p.push("the guidance does not say a customization never adds a collector, credential store, upstream API or control plane");
+  if (!/Activity is activity\. Do not call it productivity\./.test(role)) p.push("the guidance does not say activity is not productivity");
+  if (!/The oversight team defines ceremony and productivity\./.test(role) || !/never make up your own/.test(role)) p.push("the guidance does not leave ceremony and productivity definitions to the oversight team");
+  if (/productivity (score|metric|measure) (is|=|means)|define (a |your own )?productivity/i.test(role)) p.push("the guidance has the agent define productivity");
+
+  // Rotation only once its owner has enabled it; otherwise nothing moves.
+  const rotation = role.match(/## Subscription rotation([\s\S]*?)\n## /)?.[1] ?? "";
+  if (!/only when its owner has separately enabled it for you/.test(rotation) || !/Unless it has been enabled, you never move seats or accounts\./.test(rotation)) p.push("subscription rotation is not conditional on a separate enablement");
+  for (const sentence of role.split(/(?<=\.)\s+/).filter((t) => /rotation/i.test(t))) {
+    if (!/only when|only once|enabled|never/i.test(sentence)) p.push(`an unconditional rotation sentence: ${sentence.trim().slice(0, 80)}`);
   }
   if (!/stopped on purpose/i.test(role) || !/leave it\s+stopped/i.test(role)) p.push("the guidance does not tell an intentional stop apart from a failure");
   // The path for a provider that is not serving: see unhealthy, read the logs, restart once, report.
@@ -186,6 +208,23 @@ test("readiness that only proves the studio is caught", () => {
 
 test("guidance without the unhealthy -> logs -> restart once -> report path is caught", () => {
   assert.ok(planted((r) => { r.role = r.role.replace("restart `studio` once if that is the", "restart `studio` if that is the"); }).some((m) => /restart once -> report/.test(m)));
+});
+
+test("guidance letting a customization add a collector is caught", () => {
+  assert.ok(planted((r) => { r.role = r.role.replace("- `apps/observatory/` (the page)", "- `apps/observatory/` (the page)\n- a new collector for readings the daemon does not serve"); }).some((m) => /mentions what it must never add/.test(m)));
+  assert.ok(planted((r) => { r.role = r.role.replace("- add a new collector, a credential store, a new upstream API or a control plane\n", ""); }).some((m) => /rule out: new collector/.test(m)));
+});
+
+test("unconditional subscription rotation is caught", () => {
+  assert.ok(planted((r) => { r.role = r.role.replace("You may run the subscription-rotation job only when its owner has separately enabled it for you.\nUnless it has been enabled, you never move seats or accounts.", "You may run the subscription-rotation job to balance accounts."); }).some((m) => /not conditional|unconditional rotation/.test(m)));
+});
+
+test("guidance in which the agent defines productivity is caught", () => {
+  assert.ok(planted((r) => { r.role = r.role.replace("The oversight team defines ceremony and productivity. Show their definitions and readings when they\n  publish them; never make up your own.", "Define a productivity score from activity and queue throughput and show it."); }).some((m) => /oversight team|define productivity/.test(m)));
+});
+
+test("customizing outside the app's own files is caught", () => {
+  assert.ok(planted((r) => { r.role = r.role.replace("- `providers/studio-observatory/` (the reader behind it)", "- `providers/studio-fleet/` (another provider)"); }).some((m) => /reaches outside the app/.test(m)));
 });
 
 test("removing the init is caught", () => {

@@ -1,7 +1,8 @@
 # Observatory launch rig
 
 Adds the Observatory to an OpenRig machine: one container running the Studio with the Observatory
-app, and an agent that sets it up, keeps it running and answers questions from what it shows.
+app, and an agent that sets it up, keeps it running, shapes the app to what you need (its own code and
+data only) and answers questions from what it shows.
 
 ## Start it
 

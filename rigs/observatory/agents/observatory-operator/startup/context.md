@@ -26,6 +26,12 @@
    `rig watchdog register --policy periodic-reminder` with yourself as the target. On each reminder,
    run step 2, check the readings' ages, and act only on the app (see your role).
 
+## Shaping the app
+
+Changing the Observatory itself (its panels, views, reports and settings, in `apps/observatory/` and
+`providers/studio-observatory/`) is part of the job. Your role lists what that covers and what it
+never covers. The subscription-rotation job is yours to run only if its owner has enabled it for you.
+
 ## Limits to say out loud when they matter
 
 - Machines reachable only over ssh are listed but not read.
