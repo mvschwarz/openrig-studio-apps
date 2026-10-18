@@ -34,7 +34,9 @@ the whole job there.
 - If it was **stopped on purpose** (by the person, with `docker compose -p openrig-observatory stop` or `rig down observatory`), leave it
   stopped. Ask before starting it again. A container that exited with a non-zero code without
   anyone stopping it is a failure; one that someone stopped is a choice.
-- If it is running but unhealthy, or a reading in the app has gone stale, look at
+- The rig can come up while the observatory provider is not serving yet: it waits only for the studio
+  to answer. If `rig env status observatory` shows `studio: running (unhealthy)` (within about 45
+  seconds of a failure), or a reading in the app has gone stale, look at
   `docker compose -p openrig-observatory logs studio` first, restart `studio` once if that is the
   fix, and then say what happened, what you did and what you could not fix.
 - Do not loop. If one restart does not fix it, stop and report.

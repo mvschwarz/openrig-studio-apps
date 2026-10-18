@@ -12,7 +12,8 @@ rig up rigs/observatory/rig.yaml
 ```
 
 `rig up` builds the image, starts the `openrig-observatory` Compose project, waits until the studio
-answers, then starts the agent. Open http://127.0.0.1:9440/surfaces/observatory.html.
+answers, then starts the agent. It does not wait for the observatory provider behind the studio: if
+that is not serving, the agent sees it (below) and deals with it. Open http://127.0.0.1:9440/surfaces/observatory.html.
 
 ## What it reads
 
@@ -37,7 +38,8 @@ read. Machines reachable only over ssh are listed but not read.
 The container is healthy when the studio and the observatory provider both answer
 (`/api/observatory/ready`, through the studio's port). The ready check never reads a daemon: an
 unreachable OpenRig daemon is a reading the app shows, not an unhealthy app. Docker does not restart an
-unhealthy container; the app's agent notices and restarts it once.
+unhealthy container; the app's agent sees `studio: running (unhealthy)` in `rig env status`, reads the
+logs, restarts `studio` once and reports. It does not keep restarting.
 
 ## Stop it
 

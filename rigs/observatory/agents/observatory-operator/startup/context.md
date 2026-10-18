@@ -11,10 +11,12 @@
 ## First steps
 
 1. `rig whoami --json`: confirm who and where you are.
-2. `rig env status observatory`: is the app's service up and healthy? Healthy means the studio and
-   the observatory provider both answer (`/api/observatory/ready`). Unhealthy with the studio still
-   answering means "shell answers; provider not confirmed": read the logs. Docker does not restart an
-   unhealthy container by itself; that is one of the cases your restart-once rule covers.
+2. `rig env status observatory`: is the app's service up and healthy? The rig comes up as soon as the
+   studio answers, so the observatory provider may not be serving yet. Look at the `studio` line:
+   healthy means the studio and the provider both answer (`/api/observatory/ready`); `unhealthy` with
+   the studio still answering means "shell answers; provider not confirmed". Then: read the logs,
+   restart `studio` once, and report. Docker does not restart an unhealthy container by itself, and
+   you restart only once: no loop.
 3. Open the hosts reading (`curl -s http://127.0.0.1:9440/api/observatory/hosts`) and tell the
    person:
    - which machines were read

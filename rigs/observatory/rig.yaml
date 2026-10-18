@@ -11,10 +11,13 @@ services:
   compose_file: observatory.compose.yaml
   project_name: openrig-observatory
   down_policy: down
+  # The rig comes up when the studio answers. Whether the observatory provider behind it is serving is
+  # a runtime reading, which the container healthcheck reports and the app's agent acts on; waiting on
+  # it here would roll the whole rig back, agent included, on the very failure the agent is there to
+  # handle. (A `service: studio, condition: healthy` wait would do exactly that, since the healthcheck
+  # is provider-level, so there is none.)
   wait_for:
-    - url: http://127.0.0.1:9440/api/observatory/ready
-    - service: studio
-      condition: healthy
+    - url: http://127.0.0.1:9440/api/contract
   surfaces:
     urls:
       - name: Observatory

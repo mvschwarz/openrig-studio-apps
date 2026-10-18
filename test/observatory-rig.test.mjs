@@ -45,7 +45,11 @@ export function rigProblems({ dir, rig, compose }) {
     if (w.service !== undefined && (w.condition !== "healthy" || !compose.services?.[w.service])) p.push(`wait_for service ${w.service} must be a compose service with condition healthy`);
   }
   if (!(s.surfaces?.urls ?? []).length) p.push("surfaces.urls names no link for the person");
-  if (!waits.some((w) => w.url === "http://127.0.0.1:9440/api/observatory/ready")) p.push("wait_for must ask the provider's ready verb through the studio's port");
+  // The rig comes up on the studio alone. Provider health is a runtime reading for the agent: waiting on
+  // it (the ready verb, or the compose health, which is provider-level) would roll the rig back.
+  if (!waits.some((w) => w.url === "http://127.0.0.1:9440/api/contract")) p.push("wait_for must wait for the studio (/api/contract on 9440)");
+  if (waits.some((w) => String(w.url ?? "").includes("/api/observatory/"))) p.push("wait_for must not wait on the provider");
+  if (waits.some((w) => w.service !== undefined)) p.push("wait_for must not wait on compose health, which is provider-level");
   const pods = rig.pods ?? [];
   const members = pods.flatMap((pod) => pod.members ?? []);
   if (members.length !== 1) p.push(`expected one agent member, found ${members.length}`);
@@ -116,6 +120,9 @@ export function scopeProblems({ role }) {
     if (!notYours.includes(must)) p.push(`the guidance does not rule out: ${must}`);
   }
   if (!/stopped on purpose/i.test(role) || !/leave it\s+stopped/i.test(role)) p.push("the guidance does not tell an intentional stop apart from a failure");
+  // The path for a provider that is not serving: see unhealthy, read the logs, restart once, report.
+  const path = role.match(/studio: running \(unhealthy\)[\s\S]*?logs studio[\s\S]*?restart `studio` once[\s\S]*?say what happened/);
+  if (!path) p.push("the guidance does not name the unhealthy -> logs -> restart once -> report path");
   for (const m of role.matchAll(/`docker compose(?! -p openrig-observatory)[^`]*`/g)) p.push(`a docker compose command without the app's project: ${m[0]}`);
   return p;
 }
@@ -172,7 +179,13 @@ test("guidance that lets the agent bring down another rig is caught", () => {
 
 test("readiness that only proves the studio is caught", () => {
   assert.ok(planted((r) => { r.compose.services.studio.healthcheck.test = ["CMD", "node", "-e", "fetch('http://127.0.0.1:9440/api/contract')"]; }).some((m) => /provider's healthcheck/.test(m)));
-  assert.ok(planted((r) => { r.rig.services.wait_for[0].url = "http://127.0.0.1:9440/api/contract"; }).some((m) => /ready verb/.test(m)));
+  // ...while the rig's wait stays on the studio alone.
+  assert.ok(planted((r) => { r.rig.services.wait_for[0].url = "http://127.0.0.1:9440/api/observatory/ready"; }).some((m) => /must not wait on the provider/.test(m)));
+  assert.ok(planted((r) => { r.rig.services.wait_for.push({ service: "studio", condition: "healthy" }); }).some((m) => /compose health/.test(m)));
+});
+
+test("guidance without the unhealthy -> logs -> restart once -> report path is caught", () => {
+  assert.ok(planted((r) => { r.role = r.role.replace("restart `studio` once if that is the", "restart `studio` if that is the"); }).some((m) => /restart once -> report/.test(m)));
 });
 
 test("removing the init is caught", () => {
