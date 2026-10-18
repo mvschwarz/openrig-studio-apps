@@ -455,3 +455,103 @@ export async function readFleet({
     coverage: { hostsKnown: hosts.length, hostsRead: hosts.length - notRead.length, notRead, complete: notRead.length === 0 && registry.status === "ok" },
   };
 }
+
+// --- one seat ------------------------------------------------------------------------------------
+//
+// The drill-down for one seat, named by its host-qualified key (`<host>/<rig>/<seat>`). A key without
+// its machine is refused: the same rig and seat names can exist on several machines, and resolving a
+// bare name would merge them. Reads are bounded to this one seat on its own daemon.
+
+const DEFAULT_TREND_HOURS = 6;
+
+// OpenRig stores some times as SQLite datetime('now'): "YYYY-MM-DD HH:MM:SS", in UTC but without saying
+// so. A browser reads that form as local time, so it is made explicit here. The daemon's own string is
+// kept beside it.
+export function sqliteUtc(v) {
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/.test(v) ? `${v.replace(" ", "T")}Z` : v ?? null;
+}
+const DEFAULT_TREND_LIMIT = 500;
+const TENURE_LIMIT = 20;
+
+export function findSeat(fleet, key) {
+  if (typeof key !== "string" || !key) return { error: "a seat key is required", code: "seat_key_required" };
+  // A machine that has stopped answering is found by the name it was last seen under, so its seat
+  // reads as "not read" with the reason, rather than as unknown.
+  const host = (fleet.hosts ?? []).find((h) => key.startsWith(`${h.key}/`)) ?? (fleet.hosts ?? []).find((h) => h.lastSeenAs?.hostId && key.startsWith(`${h.lastSeenAs.hostId}/`));
+  if (!host) return { error: `no machine in this fleet matches the start of "${key}"; a seat key must name its machine (machine/rig/seat)`, code: "seat_host_unknown" };
+  const seats = host.reads?.seats?.data;
+  if (!Array.isArray(seats)) return { host, seat: null, error: `seats on ${host.hostId ?? (host.lastSeenAs ? `the machine last seen as ${host.lastSeenAs.hostId}` : host.key)} were not read: ${host.reads?.seats?.status ?? host.status}${host.detail ? ` (${host.detail})` : ""}`, code: "seat_host_not_read" };
+  const seat = seats.find((s) => s.key === key);
+  if (!seat) return { host, seat: null, error: `no seat ${key} on ${host.key}`, code: "seat_not_found" };
+  return { host, seat };
+}
+
+export async function readSeat({ fleet, key, fetch: fetchImpl = globalThis.fetch, now = () => Date.now(), timeoutMs = DEFAULT_TIMEOUT_MS, trendHours = DEFAULT_TREND_HOURS, trendLimit = DEFAULT_TREND_LIMIT, tenureCursor = null } = {}) {
+  const found = findSeat(fleet, key);
+  if (!found.seat) return { schema: "openrig.observatory.seat/v1", key, status: found.code, error: found.error, host: found.host ? { key: found.host.key, status: found.host.status } : null };
+  const { host, seat } = found;
+  const polledAt = new Date(now()).toISOString();
+  const since = new Date(now() - trendHours * 3600 * 1000).toISOString();
+  const seriesRoute = `/api/telemetry/usage/series?lane=context&seat=${encodeURIComponent(seat.session ?? "")}&since=${encodeURIComponent(since)}&limit=${trendLimit}`;
+  const tenureRoute = seat.nodeId ? `/api/telemetry/v1/nodes/${encodeURIComponent(seat.nodeId)}/tenures?limit=${TENURE_LIMIT}${tenureCursor ? `&cursor=${encodeURIComponent(tenureCursor)}` : ""}` : null;
+  const [series, tenures] = await Promise.all([
+    seat.session ? getJson(fetchImpl, host.url, seriesRoute, timeoutMs) : Promise.resolve({ status: "http-error", route: seriesRoute, detail: "the seat has no session name to ask for" }),
+    tenureRoute ? getJson(fetchImpl, host.url, tenureRoute, timeoutMs) : Promise.resolve({ status: "http-error", route: null, detail: "the seat has no node id" }),
+  ]);
+
+  // Context trend: the daemon's own samples, oldest first, each with its own time. No point is made
+  // up: a missing value stays missing and a silence between samples stays a silence.
+  let trend;
+  if (series.status === "http-error" && series.httpStatus === 404) trend = { route: seriesRoute, status: "absent", detail: "this daemon's OpenRig version has no usage series route", polledAt, points: null };
+  else if (series.status !== "ok") trend = { route: seriesRoute, status: series.status, httpStatus: series.httpStatus ?? null, detail: series.detail ?? null, polledAt, points: null };
+  else {
+    const rows = Array.isArray(series.body?.rows) ? series.body.rows : [];
+    const points = rows.filter((r) => r.lane === "context").map((r) => ({
+      // When the harness measured it, and when the daemon recorded it. Never the poll time.
+      sampledAt: r.sampledAt ?? null, capturedAt: r.capturedAt ?? null,
+      usedPercentage: typeof r.usedPercentage === "number" ? r.usedPercentage : null,
+      source: r.source ?? null,
+    }));
+    trend = {
+      route: seriesRoute, status: "ok", polledAt, points,
+      window: { since, hours: trendHours, boundOn: "the daemon's capture time" },
+      coverage: { limit: trendLimit, returned: rows.length, possiblyTruncated: rows.length >= trendLimit, order: "oldest first", note: rows.length >= trendLimit ? "the list is full and oldest first, so the newest samples may be missing" : null },
+      advisories: Array.isArray(series.body?.advisories) ? series.body.advisories : [],
+    };
+  }
+
+  // Generation history, newest first, as the daemon's bounded telemetry reports it. A cursor from an
+  // earlier daemon boot comes back unavailable: that is said, never shown as the whole history.
+  let generations;
+  if (tenures.status !== "ok") generations = { route: tenureRoute, status: tenures.status, httpStatus: tenures.httpStatus ?? null, detail: tenures.detail ?? null, polledAt, rows: null };
+  else {
+    const b = tenures.body ?? {};
+    const cov = b.coverage ?? {};
+    const unverified = cov.status === "unavailable";
+    generations = {
+      route: tenureRoute, status: unverified ? "history-unverified" : "ok", polledAt, observedAt: b.observedAt ?? null,
+      bootEpoch: b.source?.bootEpoch ?? null,
+      rows: unverified ? null : (Array.isArray(b.rows) ? b.rows : []).map((t) => ({ ordinal: t.generationOrdinal ?? null, kind: t.kind ?? null, generation: t.generationUuid ?? null, startedAt: sqliteUtc(t.originalTimestamp), startedAtAsStored: t.originalTimestamp ?? null })),
+      coverage: {
+        status: cov.status ?? null, historyCompleteness: cov.historyCompleteness ?? "unknown",
+        gaps: Array.isArray(cov.gaps) ? cov.gaps.map((g) => g.code) : [], gapCount: cov.gapCount ?? 0,
+        hasMore: b.page?.hasMore === true, nextCursor: b.page?.nextCursor ?? null,
+        note: unverified ? "history unverified across a daemon restart: this cursor came from an earlier boot" : null,
+      },
+    };
+  }
+
+  const queue = host.reads?.queues;
+  const own = Array.isArray(queue?.data) ? queue.data.filter((q) => q.to === seat.session || q.from === seat.session) : null;
+  return {
+    schema: "openrig.observatory.seat/v1", key, status: "ok", polledAt,
+    host: { key: host.key, hostId: host.hostId, labels: host.labels, restart: host.restart ?? null },
+    current: seat,
+    trend,
+    generations,
+    queue: own === null
+      ? { status: queue?.status ?? host.status, rows: null, note: "the machine's queue was not read" }
+      : { status: "ok", rows: own, note: "rows to or from this seat within the machine's filtered, bounded queue list; not all of this seat's work", coverage: queue.coverage },
+    notConnected: ["transcript", "generation record (needs a token)", "compaction"],
+  };
+}

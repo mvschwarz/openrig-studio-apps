@@ -186,6 +186,18 @@ test("nothing the provider runs or the page loads deals in money", () => {
   assert.ok(MONEY.test("clientCostEstimateUsd: 1.2") && MONEY.test("12 dollars"), "the money pattern catches a planted field");
 });
 
+// The drill-down stays on open, bounded reads: no transcripts, and none of the routes that need a
+// token (generation record, previews, compaction, the terminal).
+const GUARDED_ROUTES = /\/generation-record|\/preview\b|\/api\/compaction|\/api\/transcripts|\/api\/terminal|\/api\/startup\//;
+
+test("nothing the provider runs or the page loads asks for transcripts or token-guarded routes", () => {
+  const files = [...runtimeClosure(providerDir).files, ...appClosure(appDir).files];
+  const hits = [];
+  for (const file of files) fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => { if (GUARDED_ROUTES.test(line)) hits.push(`${path.relative(path.resolve(here, ".."), file)}:${i + 1}`); });
+  assert.deepEqual(hits, []);
+  assert.ok(GUARDED_ROUTES.test("/api/sessions/x/generation-record"), "the guarded-route pattern catches a planted call");
+});
+
 test("the pattern check does catch a planted path", () => {
   // Without this, a regular expression that never matches would keep the test
   // above green whatever the provider contained.

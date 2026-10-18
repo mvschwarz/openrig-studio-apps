@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFleet } from "../providers/studio-observatory/lib/fleet-reader.mjs";
-import { createFleetCache, createObservatoryServer, VERBS } from "../providers/studio-observatory/observatory-server.mjs";
+import { createFleetCache, createObservatoryServer, FLEET_VERBS as VERBS } from "../providers/studio-observatory/observatory-server.mjs";
 import { startFakeDaemon } from "./observatory-fake-daemon.mjs";
 import { loadPage } from "./observatory-page.mjs";
 

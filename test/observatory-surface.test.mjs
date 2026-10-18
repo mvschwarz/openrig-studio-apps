@@ -160,7 +160,7 @@ test("the page asks only for verbs the app declares and the provider serves", as
   const html = fs.readFileSync(pagePath, "utf8");
   const app = JSON.parse(fs.readFileSync(path.resolve(here, "../apps/observatory/app.json"), "utf8"));
   const provider = JSON.parse(fs.readFileSync(path.resolve(here, "../providers/studio-observatory/provider.json"), "utf8"));
-  const asked = [...new Set([...html.matchAll(/['"](\/api\/[^'"?]+)['"]/g)].map((m) => m[1]))].sort();
+  const asked = [...new Set([...html.matchAll(/['"`](\/api\/[^'"`?$]+)['"`?]/g)].map((m) => m[1]))].sort();
   assert.deepEqual(asked, Object.keys(app.calls).sort());
   for (const v of asked) assert.ok(provider.verbs.includes(v), `${v} is not a verb the provider serves`);
   assert.equal(app.provider.package, provider.package);

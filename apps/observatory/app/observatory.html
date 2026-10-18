@@ -61,6 +61,7 @@
       <h1>Your machines</h1>
       <div class="lede" id="lede">Reading…</div>
     </header>
+    <div id="seat-detail"></div>
     <div id="content"></div>
     <footer id="foot"></footer>
   </main>
@@ -159,7 +160,7 @@
           const a = s.activity ?? {};
           const ctx = s.context;
           rows.push(`<tr>
-            <td><span class="name">${esc(s.rigName ?? '')}/${esc(s.logicalId ?? '')}</span><span class="sub">on ${hostName(h)}</span></td>
+            <td><a class="name" href="#seat=${encodeURIComponent(s.key)}">${esc(s.rigName ?? '')}/${esc(s.logicalId ?? '')}</a><span class="sub">on ${hostName(h)}</span></td>
             <td>${a.state && a.state !== 'unknown' ? esc(a.state) : unknown()}${a.reason ? `<span class="sub">${esc(a.reason)}</span>` : ''}</td>
             <td>${a.method ? esc(a.method) : unknown('method not reported')}</td>
             <td>${ageText(a.observedAt, now)}${a.stale ? ' <span class="stale">stale (the source says)</span>' : ''}</td>
@@ -301,6 +302,93 @@
       return `<section id="subscriptions"><h2>Subscriptions</h2><p class="scope">Configured links and observed use are shown side by side and never merged. Moves between accounts are not recorded yet. Nothing here is in money.</p>${parts.join('')}</section>`;
     }
 
+    // ---- one seat --------------------------------------------------------------------------------
+    //
+    // A context trend is drawn from the daemon's own samples at their own times. A missing value is
+    // a hole, never a zero. The line is broken, never bridged, across a daemon restart, a new
+    // generation of the seat, or a silence much longer than the usual spacing (more than twice the
+    // median gap), and each break says why.
+
+    const pointTime = (p) => Date.parse(p.sampledAt ?? p.capturedAt ?? '');
+
+    export function trendSegments(points, breaks = []) {
+      const pts = (points ?? []).filter((p) => !Number.isNaN(pointTime(p))).sort((a, b) => pointTime(a) - pointTime(b));
+      const gaps = pts.slice(1).map((p, i) => pointTime(p) - pointTime(pts[i])).filter((g) => g > 0).sort((a, b) => a - b);
+      const median = gaps.length ? gaps[Math.floor(gaps.length / 2)] : null;
+      const segments = [];
+      const reasons = [];
+      let cur = [];
+      pts.forEach((p, i) => {
+        if (i > 0) {
+          const a = pointTime(pts[i - 1]), b = pointTime(p);
+          const hit = breaks.find((k) => k.at > a && k.at <= b);
+          const silence = median !== null && b - a > 2 * median;
+          if (hit || silence) {
+            if (cur.length) segments.push(cur);
+            cur = [];
+            reasons.push({ from: pts[i - 1].sampledAt ?? pts[i - 1].capturedAt, to: p.sampledAt ?? p.capturedAt, why: hit ? hit.why : 'no samples for longer than twice the usual spacing' });
+          }
+        }
+        if (p.usedPercentage === null || p.usedPercentage === undefined) {
+          if (cur.length) segments.push(cur);
+          cur = [];
+          reasons.push({ from: p.sampledAt ?? p.capturedAt, to: p.sampledAt ?? p.capturedAt, why: 'the sample has no value' });
+        } else cur.push(p);
+      });
+      if (cur.length) segments.push(cur);
+      return { segments, breaks: reasons, points: pts };
+    }
+
+    export function trendBreaks(seat) {
+      const out = [];
+      const r = seat.host?.restart;
+      if (r?.status === 'restarted' && r.between?.[1]) out.push({ at: Date.parse(r.between[1]), why: `the daemon restarted (between ${r.between[0]} and ${r.between[1]})` });
+      for (const g of seat.generations?.rows ?? []) if (g.startedAt) out.push({ at: Date.parse(g.startedAt), why: `a new generation of the seat began (${g.kind ?? 'unknown kind'})` });
+      return out;
+    }
+
+    function trendSvg({ segments, points }) {
+      if (!points.length) return '';
+      const t0 = pointTime(points[0]), t1 = pointTime(points[points.length - 1]);
+      const span = Math.max(1, t1 - t0);
+      const xy = (p) => `${(10 + 380 * (pointTime(p) - t0) / span).toFixed(1)},${(90 - 0.8 * p.usedPercentage).toFixed(1)}`;
+      const lines = segments.map((seg) => seg.length === 1 ? `<circle cx="${xy(seg[0]).split(',')[0]}" cy="${xy(seg[0]).split(',')[1]}" r="2" fill="currentColor"/>` : `<polyline fill="none" stroke="currentColor" stroke-width="1.5" points="${seg.map(xy).join(' ')}"/>`).join('');
+      return `<svg viewBox="0 0 400 100" width="400" height="100" role="img" aria-label="context used over time">${lines}</svg>`;
+    }
+
+    export function renderSeat(seat, now) {
+      if (!seat) return '';
+      if (seat.status !== 'ok') return `<section id="seat"><h2>Seat</h2><div class="notice">${esc(seat.error ?? seat.status)}</div></section>`;
+      const c = seat.current ?? {};
+      const a = c.activity ?? {};
+      const parts = [];
+      parts.push(`<p class="scope"><b>${esc(c.rigName ?? '')}/${esc(c.logicalId ?? '')}</b> on ${esc(seat.host?.hostId ?? seat.host?.key ?? '')} · ${esc(c.session ?? '')} · activity ${a.state && a.state !== 'unknown' ? esc(a.state) : unknown()} by ${a.method ? esc(a.method) : unknown('method not reported')}, measured ${ageText(a.observedAt, now)}${seat.fleetServed ? ` · the fleet read is ${esc(seat.fleetServed.cacheAgeSeconds ?? 0)} s old` : ''}</p>`);
+      const t = seat.trend ?? {};
+      if (t.status === 'absent') parts.push(`<div class="notice">Context trend: <span class="unknown">not available</span>. ${esc(t.detail)}.</div>`);
+      else if (t.status !== 'ok') parts.push(`<div class="notice">Context trend not read: ${statusText(t.status)}${why(t) ? ` · ${why(t)}` : ''}. This is a failure to read, not a flat line.</div>`);
+      else {
+        const shaped = trendSegments(t.points, trendBreaks(seat));
+        const cov = t.coverage ?? {};
+        parts.push(`<p class="scope">Context used over the last ${esc(t.window?.hours)} h (bounded by ${esc(t.window?.boundOn)}): ${esc(cov.returned)} samples, at most ${esc(cov.limit)}${cov.possiblyTruncated ? ` · <span class="stale">${esc(cov.note)}</span>` : ''}. Each point is drawn at its own sample time; nothing is filled in.</p>`);
+        parts.push(shaped.points.length ? trendSvg(shaped) : `<div class="notice">No context samples in this window.</div>`);
+        if (shaped.breaks.length) parts.push(`<p class="scope">The line is broken ${esc(shaped.breaks.length)} time${shaped.breaks.length === 1 ? '' : 's'}: ${shaped.breaks.map((b) => `${esc(b.why)} (${esc(b.from)} → ${esc(b.to)})`).join('; ')}.</p>`);
+        const rows = shaped.points.slice(-12).reverse().map((p) => `<tr><td>${ageText(p.sampledAt, now)}<span class="sub">recorded ${ageText(p.capturedAt, now)}</span></td><td class="numeric">${pct(p.usedPercentage)}</td><td>${p.source ? esc(p.source) : unknown()}</td></tr>`).join('');
+        if (rows) parts.push(`<div class="table-wrap"><table><thead><tr><th>Sampled</th><th>Context used</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+      }
+      const g = seat.generations ?? {};
+      if (g.status === 'history-unverified') parts.push(`<div class="notice">Generation history: <span class="stale">history unverified across a daemon restart</span>. ${esc(g.coverage?.note ?? '')}. Nothing from before the restart is shown as the whole history.</div>`);
+      else if (g.status !== 'ok') parts.push(`<div class="notice">Generation history not read: ${statusText(g.status)}${why(g) ? ` · ${why(g)}` : ''}.</div>`);
+      else {
+        const rows = (g.rows ?? []).map((x) => `<tr><td class="numeric">${esc(x.ordinal)}</td><td>${esc(x.kind ?? '')}</td><td>${ageText(x.startedAt, now)}</td><td>${esc(String(x.generation ?? '').slice(0, 8))}</td></tr>`).join('');
+        parts.push(`<p class="scope">Generations, newest first, from the daemon's bounded telemetry: coverage ${esc(g.coverage?.status)}, completeness ${esc(g.coverage?.historyCompleteness)}${g.coverage?.gapCount ? ` · gaps: ${esc(g.coverage.gaps.join(', '))}` : ''}${g.coverage?.hasMore ? ' · older generations exist' : ''}.</p>` + (rows ? `<div class="table-wrap"><table><thead><tr><th>#</th><th>Kind</th><th>Started</th><th>Generation</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">No generations reported.</div>`));
+      }
+      const q = seat.queue ?? {};
+      if (!Array.isArray(q.rows)) parts.push(`<div class="notice">This seat's queue rows: not read (${statusText(q.status)}).</div>`);
+      else parts.push(`<p class="scope">${esc(q.note)}: ${esc(q.rows.length)} row${q.rows.length === 1 ? '' : 's'}.</p>` + (q.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Item</th><th>State</th><th>From → to</th><th>Updated</th></tr></thead><tbody>${q.rows.map((r) => `<tr><td class="name">${esc(r.id)}</td><td>${esc(r.state)}</td><td>${esc(r.from ?? '')} → ${esc(r.to ?? '')}</td><td>${ageText(r.updatedAt, now)}</td></tr>`).join('')}</tbody></table></div>` : ''));
+      parts.push(`<p class="placeholder">Not connected here: ${esc((seat.notConnected ?? []).join(', '))}.</p>`);
+      return `<section id="seat"><h2>Seat</h2>${parts.join('')}</section>`;
+    }
+
     export function renderLater() {
       return `<section id="later"><h2>Not set up yet</h2><p class="placeholder">Productivity has no agreed definition yet, so only activity is shown. The oversight team's readings and subscription moves are not connected. Nothing here estimates them.</p></section>`;
     }
@@ -314,6 +402,17 @@
       const lede = document.querySelector('#lede');
       const foot = document.querySelector('#foot');
       const verbs = { hosts: '/api/observatory/hosts', seats: '/api/observatory/seats', queues: '/api/observatory/queues', health: '/api/observatory/health', messaging: '/api/observatory/messaging', ceremony: '/api/observatory/ceremony', subscriptions: '/api/observatory/subscriptions' };
+      async function loadSeat() {
+        const m = location.hash.match(/^#seat=(.+)$/);
+        const box = document.querySelector('#seat-detail');
+        if (!m) { box.innerHTML = ''; return; }
+        try {
+          const r = await fetch(`/api/observatory/seat?key=${encodeURIComponent(decodeURIComponent(m[1]))}`);
+          box.innerHTML = renderSeat(await r.json(), Date.now());
+        } catch (e) { box.innerHTML = `<div class="notice"><b>Could not read this seat:</b> ${esc(e.message)}.</div>`; }
+      }
+      window.addEventListener('hashchange', loadSeat);
+      loadSeat();
       async function load() {
         const got = {};
         const failed = [];

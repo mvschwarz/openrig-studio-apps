@@ -31,6 +31,7 @@ export async function startFakeDaemon(opts = {}) {
     "/api/health-summary/context": () => [200, { total: 2, byUrgency: { critical: 0, warning: 0, low: 2, unknown: 0 }, byFreshness: { fresh: 2, stale: 0, none: 0 }, critical: 0, warning: 0, stale: 0 }],
     "/api/health-summary/gateway": () => [200, { state: "inactive" }],
     "/api/telemetry/v1/events": () => [200, { schemaVersion: 1, stream: "events", source: { hostId: opts.selfHostId ?? null, bootEpoch: opts.bootEpoch ?? "boot-1", sequenceSpaceId: null }, items: [] }],
+    "/api/telemetry/usage/series": () => [200, { rows: opts.seriesRows ?? [] }],
     "/api/queue/undelivered": () => [200, opts.undelivered ?? [qitem(9, { deliveryOutcome: "transport-failed", deliveryFailureClass: "transport-failed", lastNudgeAttempt: "2030-01-01T00:00:00.000Z" })]],
     "/api/health-diagnosis/policy": () => [200, { version: 1, policy: { disabledDetectors: opts.disabledDetectors ?? [], thresholds: { ceremonyTransitions: 20, ceremonyRatio: 12, reviewReturns: 4, redundantWakes: 4 }, observationWindowSeconds: 86400, freshnessSeconds: 600 } }],
     "/api/provider/bindings": () => [200, { bindings: opts.bindings ?? [{ accountId: "acct-1", seatSession: "dev-impl@alpha", rigName: "alpha", boundAt: "2030-01-01T00:00:00.000Z", bindingSource: "codex_auth_seat_registry", anomalies: [] }] }],
@@ -42,8 +43,13 @@ export async function startFakeDaemon(opts = {}) {
     const url = new URL(req.url, "http://127.0.0.1");
     calls.push({ method: req.method, path: url.pathname, query: url.search, headers: req.headers });
     const nodes = url.pathname.match(/^\/api\/rigs\/([^/]+)\/nodes$/);
+    const tenures = url.pathname.match(/^\/api\/telemetry\/v1\/nodes\/([^/]+)\/tenures$/);
+    if (tenures && !opts.routes?.tenures) {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ schemaVersion: 1, stream: "tenures", observedAt: "2030-01-02T12:00:00.000Z", source: { hostId: opts.selfHostId ?? null, bootEpoch: opts.bootEpoch ?? "boot-1" }, rows: opts.tenureRows ?? [{ generationOrdinal: "2", nodeId: decodeURIComponent(tenures[1]), generationUuid: "gen-0002-invented", kind: "fresh", nativeSessionIdAtBoot: "native-invented", originalTimestamp: "2030-01-02T09:00:00.000Z" }, { generationOrdinal: "1", nodeId: decodeURIComponent(tenures[1]), generationUuid: "gen-0001-invented", kind: "initial", nativeSessionIdAtBoot: null, originalTimestamp: "2030-01-01T09:00:00.000Z" }], page: { hasMore: false, nextCursor: null, restartCursor: null }, coverage: { status: "retained_window", historyCompleteness: "unknown", gaps: [], gapCount: 0 } }));
+    }
     const handler = opts.routes?.[url.pathname]
-      ?? (nodes ? (opts.routes?.nodes ?? (() => (rigs[decodeURIComponent(nodes[1])] ? [200, rigs[decodeURIComponent(nodes[1])].nodes.map((n) => ({ ...n, rigId: nodes[1], rigName: rigs[decodeURIComponent(nodes[1])].name, hostSelfId: opts.selfHostId ?? null }))] : [404, { error: "rig not found" }])))
+      ?? (tenures ? opts.routes.tenures : nodes ? (opts.routes?.nodes ?? (() => (rigs[decodeURIComponent(nodes[1])] ? [200, rigs[decodeURIComponent(nodes[1])].nodes.map((n) => ({ ...n, rigId: nodes[1], rigName: rigs[decodeURIComponent(nodes[1])].name, hostSelfId: opts.selfHostId ?? null }))] : [404, { error: "rig not found" }])))
       : defaults[url.pathname]);
     if (!handler) { res.writeHead(404, { "content-type": "application/json" }); return res.end(JSON.stringify({ error: "not found" })); }
     const out = handler(url, req);

@@ -21,7 +21,8 @@
     "/api/observatory/health": { "required": true },
     "/api/observatory/messaging": { "required": true },
     "/api/observatory/ceremony": { "required": true },
-    "/api/observatory/subscriptions": { "required": true }
+    "/api/observatory/subscriptions": { "required": true },
+    "/api/observatory/seat": { "required": true }
   },
   "vendor": [],
   "provider": {
