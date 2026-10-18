@@ -18,7 +18,10 @@
     "/api/observatory/hosts": { "required": true },
     "/api/observatory/seats": { "required": true },
     "/api/observatory/queues": { "required": true },
-    "/api/observatory/health": { "required": true }
+    "/api/observatory/health": { "required": true },
+    "/api/observatory/messaging": { "required": true },
+    "/api/observatory/ceremony": { "required": true },
+    "/api/observatory/subscriptions": { "required": true }
   },
   "vendor": [],
   "provider": {

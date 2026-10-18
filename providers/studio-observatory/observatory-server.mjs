@@ -20,6 +20,9 @@ const VERBS = {
   "/api/observatory/seats": ["seats"],
   "/api/observatory/queues": ["queues"],
   "/api/observatory/health": ["health"],
+  "/api/observatory/messaging": ["messaging"],
+  "/api/observatory/ceremony": ["ceremony"],
+  "/api/observatory/subscriptions": ["bindings", "subscriptions"],
 };
 
 function json(res, status, value) {

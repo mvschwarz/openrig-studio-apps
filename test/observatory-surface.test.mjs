@@ -13,16 +13,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFleet } from "../providers/studio-observatory/lib/fleet-reader.mjs";
 import { startFakeDaemon, closedPortUrl, seat, qitem } from "./observatory-fake-daemon.mjs";
+import { loadPage, pagePath } from "./observatory-page.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const pagePath = path.resolve(here, "../apps/observatory/app/observatory.html");
-
-export async function loadPage(file = pagePath) {
-  const html = fs.readFileSync(file, "utf8");
-  const m = html.match(/<script type="module">([\s\S]*?)<\/script>/);
-  assert.ok(m, "the page has one module script");
-  return import(`data:text/javascript;base64,${Buffer.from(m[1]).toString("base64")}`);
-}
 
 const NOW = Date.parse("2030-01-02T12:00:00.000Z");
 const now = () => NOW;
@@ -160,7 +153,7 @@ test("text from a daemon is escaped, never interpreted as markup", async () => {
 
 test("later panels say they are not set up yet rather than showing estimates", async () => {
   const page = await loadPage();
-  assert.match(text(page.renderLater()), /Ceremony against what ships, subscriptions and the observatory's agent come in later versions\. Nothing here estimates them\./);
+  assert.match(text(page.renderLater()), /Productivity has no agreed definition yet, so only activity is shown\. The oversight team's readings and subscription moves are not connected\. Nothing here estimates them\./);
 });
 
 test("the page asks only for verbs the app declares and the provider serves", async () => {

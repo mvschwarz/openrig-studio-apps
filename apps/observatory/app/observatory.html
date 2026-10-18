@@ -206,19 +206,98 @@
       return `<section id="health"><h2>Health</h2>${blocks.join('')}</section>`;
     }
 
-    export function renderLater() {
-      return `<section id="later"><h2>Not set up yet</h2><p class="placeholder">Ceremony against what ships, subscriptions and the observatory's agent come in later versions. Nothing here estimates them.</p></section>`;
+    export function renderMessaging(fleet, now) {
+      const blocks = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.messaging;
+        if (!r || r.data === null || r.data === undefined) { blocks.push(notRead(h, r, 'undelivered messages')); continue; }
+        const cov = r.coverage ?? {};
+        const scope = `<p class="scope"><b>${hostName(h)}</b>: undelivered rows, filtered and bounded; not a total. At most ${esc(cov.limit)} rows, ${esc(cov.returned)} returned.${cov.possiblyTruncated ? ' <span class="stale">The page is full, so more rows may exist.</span>' : ''} Held messages are per seat and not shown here.</p>`;
+        const rows = r.data.map((q) => `<tr>
+          <td><span class="name">${esc(q.id)}</span>${q.summary ? `<span class="sub">${esc(q.summary)}</span>` : ''}</td>
+          <td>${esc(q.from ?? '')} → ${esc(q.to ?? '')}</td>
+          <td>${q.outcome ? esc(q.outcome) : q.lastResult ? esc(q.lastResult) : unknown()}${q.failureClass ? `<span class="sub">${esc(q.failureClass)}</span>` : ''}</td>
+          <td>${ageText(q.lastAttempt, now)}</td>
+          <td>${ageText(q.createdAt, now)}</td>
+        </tr>`).join('');
+        blocks.push(scope + (rows ? `<div class="table-wrap"><table><thead><tr><th>Item</th><th>From → to</th><th>Delivery</th><th>Last attempt</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">${hostName(h)} reports no undelivered rows.</div>`));
+      }
+      return `<section id="messaging"><h2>Messaging</h2>${blocks.join('')}</section>`;
     }
 
-    export function renderPage({ hosts, seats, queues, health }, now) {
-      return [hosts ? renderHosts(hosts) : '', seats ? renderSeats(seats, now) : '', queues ? renderQueues(queues, now) : '', health ? renderHealth(health, now) : '', renderLater()].join('');
+    const DETECTOR_STATE = {
+      findings: (d) => `${esc(d.findings.length)} finding${d.findings.length === 1 ? '' : 's'}`,
+      'no-active-finding': () => 'no active finding among those evaluated',
+      'no-source': () => '<span class="unknown">no source</span>',
+      disabled: () => '<span class="unknown">turned off on this machine</span>',
+    };
+
+    export function renderCeremony(fleet, now) {
+      const blocks = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.ceremony;
+        if (!r || !r.data) { blocks.push(notRead(h, r, 'ceremony')); continue; }
+        const d = r.data;
+        const pol = d.policy?.status === 'ok' && d.policy.windowSeconds ? ` · window ${esc(Math.round(d.policy.windowSeconds / 3600))} h` : d.policy?.status !== 'ok' ? ` · policy not read: ${statusText(d.policy?.status)}` : '';
+        const scope = `<p class="scope"><b>${hostName(h)}</b>: as OpenRig's own detectors see it, evaluated ${ageText(r.observedAt, now)}${pol}${r.coverage?.truncated ? ' · <span class="stale">findings list truncated</span>' : ''}.</p>`;
+        const rows = d.detectors.map((x) => {
+          const cov = (x.sourceCoverage ?? []).map((c) => c.status === 'unavailable' ? `${esc(c.source)} unavailable` : `${esc(c.source)}: ${esc(c.evaluated)} of ${esc(c.total)} evaluated${c.partial ? ' (partial)' : ''}`).join('; ');
+          const f = x.findings.map((g) => `<span class="sub">${esc(g.severity ?? '')} · ${esc(g.summary ?? '')} · ${esc(g.threshold ?? '')} · last seen ${ageText(g.lastObservedAt, now)}${g.stage ? ` · ${esc(g.stage)}` : ''}</span>`).join('');
+          return `<tr><td class="name">${esc(x.detector)}</td><td>${(DETECTOR_STATE[x.state] ?? (() => esc(x.state)))(x)}${f}</td><td>${esc(x.method)}${cov ? `<span class="sub">${cov}</span>` : ''}</td></tr>`;
+        }).join('');
+        blocks.push(scope + `<div class="table-wrap"><table><thead><tr><th>Detector</th><th>Reading</th><th>Method and coverage</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+      }
+      return `<section id="ceremony"><h2>Ceremony</h2><p class="scope">Ceremony against what ships, from OpenRig's detectors. The oversight team's weekly readings: <span class="unknown">not connected</span>.</p>${blocks.join('')}</section>`;
+    }
+
+    const windowText = (w, now) => `${esc(w.window ?? '')}: ${pct(w.usedPercent)} used${w.resetsAt ? `, resets ${esc(w.resetsAt)}` : ''} · measured ${ageText(w.observedAt, now)}${w.freshness && w.freshness !== 'fresh' ? ` <span class="stale">${esc(w.freshness)}</span>` : ''}`;
+
+    export function renderSubscriptions(fleet, now) {
+      const s = fleet.subscriptions;
+      const parts = [];
+      if (!s) parts.push(`<div class="notice">Subscription usage was not read.</div>`);
+      else if (s.status === 'not-set-up') parts.push(`<div class="notice">Usage across machines: <span class="unknown">not set up</span>. Usage windows are off on the configured machine (provider.usage_windows), so there is no reading, not a zero.</div>`);
+      else if (s.status !== 'ok' || !s.data) parts.push(`<div class="notice">Usage across machines not read: ${statusText(s.status)}${why(s) ? ` · ${why(s)}` : ''}. This is a failure to read, not a zero.</div>`);
+      else {
+        const hostCov = (s.coverage?.hosts ?? []).map((c) => `${esc(c.host)}: ${esc(c.usage ?? c.status)}`).join(' · ');
+        parts.push(`<p class="scope">Composed ${ageText(s.observedAt, now)} by the configured machine${hostCov ? ` · ${hostCov}` : ''}. Each machine's reading is shown separately; allowances are never added up across machines.</p>`);
+        const rows = s.data.allowances.flatMap((g) => g.observations.map((o, i) => `<tr>
+          <td>${i === 0 ? `<span class="name">${esc(g.provider ?? '')}</span><span class="sub">${esc(g.linkage)} across machines${g.notes.length ? ` · ${esc(g.notes.join('; '))}` : ''}</span>` : ''}</td>
+          <td>${esc(o.host)}${o.plan ? `<span class="sub">${esc(o.plan)}</span>` : ''}</td>
+          <td>${o.windows.length ? o.windows.map((w) => windowText(w, now)).join('<br>') : unknown()}</td>
+          <td>${ageText(o.readAt, now)}</td>
+        </tr>`)).join('');
+        parts.push(rows ? `<div class="table-wrap"><table><thead><tr><th>Allowance</th><th>Read on</th><th>Windows</th><th>Read</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">No allowance readings were returned.</div>`);
+      }
+      // Configured and observed stay in separate columns. Neither is "the current account".
+      const observedBySeat = new Map((s?.data?.seatAccounts ?? []).map((x) => [`${x.host}/${x.seat}`, x]));
+      const seatRows = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.bindings;
+        if (!r || r.data === null || r.data === undefined) { if (r) parts.push(notRead(h, r, 'configured subscription links')); continue; }
+        for (const b of r.data) {
+          const o = observedBySeat.get(`${h.key}/${b.seat}`);
+          const observed = s?.status !== 'ok' ? unknown(s?.status === 'not-set-up' ? 'not set up' : 'not read') : o?.observed ? `${o.observed.differsFromConfigured ? '<span class="stale">differs from configured</span> · ' : ''}sampled ${ageText(o.observed.lastSampledAt, now)}${o.observed.note ? `<span class="sub">${esc(o.observed.note)}</span>` : ''}` : unknown('no observation');
+          seatRows.push(`<tr><td><span class="name">${esc(b.seat ?? '')}</span><span class="sub">on ${hostName(h)}</span></td><td>configured: ${b.account ? `${esc(b.account.label ?? b.account.id)}${b.account.authState ? `<span class="sub">${esc(b.account.authState)}</span>` : ''}` : unknown('no account linked')}</td><td>observed: ${observed}</td><td>${esc(s?.moves?.status === 'no-record' ? 'no record' : '')}</td></tr>`);
+        }
+      }
+      if (seatRows.length) parts.push(`<div class="table-wrap"><table><thead><tr><th>Seat</th><th>Configured link</th><th>Observed</th><th>Last move</th></tr></thead><tbody>${seatRows.join('')}</tbody></table></div>`);
+      return `<section id="subscriptions"><h2>Subscriptions</h2><p class="scope">Configured links and observed use are shown side by side and never merged. Moves between accounts are not recorded yet. Nothing here is in money.</p>${parts.join('')}</section>`;
+    }
+
+    export function renderLater() {
+      return `<section id="later"><h2>Not set up yet</h2><p class="placeholder">Productivity has no agreed definition yet, so only activity is shown. The oversight team's readings and subscription moves are not connected. Nothing here estimates them.</p></section>`;
+    }
+
+    export function renderPage({ hosts, seats, queues, health, messaging, ceremony, subscriptions }, now) {
+      return [hosts ? renderHosts(hosts) : '', seats ? renderSeats(seats, now) : '', queues ? renderQueues(queues, now) : '', messaging ? renderMessaging(messaging, now) : '', health ? renderHealth(health, now) : '', ceremony ? renderCeremony(ceremony, now) : '', subscriptions ? renderSubscriptions(subscriptions, now) : '', renderLater()].join('');
     }
 
     if (typeof document !== 'undefined') {
       const content = document.querySelector('#content');
       const lede = document.querySelector('#lede');
       const foot = document.querySelector('#foot');
-      const verbs = { hosts: '/api/observatory/hosts', seats: '/api/observatory/seats', queues: '/api/observatory/queues', health: '/api/observatory/health' };
+      const verbs = { hosts: '/api/observatory/hosts', seats: '/api/observatory/seats', queues: '/api/observatory/queues', health: '/api/observatory/health', messaging: '/api/observatory/messaging', ceremony: '/api/observatory/ceremony', subscriptions: '/api/observatory/subscriptions' };
       async function load() {
         const got = {};
         const failed = [];

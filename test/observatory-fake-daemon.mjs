@@ -30,6 +30,11 @@ export async function startFakeDaemon(opts = {}) {
     "/api/health-summary/nodes": () => [200, { total: 2, bySessionStatus: { running: 2 }, byLifecycle: { running: 2 }, attentionRequired: 0 }],
     "/api/health-summary/context": () => [200, { total: 2, byUrgency: { critical: 0, warning: 0, low: 2, unknown: 0 }, byFreshness: { fresh: 2, stale: 0, none: 0 }, critical: 0, warning: 0, stale: 0 }],
     "/api/health-summary/gateway": () => [200, { state: "inactive" }],
+    "/api/queue/undelivered": () => [200, opts.undelivered ?? [qitem(9, { deliveryOutcome: "transport-failed", deliveryFailureClass: "transport-failed", lastNudgeAttempt: "2030-01-01T00:00:00.000Z" })]],
+    "/api/health-diagnosis/policy": () => [200, { version: 1, policy: { disabledDetectors: opts.disabledDetectors ?? [], thresholds: { ceremonyTransitions: 20, ceremonyRatio: 12, reviewReturns: 4, redundantWakes: 4 }, observationWindowSeconds: 86400, freshnessSeconds: 600 } }],
+    "/api/provider/bindings": () => [200, { bindings: opts.bindings ?? [{ accountId: "acct-1", seatSession: "dev-impl@alpha", rigName: "alpha", boundAt: "2030-01-01T00:00:00.000Z", bindingSource: "codex_auth_seat_registry", anomalies: [] }] }],
+    "/api/provider/accounts": () => [200, { accounts: opts.accounts ?? [{ accountId: "acct-1", label: "team plan A", provider: "codex", authState: "active", profileRef: null, asOf: "2030-01-01T00:00:00.000Z" }] }],
+    "/api/provider/usage/hosts": () => (opts.usageHosts ? [200, opts.usageHosts] : [409, { error: "usage_windows_disabled", message: "Usage across hosts needs usage windows on this daemon." }]),
     "/api/health": () => [200, { schema: "openrig.health-list/v0alpha1", evaluatedAt: "2030-01-01T00:00:00.000Z", total: 1, limit: 200, truncated: false, records: [{ id: "f1", detector: "process.ceremony-amplification", category: "process", severity: "warning", status: "active", scope: { type: "rig", rigId: "rig-1" }, summary: "invented finding", lastObservedAt: "2030-01-01T00:00:00.000Z", freshness: { state: "fresh" } }] }],
   };
   const server = http.createServer((req, res) => {

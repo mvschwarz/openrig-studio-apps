@@ -23,8 +23,19 @@ const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_QUEUE_STATES = ["pending", "in-progress", "blocked"];
 const DEFAULT_QUEUE_LIMIT = 200;
 const HEALTH_LIMIT = 200;
+const DEFAULT_UNDELIVERED_LIMIT = 200;
 
-export const READS = ["seats", "queues", "health"];
+export const READS = ["seats", "queues", "health", "messaging", "ceremony", "bindings"];
+
+// OpenRig's process detectors and what feeds them. No route reports which observation sources a
+// daemon has, so this table is kept here, from OpenRig's own source, and a detector without a live
+// source is shown as having none rather than as reading zero. A finding from a detector listed here
+// as sourceless still shows: the finding wins over the table.
+export const CEREMONY_DETECTORS = {
+  "process.ceremony-amplification": { sources: ["passive-ceremony", "health-checkpoints"], note: "coordination transitions against the outcomes they lead to" },
+  "process.review-carousel": { sources: [], note: "no live source in current OpenRig: review returns are not yet counted" },
+  "process.redundant-wake-storm": { sources: [], note: "no live source in current OpenRig: wake lineage is not yet recorded" },
+};
 
 async function getJson(fetchImpl, base, route, timeoutMs) {
   const url = new URL(route, base.endsWith("/") ? base : base + "/").toString();
@@ -178,7 +189,142 @@ async function readHealth(ctx, host) {
   };
 }
 
-const READERS = { seats: readSeats, queues: readQueues, health: readHealth };
+// Messages that did not reach their destination: one daemon's undelivered queue rows. The route has
+// no default bound, so the reader sends one and reports when the page is full.
+async function readMessaging(ctx, host) {
+  const { fetchImpl, timeoutMs, now } = ctx;
+  const polledAt = new Date(now()).toISOString();
+  const limit = ctx.undeliveredLimit;
+  const route = `/api/queue/undelivered?limit=${limit}&compact=1`;
+  const r = await getJson(fetchImpl, host.url, route, timeoutMs);
+  if (r.status !== "ok") return reading(r, polledAt);
+  if (!Array.isArray(r.body)) return reading({ ...r, status: "http-error", detail: "/api/queue/undelivered did not return a list" }, polledAt);
+  const rows = r.body.map((q) => ({
+    key: `${host.key}/${q.qitemId}`, hostId: host.hostId, id: q.qitemId ?? null, state: q.state ?? null,
+    from: q.sourceSession ?? null, to: q.destinationSession ?? null, createdAt: q.tsCreated ?? null, updatedAt: q.tsUpdated ?? null,
+    outcome: q.deliveryOutcome ?? null, failureClass: q.deliveryFailureClass ?? null, lastAttempt: q.lastNudgeAttempt ?? null,
+    lastResult: q.lastNudgeWireResult ?? q.lastNudgeResult ?? null, summary: q.summary ?? null,
+  }));
+  return {
+    route, status: "ok", httpStatus: r.httpStatus, detail: null, polledAt, observedAt: null, data: rows,
+    coverage: {
+      kind: "filtered-bounded", filter: { undelivered: true }, limit, returned: rows.length,
+      possiblyTruncated: rows.length >= limit, total: null,
+      note: "open rows this daemon could not deliver, oldest first; a bounded list, not a total. Held messages are per seat and not read here.",
+    },
+  };
+}
+
+// Ceremony as OpenRig's own detectors see it, with their method, limits and freshness. Nothing here
+// computes a ceremony number.
+async function readCeremony(ctx, host) {
+  const { fetchImpl, timeoutMs, now } = ctx;
+  const polledAt = new Date(now()).toISOString();
+  const [findings, policy] = await Promise.all([
+    getJson(fetchImpl, host.url, `/api/health?limit=${HEALTH_LIMIT}`, timeoutMs),
+    getJson(fetchImpl, host.url, "/api/health-diagnosis/policy", timeoutMs),
+  ]);
+  if (findings.status !== "ok") return reading(findings, polledAt);
+  const b = findings.body ?? {};
+  const records = Array.isArray(b.records) ? b.records : [];
+  const disabled = policy.status === "ok" && Array.isArray(policy.body?.policy?.disabledDetectors) ? policy.body.policy.disabledDetectors : null;
+  const sourceCoverage = Array.isArray(b.coverage) ? b.coverage : [];
+  const detectors = Object.entries(CEREMONY_DETECTORS).map(([id, d]) => {
+    const own = records.filter((f) => f.detector === id).map((f) => ({
+      id: f.id, severity: f.severity ?? null, status: f.status ?? null, scope: f.scope ?? null, summary: f.summary ?? null,
+      threshold: f.threshold ?? null, window: f.window ?? null, freshness: f.freshness ?? null, lastObservedAt: f.lastObservedAt ?? null,
+      stage: f.ceremony?.stage ?? null, missingFacts: f.ceremony?.missingFacts ?? null,
+    }));
+    const isDisabled = disabled ? disabled.includes(id) : null;
+    const state = isDisabled ? "disabled" : own.length ? "findings" : d.sources.length === 0 ? "no-source" : "no-active-finding";
+    return {
+      detector: id, state, method: d.note, sources: d.sources,
+      sourceCoverage: sourceCoverage.filter((c) => d.sources.includes(c.source)),
+      enabled: isDisabled === null ? null : !isDisabled,
+      findings: own,
+    };
+  });
+  return {
+    route: `/api/health?limit=${HEALTH_LIMIT} + /api/health-diagnosis/policy`, status: "ok", httpStatus: findings.httpStatus, detail: null, polledAt,
+    observedAt: b.evaluatedAt ?? null,
+    data: {
+      detectors,
+      policy: policy.status === "ok" ? { status: "ok", thresholds: policy.body?.policy?.thresholds ?? null, windowSeconds: policy.body?.policy?.observationWindowSeconds ?? null, freshnessSeconds: policy.body?.policy?.freshnessSeconds ?? null } : { status: policy.status, httpStatus: policy.httpStatus ?? null, detail: policy.detail ?? null },
+      oversight: { status: "not-connected", note: "the oversight team's weekly readings are not connected yet" },
+    },
+    coverage: { total: b.total ?? null, limit: b.limit ?? HEALTH_LIMIT, truncated: b.truncated === true },
+  };
+}
+
+// The subscription link each seat is CONFIGURED with on this daemon. This is configuration, not a
+// reading of which account a seat is using now.
+async function readBindings(ctx, host) {
+  const { fetchImpl, timeoutMs, now } = ctx;
+  const polledAt = new Date(now()).toISOString();
+  const [bindings, accounts] = await Promise.all([
+    getJson(fetchImpl, host.url, "/api/provider/bindings", timeoutMs),
+    getJson(fetchImpl, host.url, "/api/provider/accounts", timeoutMs),
+  ]);
+  if (bindings.status !== "ok") return reading(bindings, polledAt);
+  const byId = new Map((accounts.status === "ok" && Array.isArray(accounts.body?.accounts) ? accounts.body.accounts : []).map((a) => [a.accountId, a]));
+  const rows = (Array.isArray(bindings.body?.bindings) ? bindings.body.bindings : []).map((x) => ({
+    key: `${host.key}/${x.seatSession}`, hostId: host.hostId, seat: x.seatSession ?? null, rigName: x.rigName ?? null,
+    kind: "configured",
+    account: x.accountId ? { id: x.accountId, label: byId.get(x.accountId)?.label ?? null, provider: byId.get(x.accountId)?.provider ?? null, authState: byId.get(x.accountId)?.authState ?? null } : null,
+    since: x.boundAt ?? null, source: x.bindingSource ?? null,
+    anomalies: Array.isArray(x.anomalies) ? x.anomalies.map((a) => a.kind) : [],
+  }));
+  return {
+    route: "/api/provider/bindings + /api/provider/accounts", status: "ok", httpStatus: bindings.httpStatus, detail: null, polledAt, observedAt: null, data: rows,
+    coverage: { accounts: accounts.status, note: "configured links only; which account a seat is using now is a separate observation" },
+  };
+}
+
+const READERS = { seats: readSeats, queues: readQueues, health: readHealth, messaging: readMessaging, ceremony: readCeremony, bindings: readBindings };
+
+// Subscription usage across machines, as the configured daemon already combines it. That route keeps
+// each machine's reading separate and never sums them; this reader keeps it that way and only maps the
+// route's host labels onto the hosts it knows.
+async function readSubscriptions(ctx, daemonUrl, hosts) {
+  const { fetchImpl, timeoutMs, now } = ctx;
+  const polledAt = new Date(now()).toISOString();
+  const route = "/api/provider/usage/hosts";
+  const r = await getJson(fetchImpl, daemonUrl, route, timeoutMs);
+  const moves = { status: "no-record", note: "subscription moves are not recorded yet" };
+  if (r.status === "http-error" && r.httpStatus === 409) {
+    return { route, status: "not-set-up", httpStatus: 409, detail: r.detail, polledAt, observedAt: null, data: null, moves, coverage: { note: "usage windows are off on the configured daemon (provider.usage_windows)" } };
+  }
+  if (r.status !== "ok") return { ...reading(r, polledAt), moves };
+  const b = r.body ?? {};
+  const hostFor = (label) => (label === "local" ? hosts[0] : hosts.find((h) => h.labels.includes(label))) ?? null;
+  const keyFor = (label) => hostFor(label)?.key ?? `unmatched:${label}`;
+  const window = (w) => ({ window: w.window ?? null, usedPercent: w.usedPercent ?? null, resetsAt: w.resetsAt ?? null, observedAt: w.observedAt ?? null, freshness: w.freshness ?? null, level: w.level ?? null });
+  const allowances = (Array.isArray(b.items) ? b.items : []).map((g) => ({
+    provider: g.provider ?? null, key: g.key ?? null, linkage: g.linkage ?? "unknown", notes: Array.isArray(g.notes) ? g.notes : [],
+    // One entry per machine that read this allowance, as that machine read it. Never added up.
+    observations: (Array.isArray(g.observations) ? g.observations : []).map((o) => ({
+      host: keyFor(o.hostId), hostLabel: o.hostId, readAt: o.readAt ?? null,
+      plan: o.row?.identity?.planType ?? o.row?.identity?.subscriptionType ?? null,
+      observedAt: o.row?.observedAt ?? null, availability: o.row?.currentAvailability ?? "unknown",
+      windows: Array.isArray(o.row?.windows) ? o.row.windows.map(window) : [],
+    })),
+  }));
+  const seatAccounts = (Array.isArray(b.seatAccounts) ? b.seatAccounts : []).flatMap((h) => (Array.isArray(h.seats) ? h.seats : []).map((s) => ({
+    host: keyFor(h.hostId), seat: s.seatSession ?? null, rigName: s.rigName ?? null,
+    configured: s.configured ? { kind: "configured", source: s.configured.source ?? "unknown", profile: s.configured.profileRef ?? null, recordedAt: s.configured.recordedAt ?? null, reason: s.configured.reason ?? null } : null,
+    observed: s.observed ? { kind: "observed", lastSampledAt: s.observed.lastSampledAt ?? null, differsFromConfigured: s.observed.differsFrom ?? null, note: s.observed.note ?? s.observed.withheld ?? null } : null,
+  })));
+  return {
+    route, status: "ok", httpStatus: r.httpStatus, detail: null, polledAt, observedAt: b.asOf ?? null,
+    data: { allowances, seatAccounts },
+    moves,
+    coverage: {
+      hosts: (Array.isArray(b.hosts) ? b.hosts : []).map((h) => ({ host: keyFor(h.hostId), hostLabel: h.hostId, status: h.status ?? null, usage: h.usage ?? null, readAt: h.readAt ?? null, reason: h.usageReason ?? h.error ?? null })),
+      skipped: Array.isArray(b.skipped) ? b.skipped : [],
+      note: "each machine's reading is kept separate; allowances are never added up across machines",
+    },
+  };
+}
 
 // --- the fleet ----------------------------------------------------------------------------------
 
@@ -191,8 +337,9 @@ export async function readFleet({
   concurrency = DEFAULT_CONCURRENCY,
   queueStates = DEFAULT_QUEUE_STATES,
   queueLimit = DEFAULT_QUEUE_LIMIT,
+  undeliveredLimit = DEFAULT_UNDELIVERED_LIMIT,
 } = {}) {
-  const ctx = { fetchImpl, now, timeoutMs, concurrency, queueStates, queueLimit };
+  const ctx = { fetchImpl, now, timeoutMs, concurrency, queueStates, queueLimit, undeliveredLimit };
   const polledAt = new Date(now()).toISOString();
 
   const [localHealth, registry] = await Promise.all([
@@ -249,8 +396,13 @@ export async function readFleet({
     }
   });
 
+  const subscriptions = reads.includes("subscriptions")
+    ? (hosts[0]?.status === "ok" ? await readSubscriptions(ctx, daemonUrl, hosts) : { route: "/api/provider/usage/hosts", status: hosts[0]?.status ?? "unreachable", httpStatus: null, detail: hosts[0]?.detail ?? null, polledAt, observedAt: null, data: null, moves: { status: "no-record", note: "subscription moves are not recorded yet" }, coverage: null })
+    : undefined;
+
   const notRead = hosts.filter((h) => h.status !== "ok").map((h) => ({ key: h.key, labels: h.labels, status: h.status }));
   return {
+    ...(subscriptions ? { subscriptions } : {}),
     schema: "openrig.observatory.fleet/v1",
     polledAt,
     configuredDaemon: daemonUrl,

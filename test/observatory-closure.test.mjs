@@ -174,6 +174,18 @@ test("nothing in the launch rig names a machine, an account path or a credential
   assert.deepEqual(hits, []);
 });
 
+// Subscriptions are shown as usage and resets, never as money. Neither the provider nor the page
+// may carry a currency field or label.
+const MONEY = /\bUSD\b|\busd\b|costUsd|CostUsd|CostEstimate|\bdollars?\b|\bbilling\b/i;
+
+test("nothing the provider runs or the page loads deals in money", () => {
+  const files = [...runtimeClosure(providerDir).files, ...appClosure(appDir).files];
+  const hits = [];
+  for (const file of files) fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => { if (MONEY.test(line)) hits.push(`${path.relative(path.resolve(here, ".."), file)}:${i + 1}`); });
+  assert.deepEqual(hits, []);
+  assert.ok(MONEY.test("clientCostEstimateUsd: 1.2") && MONEY.test("12 dollars"), "the money pattern catches a planted field");
+});
+
 test("the pattern check does catch a planted path", () => {
   // Without this, a regular expression that never matches would keep the test
   // above green whatever the provider contained.
