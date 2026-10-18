@@ -31,10 +31,15 @@ export const READS = ["seats", "queues", "health", "messaging", "ceremony", "bin
 // daemon has, so this table is kept here, from OpenRig's own source, and a detector without a live
 // source is shown as having none rather than as reading zero. A finding from a detector listed here
 // as sourceless still shows: the finding wins over the table.
+//
+// The table is only as good as the OpenRig source it was checked against. Those commits travel with
+// every reading, and a daemon built from another commit is told apart, so a newer daemon that has
+// since wired a source is never silently labelled as having none.
+export const DETECTOR_TABLE_CHECKED_AGAINST = ["6f2751a1", "379f0a0d"];
 export const CEREMONY_DETECTORS = {
   "process.ceremony-amplification": { sources: ["passive-ceremony", "health-checkpoints"], note: "coordination transitions against the outcomes they lead to" },
-  "process.review-carousel": { sources: [], note: "no live source in current OpenRig: review returns are not yet counted" },
-  "process.redundant-wake-storm": { sources: [], note: "no live source in current OpenRig: wake lineage is not yet recorded" },
+  "process.review-carousel": { sources: [], note: "review returns are not counted in the OpenRig source this table was checked against" },
+  "process.redundant-wake-storm": { sources: [], note: "wake lineage is not recorded in the OpenRig source this table was checked against" },
 };
 
 async function getJson(fetchImpl, base, route, timeoutMs) {
@@ -237,8 +242,15 @@ async function readCeremony(ctx, host) {
     }));
     const isDisabled = disabled ? disabled.includes(id) : null;
     const state = isDisabled ? "disabled" : own.length ? "findings" : d.sources.length === 0 ? "no-source" : "no-active-finding";
+    const daemonCommit = host.healthz?.commit ?? null;
     return {
       detector: id, state, method: d.note, sources: d.sources,
+      sourceTable: {
+        checkedAgainst: DETECTOR_TABLE_CHECKED_AGAINST,
+        daemonCommit,
+        // null when the daemon doesn't report its commit: then nobody knows, and the page says so.
+        matchesDaemon: daemonCommit ? DETECTOR_TABLE_CHECKED_AGAINST.some((c) => daemonCommit.startsWith(c)) : null,
+      },
       sourceCoverage: sourceCoverage.filter((c) => d.sources.includes(c.source)),
       enabled: isDisabled === null ? null : !isDisabled,
       findings: own,
@@ -280,6 +292,15 @@ async function readBindings(ctx, host) {
   };
 }
 
+export function restartSignal(before, now, previousPolledAt, polledAt) {
+  if (!now.boot) return { status: "unknown", detail: "this read could not reach the daemon" };
+  if (!before) return { status: "first-read" };
+  if (!before.boot) return { status: "unknown", detail: "the previous read could not reach the daemon" };
+  const byEpoch = before.boot.bootEpoch && now.boot.bootEpoch;
+  const changed = byEpoch ? before.boot.bootEpoch !== now.boot.bootEpoch : before.boot.pid !== now.boot.pid;
+  return { status: changed ? "restarted" : "same", method: byEpoch ? "boot epoch" : "pid", between: [previousPolledAt, polledAt] };
+}
+
 const READERS = { seats: readSeats, queues: readQueues, health: readHealth, messaging: readMessaging, ceremony: readCeremony, bindings: readBindings };
 
 // Subscription usage across machines, as the configured daemon already combines it. That route keeps
@@ -293,6 +314,9 @@ async function readSubscriptions(ctx, daemonUrl, hosts) {
   const moves = { status: "no-record", note: "subscription moves are not recorded yet" };
   if (r.status === "http-error" && r.httpStatus === 409) {
     return { route, status: "not-set-up", httpStatus: 409, detail: r.detail, polledAt, observedAt: null, data: null, moves, coverage: { note: "usage windows are off on the configured daemon (provider.usage_windows)" } };
+  }
+  if (r.status === "http-error" && r.httpStatus === 404) {
+    return { route, status: "absent", httpStatus: 404, detail: "this daemon's OpenRig version has no usage-across-machines route", polledAt, observedAt: null, data: null, moves, coverage: null };
   }
   if (r.status !== "ok") return { ...reading(r, polledAt), moves };
   const b = r.body ?? {};
@@ -338,6 +362,7 @@ export async function readFleet({
   queueStates = DEFAULT_QUEUE_STATES,
   queueLimit = DEFAULT_QUEUE_LIMIT,
   undeliveredLimit = DEFAULT_UNDELIVERED_LIMIT,
+  previous = null,
 } = {}) {
   const ctx = { fetchImpl, now, timeoutMs, concurrency, queueStates, queueLimit, undeliveredLimit };
   const polledAt = new Date(now()).toISOString();
@@ -387,6 +412,25 @@ export async function readFleet({
     };
     if (hostId) byKey.set(hostId, host);
     hosts.push(host);
+  }
+
+  // Restart signal. /healthz has a pid but no boot identity; the telemetry route stamps every page
+  // with the daemon's boot epoch, a fresh id per start. Compare with the previous read of the same
+  // host: a new boot epoch (or, without one, a new pid) means the daemon restarted in between, which
+  // is also when its telemetry cursors reset.
+  await mapLimit(hosts.filter((h) => h.status === "ok"), concurrency, async (host) => {
+    const t = await getJson(fetchImpl, host.url, "/api/telemetry/v1/events?limit=1", timeoutMs);
+    host.boot = { pid: host.healthz?.pid ?? null, bootEpoch: t.status === "ok" ? t.body?.source?.bootEpoch ?? null : null, route: "/healthz + /api/telemetry/v1/events?limit=1", bootEpochStatus: t.status };
+  });
+  for (const host of hosts) {
+    const before = previous?.hosts?.find((h) => h.key === host.key);
+    host.restart = restartSignal(before, host, previous?.polledAt ?? null, polledAt);
+    // A machine that stops answering can no longer say who it is. If an earlier read under the same
+    // label knew, keep that as "last seen as", labelled, without treating it as this read's identity.
+    if (!host.hostId) {
+      const known = previous?.hosts?.find((h) => h.hostId && h.labels.some((l) => host.labels.includes(l)));
+      if (known) host.lastSeenAs = { hostId: known.hostId, at: previous.polledAt };
+    }
   }
 
   await mapLimit(hosts, concurrency, async (host) => {

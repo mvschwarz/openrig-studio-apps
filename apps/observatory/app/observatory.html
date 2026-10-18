@@ -105,7 +105,7 @@
       return `<span title="${esc(observedAt)}">${text}</span>`;
     }
 
-    export const hostName = (h) => (h.hostId ? esc(h.hostId) : unknown('identity not reported'));
+    export const hostName = (h) => (h.hostId ? esc(h.hostId) : h.lastSeenAs ? `${unknown('identity not reported')} <span class="muted">(last seen as ${esc(h.lastSeenAs.hostId)})</span>` : unknown('identity not reported'));
     const hostCell = (h) => `<span class="name">${hostName(h)}</span><span class="sub">listed as ${esc((h.labels ?? []).join(', '))}</span>`;
     const why = (r) => [r?.detail, r?.httpStatus ? `HTTP ${r.httpStatus}` : null].filter(Boolean).map(esc).join(' · ');
 
@@ -113,19 +113,34 @@
       return `<div class="notice"><b>${hostName(h)}</b>: ${esc(what)} not read: ${statusText(r?.status ?? h.status)}${why(r ?? h) ? ` · ${why(r ?? h)}` : ''}. This is a failure to read, not an empty result.</div>`;
     }
 
-    export function renderHosts(fleet) {
+    // How old the provider's read is. A kept read is shown with its age, never as fresh.
+    export function servedText(fleet, now) {
+      const sv = fleet.served;
+      if (!sv) return `asked at ${esc(fleet.polledAt ?? '')}`;
+      const age = Math.max(sv.cacheAgeSeconds ?? 0, Math.round((now - Date.parse(sv.servedAt)) / 1000) + (sv.cacheAgeSeconds ?? 0));
+      return `read by the provider ${ageText(sv.polledAt, now)}${sv.fromCache ? ` (a kept read, ${esc(age)} s old; reads are kept up to ${esc(sv.keptForSeconds)} s)` : ''}`;
+    }
+
+    export function restartText(h) {
+      const r = h.restart;
+      if (!r || r.status === 'first-read' || r.status === 'same') return '';
+      if (r.status === 'restarted') return `<span class="sub stale">daemon restarted since the last read (between ${esc(r.between?.[0] ?? '?')} and ${esc(r.between?.[1] ?? '?')}, by ${esc(r.method)}); history from before it may not continue</span>`;
+      return `<span class="sub unknown">restart not known: ${esc(r.detail ?? '')}</span>`;
+    }
+
+    export function renderHosts(fleet, now = Date.now()) {
       const rows = (fleet.hosts ?? []).map((h) => `<tr>
         <td>${hostCell(h)}</td>
-        <td>${statusText(h.status)}${h.status !== 'ok' && why(h) ? `<span class="sub">${why(h)}</span>` : ''}</td>
+        <td>${statusText(h.status)}${h.status !== 'ok' && why(h) ? `<span class="sub">${why(h)}</span>` : ''}${restartText(h)}</td>
         <td>${h.healthz?.version ? esc(h.healthz.version) : unknown()}</td>
         <td>${esc(h.transport ?? '')}<span class="sub">${esc(h.url ?? '')}</span></td>
         <td>${h.identitySource === 'self-reported' ? 'reported by the machine' : h.identitySource === 'declared' ? 'declared in the host list' : unknown('not reported')}${(h.identityConflicts ?? []).length ? `<span class="sub stale">listed as ${esc(h.identityConflicts.map((c) => c.declared).join(', '))}, reports ${esc(h.hostId)}</span>` : ''}</td>
       </tr>`).join('');
       const c = fleet.coverage ?? {};
       const reg = fleet.registry ?? {};
-      const regNote = reg.status === 'ok' ? `the host list names ${esc(reg.listed)} other machine${reg.listed === 1 ? '' : 's'}` : `the host list could not be read: ${statusText(reg.status)}${why(reg) ? ` · ${why(reg)}` : ''}`;
+      const regNote = reg.status === 'ok' ? `the host list has ${esc(reg.listed)} entr${reg.listed === 1 ? 'y' : 'ies'}` : `the host list could not be read: ${statusText(reg.status)}${why(reg) ? ` · ${why(reg)}` : ''}`;
       return `<section id="hosts"><h2>Machines</h2>
-        <p class="scope">${esc(c.hostsRead ?? 0)} of ${esc(c.hostsKnown ?? 0)} machines read · ${regNote}${c.complete ? '' : ' · <span class="stale">this view is incomplete</span>'} · asked at ${esc(fleet.polledAt ?? '')}</p>
+        <p class="scope">${esc(c.hostsRead ?? 0)} of ${esc(c.hostsKnown ?? 0)} machines read · ${regNote}${c.complete ? '' : ' · <span class="stale">this view is incomplete</span>'} · ${servedText(fleet, now)}</p>
         <div class="table-wrap"><table><thead><tr><th>Machine</th><th>Status</th><th>OpenRig</th><th>Reached by</th><th>Identity</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
     }
 
@@ -228,7 +243,7 @@
     const DETECTOR_STATE = {
       findings: (d) => `${esc(d.findings.length)} finding${d.findings.length === 1 ? '' : 's'}`,
       'no-active-finding': () => 'no active finding among those evaluated',
-      'no-source': () => '<span class="unknown">no source</span>',
+      'no-source': (d) => `<span class="unknown">no source in OpenRig as of ${esc((d.sourceTable?.checkedAgainst ?? []).join(', '))}</span>${d.sourceTable?.matchesDaemon === false ? `<span class="sub stale">not checked against this daemon's version (${esc(String(d.sourceTable.daemonCommit).slice(0, 8))})</span>` : d.sourceTable?.matchesDaemon === null ? '<span class="sub unknown">this daemon does not report its version</span>' : ''}`,
       disabled: () => '<span class="unknown">turned off on this machine</span>',
     };
 
@@ -257,6 +272,7 @@
       const parts = [];
       if (!s) parts.push(`<div class="notice">Subscription usage was not read.</div>`);
       else if (s.status === 'not-set-up') parts.push(`<div class="notice">Usage across machines: <span class="unknown">not set up</span>. Usage windows are off on the configured machine (provider.usage_windows), so there is no reading, not a zero.</div>`);
+      else if (s.status === 'absent') parts.push(`<div class="notice">Usage across machines: <span class="unknown">not available</span>. ${esc(s.detail)}, so there is no reading, not a zero.</div>`);
       else if (s.status !== 'ok' || !s.data) parts.push(`<div class="notice">Usage across machines not read: ${statusText(s.status)}${why(s) ? ` · ${why(s)}` : ''}. This is a failure to read, not a zero.</div>`);
       else {
         const hostCov = (s.coverage?.hosts ?? []).map((c) => `${esc(c.host)}: ${esc(c.usage ?? c.status)}`).join(' · ');
@@ -277,7 +293,7 @@
         if (!r || r.data === null || r.data === undefined) { if (r) parts.push(notRead(h, r, 'configured subscription links')); continue; }
         for (const b of r.data) {
           const o = observedBySeat.get(`${h.key}/${b.seat}`);
-          const observed = s?.status !== 'ok' ? unknown(s?.status === 'not-set-up' ? 'not set up' : 'not read') : o?.observed ? `${o.observed.differsFromConfigured ? '<span class="stale">differs from configured</span> · ' : ''}sampled ${ageText(o.observed.lastSampledAt, now)}${o.observed.note ? `<span class="sub">${esc(o.observed.note)}</span>` : ''}` : unknown('no observation');
+          const observed = s?.status !== 'ok' ? unknown(s?.status === 'not-set-up' ? 'not set up' : s?.status === 'absent' ? 'not available on this version' : 'not read') : o?.observed ? `${o.observed.differsFromConfigured ? '<span class="stale">differs from configured</span> · ' : ''}sampled ${ageText(o.observed.lastSampledAt, now)}${o.observed.note ? `<span class="sub">${esc(o.observed.note)}</span>` : ''}` : unknown('no observation');
           seatRows.push(`<tr><td><span class="name">${esc(b.seat ?? '')}</span><span class="sub">on ${hostName(h)}</span></td><td>configured: ${b.account ? `${esc(b.account.label ?? b.account.id)}${b.account.authState ? `<span class="sub">${esc(b.account.authState)}</span>` : ''}` : unknown('no account linked')}</td><td>observed: ${observed}</td><td>${esc(s?.moves?.status === 'no-record' ? 'no record' : '')}</td></tr>`);
         }
       }
@@ -290,7 +306,7 @@
     }
 
     export function renderPage({ hosts, seats, queues, health, messaging, ceremony, subscriptions }, now) {
-      return [hosts ? renderHosts(hosts) : '', seats ? renderSeats(seats, now) : '', queues ? renderQueues(queues, now) : '', messaging ? renderMessaging(messaging, now) : '', health ? renderHealth(health, now) : '', ceremony ? renderCeremony(ceremony, now) : '', subscriptions ? renderSubscriptions(subscriptions, now) : '', renderLater()].join('');
+      return [hosts ? renderHosts(hosts, now) : '', seats ? renderSeats(seats, now) : '', queues ? renderQueues(queues, now) : '', messaging ? renderMessaging(messaging, now) : '', health ? renderHealth(health, now) : '', ceremony ? renderCeremony(ceremony, now) : '', subscriptions ? renderSubscriptions(subscriptions, now) : '', renderLater()].join('');
     }
 
     if (typeof document !== 'undefined') {

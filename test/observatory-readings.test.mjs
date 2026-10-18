@@ -129,8 +129,8 @@ test("a detector with no live source reads 'no source', never zero", async () =>
   assert.equal(d["process.redundant-wake-storm"].state, "no-source");
   assert.equal(d["process.ceremony-amplification"].state, "findings", "the stand-in reports one amplification finding");
   const out = text(page.renderCeremony(fleet, NOW));
-  assert.match(out, /process\.review-carousel no source no live source in current OpenRig: review returns are not yet counted/);
-  assert.match(out, /process\.redundant-wake-storm no source/);
+  assert.match(out, /process\.review-carousel no source in OpenRig as of 6f2751a1, 379f0a0d not checked against this daemon's version \(abc\) review returns are not counted in the OpenRig source this table was checked against/);
+  assert.match(out, /process\.redundant-wake-storm no source in OpenRig as of 6f2751a1, 379f0a0d/);
   assert.doesNotMatch(out, /review-carousel 0|wake-storm 0|0 findings/);
   assert.match(out, /The oversight team's weekly readings: not connected ?\./);
 });
