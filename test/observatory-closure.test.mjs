@@ -158,6 +158,22 @@ test("the app check does catch a page that loads from another origin", () => {
   }
 });
 
+// The launch rig ships whole: its spec, compose file, Dockerfile, agent and notes. Every file in it
+// gets the same patterns.
+test("nothing in the launch rig names a machine, an account path or a credential", () => {
+  const rigDir = path.resolve(here, "../rigs/observatory");
+  const patterns = [...PATTERNS, ...extraPatterns()];
+  const files = fs.readdirSync(rigDir, { recursive: true }).map((f) => path.join(rigDir, f)).filter((f) => fs.statSync(f).isFile());
+  assert.ok(files.length >= 8, `expected the rig's files, found ${files.length}`);
+  const hits = [];
+  for (const file of files) {
+    fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+      for (const p of patterns) if (p.re.test(line)) hits.push(`${path.relative(rigDir, file)}:${i + 1} ${p.name}`);
+    });
+  }
+  assert.deepEqual(hits, []);
+});
+
 test("the pattern check does catch a planted path", () => {
   // Without this, a regular expression that never matches would keep the test
   // above green whatever the provider contained.
