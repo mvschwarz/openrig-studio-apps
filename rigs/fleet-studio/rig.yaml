@@ -1,0 +1,29 @@
+version: "0.2"
+name: fleet-studio
+summary: >
+  Fleet Studio: a starter operations agent for this OpenRig setup, carrying the fleet know-how
+  (recovering a stranded seat, reading usage honestly, keeping context healthy) and making it
+  available to every agent on the machine. An app for viewing the fleet joins this rig later; the
+  Observatory is an optional addition, never required.
+
+# No services yet: which app shows the fleet is still open, and the studio starts only the providers its
+# enabled apps need, so there is no provider-only service to run. The rig is valid and useful without
+# one: the agent works from OpenRig's own commands and the know-how.
+
+pods:
+  - id: ops
+    label: Operations
+    members:
+      - id: operator
+        agent_ref: "local:../agents/starter-ops"
+        runtime: claude-code
+        profile: default
+        cwd: "."
+        startup:
+          files:
+            - path: fleet-studio-startup.md
+              delivery_hint: send_text
+              required: true
+    edges: []
+
+edges: []

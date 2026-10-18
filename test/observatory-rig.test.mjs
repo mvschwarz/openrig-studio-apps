@@ -172,12 +172,17 @@ test("the agent may act on its own Compose project only, and tells an intentiona
   assert.deepEqual(scopeProblems(loadRig()), []);
 });
 
-test("the agent's startup files exist and say where the app is", () => {
-  const { agentDir, agent } = loadRig();
+test("the agent's startup files exist, and the Observatory rig's own startup says where the app is", () => {
+  const { dir, rig, agentDir, agent } = loadRig();
   for (const f of agent.startup.files) assert.ok(fs.existsSync(path.join(agentDir, f.path)), `${f.path} is missing`);
-  const ctx = fs.readFileSync(path.join(agentDir, "startup/context.md"), "utf8");
+  const general = fs.readFileSync(path.join(agentDir, "startup/context.md"), "utf8");
+  // A periodic reminder needs a spec file; the general startup shows the form that works.
+  assert.match(general, /rig watchdog register --policy periodic-reminder --spec <file> --target-session <you>\s+--interval-seconds \d+ --registered-by <you>/);
+  const member = rig.pods[0].members[0];
+  const own = member.startup.files.map((f) => f.path);
+  assert.deepEqual(own, ["observatory-startup.md"]);
+  const ctx = fs.readFileSync(path.join(dir, own[0]), "utf8");
   assert.match(ctx, /127\.0\.0\.1:9440\/surfaces\/observatory\.html/);
-  assert.match(ctx, /periodic-reminder/);
 });
 
 test("the build context sends only the observatory app and provider", () => {
@@ -239,7 +244,7 @@ test("customizing outside the app's own files is caught", () => {
 });
 
 test("an Observatory-only role is caught", () => {
-  assert.ok(planted((r) => { r.role = r.role.replace("The Observatory is one\napp you run and shape here; your other work does not depend on it.", "You are the Observatory-only agent:\nyou run the Observatory and nothing else."); }).some((m) => /Observatory-only/.test(m)));
+  assert.ok(planted((r) => { r.role = r.role.replace("The Observatory is one\napp you may run and shape; your other work does not depend on it.", "You are the Observatory-only agent:\nyou run the Observatory and nothing else."); }).some((m) => /Observatory-only/.test(m)));
 });
 
 test("growing its own rig is allowed, and removing that is caught", () => {

@@ -1,0 +1,8 @@
+name: fleet-ops/recover-a-stranded-seat
+version: "1"
+taxonomy: skills
+purpose: "Recover a stranded seat: an agent that stopped at a usage limit, lost its login, or was left stopped after a restart. How to recognise it, what to do with today's rig commands, and when to ask a person."
+files:
+  - path: practice.md
+    role: practice
+    summary: "Recognise a seat stuck at a usage limit or a lost login, choose wait / sign in / resume, and keep its conversation."

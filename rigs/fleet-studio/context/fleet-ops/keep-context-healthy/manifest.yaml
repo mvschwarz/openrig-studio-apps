@@ -1,0 +1,8 @@
+name: fleet-ops/keep-context-healthy
+version: "1"
+taxonomy: skills
+purpose: "Keep agents' context healthy: check each seat's context use, plan compaction safely, set an early warning, and decide when a seat should hand over to a fresh successor instead."
+files:
+  - path: practice.md
+    role: practice
+    summary: "Check context use, plan compact-in-place with rig compact-plan, warn early with a context watchdog, and hand over when that is better."

@@ -33,10 +33,15 @@ pods:
     label: Observatory
     members:
       - id: operator
-        agent_ref: "local:agents/observatory-operator"
+        agent_ref: "local:../agents/starter-ops"
         runtime: claude-code
         profile: default
         cwd: "."
+        startup:
+          files:
+            - path: observatory-startup.md
+              delivery_hint: send_text
+              required: true
     edges: []
 
 edges: []

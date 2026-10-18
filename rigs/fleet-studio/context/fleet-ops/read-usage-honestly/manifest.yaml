@@ -1,0 +1,8 @@
+name: fleet-ops/read-usage-honestly
+version: "1"
+taxonomy: skills
+purpose: "Read subscription usage honestly: where each machine's usage windows and resets come from, how old they are, why readings from several machines are never added together, and what unknown means."
+files:
+  - path: practice.md
+    role: practice
+    summary: "Read usage windows and resets with rig provider status, per machine, with their age; never a model request, never a total, never money."

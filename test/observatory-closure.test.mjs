@@ -160,13 +160,13 @@ test("the app check does catch a page that loads from another origin", () => {
   }
 });
 
-// The launch rig ships whole: its spec, compose file, Dockerfile, agent and notes. Every file in it
-// gets the same patterns.
-test("nothing in the launch rig names a machine, an account path or a credential", () => {
-  const rigDir = path.resolve(here, "../rigs/observatory");
+// The launch rigs ship whole: their specs, compose file, Dockerfile, the shared agent, the know-how and
+// notes. Every file under rigs/ gets the same patterns.
+test("nothing in the launch rigs names a machine, an account path or a credential", () => {
+  const rigDir = path.resolve(here, "../rigs");
   const patterns = [...PATTERNS, ...extraPatterns()];
   const files = fs.readdirSync(rigDir, { recursive: true }).map((f) => path.join(rigDir, f)).filter((f) => fs.statSync(f).isFile());
-  assert.ok(files.length >= 8, `expected the rig's files, found ${files.length}`);
+  assert.ok(files.length >= 18, `expected the rigs' files, found ${files.length}`);
   const hits = [];
   for (const file of files) {
     fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => {
