@@ -336,7 +336,10 @@ async function readSubscriptions(ctx, daemonUrl, hosts) {
   const seatAccounts = (Array.isArray(b.seatAccounts) ? b.seatAccounts : []).flatMap((h) => (Array.isArray(h.seats) ? h.seats : []).map((s) => ({
     host: keyFor(h.hostId), seat: s.seatSession ?? null, rigName: s.rigName ?? null,
     configured: s.configured ? { kind: "configured", source: s.configured.source ?? "unknown", profile: s.configured.profileRef ?? null, recordedAt: s.configured.recordedAt ?? null, reason: s.configured.reason ?? null } : null,
-    observed: s.observed ? { kind: "observed", lastSampledAt: s.observed.lastSampledAt ?? null, differsFromConfigured: s.observed.differsFrom ?? null, note: s.observed.note ?? s.observed.withheld ?? null } : null,
+    // differsFrom is the daemon's: the OTHER seats whose sampled usage windows differ from this one's, which it qualifies
+    // only as possibly a different login (its note says so). It says nothing about the configured account.
+    observed: s.observed ? { kind: "observed", lastSampledAt: s.observed.lastSampledAt ?? null, windowsSampled: s.observed.windowsSampled ?? null,
+      differsFrom: Array.isArray(s.observed.differsFrom) ? s.observed.differsFrom : [], withheld: s.observed.withheld === true, note: s.observed.note ?? null } : null,
   })));
   return {
     route, status: "ok", httpStatus: r.httpStatus, detail: null, polledAt, observedAt: b.asOf ?? null,

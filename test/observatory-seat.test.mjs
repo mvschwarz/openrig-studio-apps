@@ -234,3 +234,44 @@ test("the seat verb passes the route's own cursor through to the daemon", async 
     await new Promise((r) => { server.closeAllConnections?.(); server.close(r); });
   }
 });
+
+test("a seat's detail that answers after the person moved to another seat is dropped, errors and older pages included", async () => {
+  const page = await loadPage();
+  const a = await daemon({ selfHostId: "box-a" });
+  const fleet = await readFleet({ daemonUrl: a.url, now, reads: ["seats"] });
+  const impl = await readSeat({ fleet, key: "box-a/alpha/dev.impl", now });
+  const qa = await readSeat({ fleet, key: "box-a/alpha/dev.qa", now });
+  const pending = new Map(); // url -> { resolve, reject }
+  const fetchJson = (url) => new Promise((resolve, reject) => pending.set(url, { resolve, reject }));
+  const shown = [];
+  const loader = page.makeSeatLoader({ fetchJson, show: (html) => shown.push(text(html)), now });
+  const seatUrl = (key) => `/api/observatory/seat?key=${encodeURIComponent(key)}`;
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  // Ask for dev.impl, move to dev.qa before it answers: only dev.qa's detail is shown.
+  const first = loader.open("box-a/alpha/dev.impl");
+  const second = loader.open("box-a/alpha/dev.qa");
+  pending.get(seatUrl("box-a/alpha/dev.qa")).resolve(qa);
+  await second;
+  pending.get(seatUrl("box-a/alpha/dev.impl")).resolve(impl);
+  await first;
+  assert.equal(shown.length, 1);
+  assert.match(shown[0], /dev\.qa/);
+  assert.doesNotMatch(shown[0], /dev\.impl/);
+
+  // An older page asked for dev.qa that answers after moving to dev.impl isn't appended under dev.impl; nor is a late error.
+  const older = loader.older("c-1");
+  await settle();
+  const third = loader.open("box-a/alpha/dev.impl");
+  pending.get(seatUrl("box-a/alpha/dev.impl")).resolve(impl);
+  await third;
+  pending.get(`${seatUrl("box-a/alpha/dev.qa")}&cursor=c-1`).resolve({ generations: { status: "ok", rows: [] } });
+  await older;
+  const late = loader.open("box-a/alpha/dev.qa");
+  loader.open(null); // closed the detail
+  pending.get(seatUrl("box-a/alpha/dev.qa")).reject(new Error("timed out"));
+  await late;
+  assert.equal(shown.length, 3); // dev.qa, dev.impl, then cleared
+  assert.match(shown[1], /dev\.impl/);
+  assert.equal(shown[2], "");
+});

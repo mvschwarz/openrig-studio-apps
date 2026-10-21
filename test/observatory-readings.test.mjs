@@ -25,6 +25,19 @@ const obs = (hostId, usedPercent, observedAt = "2030-01-02T11:30:00.000Z") => ({
   row: { provider: "codex", identity: { planType: "team" }, observedAt, currentAvailability: "known", windows: [{ window: "weekly", usedPercent, resetsAt: "2030-01-05T00:00:00.000Z", observedAt, freshness: "fresh", level: "ok" }] },
 });
 
+// --- seats --------------------------------------------------------------------------------------
+
+test("rigs listed whose seats all failed to read are reported as not read, never as no rigs running", async () => {
+  const page = await loadPage();
+  const a = await daemon({ selfHostId: "box-a", routes: { nodes: () => [503, { error: "unavailable" }] } });
+  const fleet = await readFleet({ daemonUrl: a.url, now, reads: ["seats"] });
+  const out = text(page.renderSeats(fleet, NOW));
+  assert.match(out, /box-a : seats not read\. It lists 1 rig, and none could be read: alpha \(/);
+  assert.doesNotMatch(out, /no rigs running/);
+  const empty = await daemon({ selfHostId: "box-b", rigs: {} });
+  assert.match(text(page.renderSeats(await readFleet({ daemonUrl: empty.url, now, reads: ["seats"] }), NOW)), /box-b : read, and it reports no rigs running\./);
+});
+
 // --- subscriptions ------------------------------------------------------------------------------
 
 test("usage windows turned off read as not set up, never as zero percent", async () => {
@@ -58,7 +71,7 @@ test("a seat's configured link and its observed use stay in separate columns", a
   const page = await loadPage();
   const a = await daemon({
     selfHostId: "box-a",
-    usageHosts: usage([obs("local", 10)], { seatAccounts: [{ hostId: "local", seats: [{ seatSession: "dev-impl@alpha", rigName: "alpha", runtime: "codex", configured: { source: "registry", profileRef: "team-a", recordedAt: "2030-01-01T00:00:00.000Z" }, observed: { lastSampledAt: "2030-01-02T11:00:00.000Z", differsFrom: true, note: "sampled usage belongs to another allowance" } }] }] }),
+    usageHosts: usage([obs("local", 10)], { seatAccounts: [{ hostId: "local", seats: [{ seatSession: "dev-impl@alpha", rigName: "alpha", runtime: "codex", configured: { source: "registry", profileRef: "team-a", recordedAt: "2030-01-01T00:00:00.000Z" }, observed: { windowsSampled: true, lastSampledAt: "2030-01-02T11:00:00.000Z", differsFrom: ["dev-review@alpha"], note: "possibly a different login: this seat's status line reports windows that differ from another seat's (a reset more than 60 s apart); not a verdict" } }] }] }),
   });
   const fleet = await readFleet({ daemonUrl: a.url, now, reads: ["bindings", "subscriptions"] });
   const binding = fleet.hosts[0].reads.bindings.data[0];
@@ -68,7 +81,9 @@ test("a seat's configured link and its observed use stay in separate columns", a
   assert.equal(sa.configured.kind, "configured");
   assert.equal(sa.observed.kind, "observed");
   const out = text(page.renderSubscriptions(fleet, NOW));
-  assert.match(out, /dev-impl@alpha on box-a configured: team plan A active observed: differs from configured · sampled 60 min ago sampled usage belongs to another allowance no record/);
+  assert.deepEqual(sa.observed.differsFrom, ["dev-review@alpha"]);
+  assert.match(out, /dev-impl@alpha on box-a configured: team plan A active observed: windows differ from dev-review@alpha · sampled 60 min ago possibly a different login: this seat's status line reports windows that differ from another seat's \(a reset more than 60 s apart\); not a verdict no record/);
+  assert.doesNotMatch(out, /differs from configured/);
   assert.doesNotMatch(out, /current account|currently using/i);
 });
 

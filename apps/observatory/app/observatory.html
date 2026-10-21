@@ -154,8 +154,19 @@
       for (const h of fleet.hosts ?? []) {
         const r = h.reads?.seats;
         if (!r || r.data === null || r.data === undefined) { parts.push(notRead(h, r, 'seats')); continue; }
-        if (r.status === 'partial') parts.push(`<div class="notice"><b>${hostName(h)}</b>: seats partly read. Rigs not read: ${esc((r.coverage?.rigsFailed ?? []).map((x) => `${x.rigName ?? x.rigId} (${STATUS_WORDS[x.status] ?? x.status})`).join(', '))}.</div>`);
-        if (!r.data.length) parts.push(`<div class="notice"><b>${hostName(h)}</b>: read, and it reports no rigs running.</div>`);
+        const cov = r.coverage ?? null;
+        const unreadRigs = esc((cov?.rigsFailed ?? []).map((x) => `${x.rigName ?? x.rigId} (${STATUS_WORDS[x.status] ?? x.status})`).join(', '));
+        if (cov && cov.rigsListed > 0 && cov.rigsRead === 0) {
+          // Rigs were listed but none of their seats could be read: that is not an empty machine.
+          parts.push(`<div class="notice"><b>${hostName(h)}</b>: seats not read. It lists ${esc(cov.rigsListed)} rig${cov.rigsListed === 1 ? '' : 's'}, and none could be read: ${unreadRigs}.</div>`);
+          continue;
+        }
+        if (r.status === 'partial') parts.push(`<div class="notice"><b>${hostName(h)}</b>: seats partly read. Rigs not read: ${unreadRigs}.</div>`);
+        if (!r.data.length) {
+          parts.push(cov && cov.rigsListed > 0
+            ? `<div class="notice"><b>${hostName(h)}</b>: the ${esc(cov.rigsRead)} rig${cov.rigsRead === 1 ? '' : 's'} read ${cov.rigsRead === 1 ? 'has' : 'have'} no seats.</div>`
+            : `<div class="notice"><b>${hostName(h)}</b>: read, and it reports no rigs running.</div>`);
+        }
         for (const s of r.data) {
           const a = s.activity ?? {};
           const ctx = s.context;
@@ -294,7 +305,7 @@
         if (!r || r.data === null || r.data === undefined) { if (r) parts.push(notRead(h, r, 'configured subscription links')); continue; }
         for (const b of r.data) {
           const o = observedBySeat.get(`${h.key}/${b.seat}`);
-          const observed = s?.status !== 'ok' ? unknown(s?.status === 'not-set-up' ? 'not set up' : s?.status === 'absent' ? 'not available on this version' : 'not read') : o?.observed ? `${o.observed.differsFromConfigured ? '<span class="stale">differs from configured</span> · ' : ''}sampled ${ageText(o.observed.lastSampledAt, now)}${o.observed.note ? `<span class="sub">${esc(o.observed.note)}</span>` : ''}` : unknown('no observation');
+          const observed = s?.status !== 'ok' ? unknown(s?.status === 'not-set-up' ? 'not set up' : s?.status === 'absent' ? 'not available on this version' : 'not read') : o?.observed ? `${o.observed.differsFrom?.length ? `<span class="stale">windows differ from ${esc(o.observed.differsFrom.join(', '))}</span> · ` : ''}sampled ${ageText(o.observed.lastSampledAt, now)}${o.observed.note ? `<span class="sub">${esc(o.observed.note)}</span>` : ''}` : unknown('no observation');
           seatRows.push(`<tr><td><span class="name">${esc(b.seat ?? '')}</span><span class="sub">on ${hostName(h)}</span></td><td>configured: ${b.account ? `${esc(b.account.label ?? b.account.id)}${b.account.authState ? `<span class="sub">${esc(b.account.authState)}</span>` : ''}` : unknown('no account linked')}</td><td>observed: ${observed}</td><td>${esc(s?.moves?.status === 'no-record' ? 'no record' : '')}</td></tr>`);
         }
       }
@@ -418,6 +429,39 @@
       return `<section id="later"><h2>Not set up yet</h2><p class="placeholder">Productivity has no agreed definition yet, so only activity is shown. The oversight team's readings and subscription moves are not connected. Nothing here estimates them.</p></section>`;
     }
 
+    // One seat's detail at a time. Each response is bound to the seat it was asked for: an answer (or an error) that
+    // arrives after the person moved to another seat, or closed the detail, is dropped, so it never shows under the
+    // wrong seat.
+    export function makeSeatLoader({ fetchJson, show, now = () => Date.now() }) {
+      let view = null; // { key, seat, older: [] }
+      let asked = 0;
+      return {
+        async open(key) {
+          const ticket = ++asked;
+          view = null;
+          if (!key) { show(''); return; }
+          try {
+            const seat = await fetchJson(`/api/observatory/seat?key=${encodeURIComponent(key)}`);
+            if (ticket !== asked) return;
+            view = { key, seat, older: [] };
+            show(renderSeat(seat, now(), view.older));
+          } catch (e) {
+            if (ticket === asked) show(`<div class="notice"><b>Could not read this seat:</b> ${esc(e.message)}.</div>`);
+          }
+        },
+        async older(cursor) {
+          const v = view;
+          if (!v) return;
+          let page;
+          try { page = (await fetchJson(`/api/observatory/seat?key=${encodeURIComponent(v.key)}&cursor=${encodeURIComponent(cursor)}`)).generations; }
+          catch (e) { page = { status: 'unreachable', detail: e.message }; }
+          if (view !== v) return;
+          v.older.push(page);
+          show(renderSeat(v.seat, now(), v.older));
+        },
+      };
+    }
+
     export function renderPage({ hosts, seats, queues, health, messaging, ceremony, subscriptions }, now) {
       return [hosts ? renderHosts(hosts, now) : '', seats ? renderSeats(seats, now) : '', queues ? renderQueues(queues, now) : '', messaging ? renderMessaging(messaging, now) : '', health ? renderHealth(health, now) : '', ceremony ? renderCeremony(ceremony, now) : '', subscriptions ? renderSubscriptions(subscriptions, now) : '', renderLater()].join('');
     }
@@ -427,27 +471,16 @@
       const lede = document.querySelector('#lede');
       const foot = document.querySelector('#foot');
       const verbs = { hosts: '/api/observatory/hosts', seats: '/api/observatory/seats', queues: '/api/observatory/queues', health: '/api/observatory/health', messaging: '/api/observatory/messaging', ceremony: '/api/observatory/ceremony', subscriptions: '/api/observatory/subscriptions' };
-      let seatView = null; // { key, seat, older: [] }
-      async function loadSeat() {
+      const seats = makeSeatLoader({ fetchJson: async (url) => (await fetch(url)).json(), show: (html) => { document.querySelector('#seat-detail').innerHTML = html; } });
+      function loadSeat() {
         const m = location.hash.match(/^#seat=(.+)$/);
-        const box = document.querySelector('#seat-detail');
-        if (!m) { box.innerHTML = ''; seatView = null; return; }
-        const key = decodeURIComponent(m[1]);
-        try {
-          const r = await fetch(`/api/observatory/seat?key=${encodeURIComponent(key)}`);
-          seatView = { key, seat: await r.json(), older: [] };
-          box.innerHTML = renderSeat(seatView.seat, Date.now(), seatView.older);
-        } catch (e) { box.innerHTML = `<div class="notice"><b>Could not read this seat:</b> ${esc(e.message)}.</div>`; }
+        seats.open(m ? decodeURIComponent(m[1]) : null);
       }
-      document.addEventListener('click', async (ev) => {
+      document.addEventListener('click', (ev) => {
         const btn = ev.target.closest?.('[data-older-cursor]');
-        if (!btn || !seatView) return;
+        if (!btn) return;
         btn.disabled = true;
-        try {
-          const r = await fetch(`/api/observatory/seat?key=${encodeURIComponent(seatView.key)}&cursor=${encodeURIComponent(btn.dataset.olderCursor)}`);
-          seatView.older.push((await r.json()).generations);
-        } catch (e) { seatView.older.push({ status: 'unreachable', detail: e.message }); }
-        document.querySelector('#seat-detail').innerHTML = renderSeat(seatView.seat, Date.now(), seatView.older);
+        seats.older(btn.dataset.olderCursor);
       });
       window.addEventListener('hashchange', loadSeat);
       loadSeat();
