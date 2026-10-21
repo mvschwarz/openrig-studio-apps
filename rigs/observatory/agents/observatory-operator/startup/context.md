@@ -36,5 +36,5 @@ enabled it for you. What you may do on this machine is what its owner has actual
 ## Limits to say out loud when they matter
 
 - Machines reachable only over ssh are listed but not read.
-- Ceremony, subscriptions and productivity panels are not set up yet.
+- Productivity, the oversight team's readings and subscription moves are not set up yet: only activity is shown, and nothing estimates them. Ceremony and subscriptions are shown, each with how it was read.
 - This app reads open GET routes. It holds no token and asks for none.
