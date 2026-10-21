@@ -120,28 +120,29 @@ test("accounts are sorted out, then low, then the rest; ones without a reading f
   assert.match(all, /No reading yet: codex blind-acct, team plan A\./);
 });
 
-test("planned, default login and seen-using stay three separate columns; a configured account is never shown as the one in use", async () => {
+test("planned, default login and observed usage windows stay three separate columns; no account is ever shown as the one in use", async () => {
   const a = await daemon({
     selfHostId: "box-a",
-    usageHosts: usage([obs("local", 10)], { seatAccounts: [{ hostId: "local", seats: [{ seatSession: "dev-impl@alpha", rigName: "alpha", configured: { source: "registry", profileRef: "team-a" }, observed: { lastSampledAt: "2030-01-02T11:00:00.000Z", differsFrom: true } }, { seatSession: "dev-qa@alpha", rigName: "alpha", configured: { source: "default_login" } }] }] }),
+    usageHosts: usage([obs("local", 10)], { seatAccounts: [{ hostId: "local", seats: [{ seatSession: "dev-impl@alpha", rigName: "alpha", configured: { source: "registry", profileRef: "team-a" }, observed: { windowsSampled: true, lastSampledAt: "2030-01-02T11:00:00.000Z", differsFrom: ["dev-review@alpha"], note: "possibly a different login: this seat's status line reports windows that differ from another seat's (a reset more than 60 s apart); not a verdict" } }, { seatSession: "dev-lead@alpha", rigName: "alpha", configured: { source: "registry", profileRef: "team-a" }, observed: { windowsSampled: true, lastSampledAt: "2030-01-02T11:30:00.000Z" } }, { seatSession: "dev-qa@alpha", rigName: "alpha", configured: { source: "default_login" } }] }] }),
   });
   const p = await fleetPage();
   const fleet = await read(a.url);
-  const rows = p.seatAccountsRows(fleet);
+  const rows = p.seatAccountsRows(fleet, NOW);
   const impl = rows.find((r) => r.seat === "dev-impl@alpha");
   assert.equal(impl.planned, "team plan A");
-  assert.equal(impl.seen, "a different account");
+  assert.equal(impl.seen, "windows sampled 60 min ago; they differ from dev-review@alpha (possibly a different login: this seat's status line reports windows that differ from another seat's (a reset more than 60 s apart); not a verdict)");
+  assert.equal(rows.find((r) => r.seat === "dev-lead@alpha").seen, "windows sampled 30 min ago", "a sample alone names no account");
   assert.equal(rows.find((r) => r.seat === "dev-qa@alpha").login, "default login");
   const { all } = await render(fleet);
-  assert.match(all, /Seat Planned Default login Seen using/);
-  assert.doesNotMatch(all, /current account|currently using/i);
+  assert.match(all, /Seat Planned Default login Usage windows observed/);
+  assert.doesNotMatch(all, /current account|currently using|a different account|the planned account/i);
 });
 
 test("a column with no values is cut", async () => {
   const a = await daemon({ selfHostId: "box-a" });
   const { all } = await render(await read(a.url));
   assert.match(all, /Seat Planned dev-impl@alpha/);
-  assert.doesNotMatch(all, /Default login|Seen using/);
+  assert.doesNotMatch(all, /Default login|Usage windows observed/);
 });
 
 test("the honesty rule is stated once, rows show '—' in grey, and a stale reading says so", async () => {
@@ -229,4 +230,37 @@ test("Fleet's ready route makes no daemon call, and its healthcheck passes only 
   } finally {
     await new Promise((r) => { server.closeAllConnections?.(); server.close(r); });
   }
+});
+
+test("what wasn't read is named, never counted as zero rigs, a rig with no seats, or no account low", async () => {
+  // The daemon is down on the first read.
+  const down = await render(await readFleet({ daemonUrl: await closedPortUrl(), reads: [...FLEET_READS], now, timeoutMs: 300 }));
+  assert.match(down.all, /Teams Rigs not read/);
+  assert.doesNotMatch(down.all, /0 rigs running|No rig is running/);
+
+  // The machine answers, but its rig list fails.
+  const ps = await daemon({ selfHostId: "box-a", routes: { "/api/ps": () => [500, { error: "internal" }] } });
+  const psAll = (await render(await read(ps.url))).all;
+  assert.match(psAll, /Rigs not read on: box-a \(http-error\)/);
+  assert.doesNotMatch(psAll, /0 rigs running|No rig is running/);
+
+  // One rig's seats fail: it's named as not read, not shown as a rig with no seats, and the machine's seat count says so.
+  const part = await daemon({ selfHostId: "box-b", rigs: { "rig-1": { name: "alpha", nodes: [seat("dev.impl")] }, "rig-2": { name: "beta", nodes: [seat("dev.qa")] } },
+    routes: { nodes: (u) => (u.pathname.includes("rig-2") ? [503, { error: "unavailable" }] : [200, [{ ...seat("dev.impl"), rigId: "rig-1", rigName: "alpha" }]]) } });
+  const p = await fleetPage();
+  const fleet = await read(part.url);
+  const rigs = p.rigsView(fleet);
+  assert.deepEqual(rigs.running.map((x) => x.name), ["alpha"]);
+  assert.deepEqual(rigs.unread, [{ name: "beta", machine: "box-b" }]);
+  const partAll = (await render(fleet)).all;
+  assert.match(partAll, /1 rig running among what was read/);
+  assert.match(partAll, /Seats not read: beta \(box-b\)/);
+  assert.match(partAll, /2 rigs · 1\+ seats \(1 rig not read\)/);
+
+  // Accounts are connected, but no allowance has a readable window: unknown, not "none low".
+  const noWindow = { hostId: "local", readAt: "2030-01-02T11:59:00.000Z", row: { identity: { planType: "team" }, observedAt: null, currentAvailability: "unknown", windows: [] } };
+  const acc = await daemon({ selfHostId: "box-c", usageHosts: usage([noWindow]) });
+  const accAll = (await render(await read(acc.url))).all;
+  assert.match(accAll, /No account has a readable window/);
+  assert.doesNotMatch(accAll, /No account is low or out|None of the/);
 });
