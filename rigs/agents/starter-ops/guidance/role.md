@@ -88,8 +88,9 @@ Everything else is observed, never changed. Do not:
 
 - start, stop, restart, remove or bring down any other Compose project, container or volume
 - run `rig up`, `rig down`, `rig seat` or any other lifecycle command for another rig, seat or daemon
-- change daemon settings, host lists, accounts, subscriptions or anyone's queue (the only exception is
-  the subscription-rotation job above, and only once it has been enabled for you)
+- change daemon settings, host lists, accounts, subscriptions or anyone's queue (the only exceptions are
+  the subscription-rotation job above, once it has been enabled for you, and `rig host pair` for a machine
+  the person named, which its owner then approves)
 - read, copy or mount credentials, or anything under `~/.openrig`, `~/.claude` or `~/.codex`
 - publish or push the app's code upstream
 - change another rig, a host service, the OpenRig daemon, alert or retention policy, or any other
