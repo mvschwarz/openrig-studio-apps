@@ -264,3 +264,51 @@ test("what wasn't read is named, never counted as zero rigs, a rig with no seats
   assert.match(accAll, /No account has a readable window/);
   assert.doesNotMatch(accAll, /No account is low or out|None of the/);
 });
+
+
+test("move history keeps reported outcomes, evidence and follow-ups separate from account readings", async () => {
+  const report = { version: 1, host: "box-a", home: "/homes/team", from: "old", to: "target", reason: "<keep working>", policy: { ref: "account-policy", version: "3" },
+    readings: [{ subject: "target", basis: "expected", expectedFullSince: "2030-01-02T11:00:00Z", summary: "reset passed" }],
+    seats: [{ seat: "impl@alpha", result: "moved", accountEvidence: { state: "matched", detail: "target login", at: "2030-01-02T11:01:00Z" }, toolTurn: { state: "observed", at: "2030-01-02T11:02:00Z" } },
+      { seat: "review@alpha", result: "unconfirmed", missing: "no tool turn" }, { seat: "qa@alpha", result: "unknown", missing: "no capture" }],
+    peers: [{ seat: "lead@alpha", note: "not restarted; account unverified" }] };
+  const row = { qitemId: "move-1", reportedAt: "2030-01-02T11:03:00Z", reportedBy: "manager@fleet", reportedTo: "operator@kernel", state: "done", followedBy: ["move-2"], report };
+  const b = await daemon({ selfHostId: "box-b" });
+  const a = await daemon({ selfHostId: "box-a", hosts: [{ id: "second", transport: "http", url: b.url }], routes: { "/api/provider/moves": () => [200, { moves: [row, { ...row, qitemId: "move-2", followedBy: [], report: { ...report, follows: "move-1" } }], unreadable: [{ qitemId: "bad-1", reason: "invalid report" }], truncated: true }] } });
+  const fleet = await read(a.url); // Usage is off: move reports are still available.
+  const { all, body } = await render(fleet);
+  for (const value of ["Subscription moves", "old → target", "account-policy", "version 3", "impl@alpha", "matched", "2030-01-02T11:01:00Z", "observed", "2030-01-02T11:02:00Z", "unconfirmed", "no tool turn", "unknown", "no capture", "lead@alpha", "account unverified", "expected full since", "not measured", "bad-1", "invalid report", "older reports may exist"]) assert.ok(all.includes(value), value);
+  assert.match(all, /box-b: Move reports unavailable/);
+  assert.equal(b.calls.filter((c) => c.path === "/api/provider/moves").length, 1);
+  assert.match(body, /href="#move-box-a%2Fmove-2"/);
+  assert.match(body, /&lt;keep working&gt;/);
+  assert.doesNotMatch(body, /<keep working>/);
+  assert.ok(!(await fleetPage()).seatAccountsRows(fleet, NOW).some((r) => r.planned === "target"));
+  assert.ok(a.calls.some((c) => c.path === "/api/provider/moves" && c.query === "?limit=50"));
+  assert.ok(a.calls.every((c) => c.method === "GET"));
+});
+
+test("missing, guarded and malformed move routes say unavailable; only a read empty list says no recent reports", async () => {
+  for (const response of [[404, {}], [401, {}], [200, {}], [200, { moves: [], unreadable: [], truncated: false }]]) {
+    const a = await daemon({ selfHostId: "box-a", routes: { "/api/provider/moves": () => response } });
+    const { all } = await render(await read(a.url));
+    if (response[0] === 200 && Array.isArray(response[1].moves)) assert.match(all, /No recent move reports in this window/);
+    else { assert.match(all, /Move reports unavailable/); assert.doesNotMatch(all, /No recent move reports/); }
+  }
+});
+
+test("retained exhaustion, sign-in and reset expectations survive the reader without becoming measured room", async () => {
+  const observation = obs("local", 100, "exhausted");
+  Object.assign(observation.row, { lastObservedExhausted: { at: "2030-01-01T00:00:00Z", window: "weekly", evidence: "native reading" }, signIn: { state: "unknown", at: null, evidence: "not read" } });
+  observation.row.windows[0].expectation = { expectedFullSince: "2030-01-02T11:00:00Z", note: "not measured" };
+  const a = await daemon({ selfHostId: "box-a", usageHosts: usage([observation]) });
+  const fleet = await read(a.url), actual = fleet.subscriptions.data.allowances[0].observations[0];
+  assert.deepEqual(actual.lastObservedExhausted, observation.row.lastObservedExhausted);
+  assert.deepEqual(actual.signIn, observation.row.signIn);
+  assert.deepEqual(actual.windows[0].expectation, observation.row.windows[0].expectation);
+  const { all } = await render(fleet);
+  assert.match(all, /expected full since 2030-01-02T11:00:00Z/);
+  assert.match(all, /Sign-in: unknown/);
+  assert.match(all, /Last observed exhausted: 2030-01-01T00:00:00Z/);
+  assert.doesNotMatch(all, /has room/);
+});

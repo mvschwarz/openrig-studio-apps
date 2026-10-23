@@ -82,18 +82,17 @@ test("a seat's configured link and its observed use stay in separate columns", a
   assert.equal(sa.observed.kind, "observed");
   const out = text(page.renderSubscriptions(fleet, NOW));
   assert.deepEqual(sa.observed.differsFrom, ["dev-review@alpha"]);
-  assert.match(out, /dev-impl@alpha on box-a configured: team plan A active observed: windows differ from dev-review@alpha · sampled 60 min ago possibly a different login: this seat's status line reports windows that differ from another seat's \(a reset more than 60 s apart\); not a verdict no record/);
+  assert.match(out, /dev-impl@alpha on box-a configured: team plan A active observed: windows differ from dev-review@alpha · sampled 60 min ago possibly a different login: this seat's status line reports windows that differ from another seat's \(a reset more than 60 s apart\); not a verdict/);
   assert.doesNotMatch(out, /differs from configured/);
   assert.doesNotMatch(out, /current account|currently using/i);
 });
 
-test("moves are 'no record', and nothing is shown in money", async () => {
+test("the Observatory points to Fleet for moves, and nothing is shown in money", async () => {
   const page = await loadPage();
   const a = await daemon({ selfHostId: "box-a", usageHosts: usage([obs("local", 10)]) });
   const fleet = await readFleet({ daemonUrl: a.url, now, reads: ["bindings", "subscriptions"] });
-  assert.equal(fleet.subscriptions.moves.status, "no-record");
   const out = text(page.renderSubscriptions(fleet, NOW));
-  assert.match(out, /Moves between accounts are not recorded yet\. Nothing here is in money\./);
+  assert.match(out, /Move history is shown in the Fleet page when installed\. Nothing here is in money\./);
   assert.doesNotMatch(out, /\$|USD|dollar/i);
 });
 

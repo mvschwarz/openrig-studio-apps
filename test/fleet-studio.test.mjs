@@ -52,6 +52,7 @@ export const SEARCHES = [
   { words: ["lost its login", "lost login", "login"], expect: "fleet-ops/recover-a-stranded-seat" },
   { words: ["subscription usage"], expect: "fleet-ops/read-usage-honestly" },
   { words: ["resets"], expect: "fleet-ops/read-usage-honestly" },
+  { words: ["manage subscriptions"], expect: "fleet-ops/manage-subscriptions" },
   { words: ["context"], expect: "fleet-ops/keep-context-healthy" },
   { words: ["compaction"], expect: "fleet-ops/keep-context-healthy" },
 ];
@@ -73,7 +74,10 @@ const VERIFIED = {
   "rig send": [],
   "rig provider status": ["--json", "--refresh", "--all-hosts", "--hosts", "--provider"],
   "rig auth status": ["--runtime"],
-  "rig seat restart": ["--keep-conversation", "--reason", "--plan", "--json"],
+  "rig auth switch": ["--runtime"],
+  "rig provider moves report": ["--file", "--to", "--follows"],
+  "rig provider moves": ["--seat", "--limit"],
+  "rig seat restart": ["--keep-conversation", "--reason", "--plan", "--json", "--verify", "--expect-account"],
   "rig seat launch": [],
   "rig seat handover": ["--dry-run", "--reason", "--source", "--json"],
   "rig up": ["--existing", "--plan", "--json"],
@@ -138,15 +142,18 @@ test("every command the know-how and the agent's text name exists, with those op
 });
 
 test("the know-how never prices usage, never measures it with a model request, and leaves moves to their owners", () => {
-  for (const [file, text] of knowHowTexts().slice(0, 3)) {
+  for (const [file, text] of knowHowTexts().filter(([file]) => file.endsWith("/practice.md"))) {
     assert.doesNotMatch(text, /\$\s?\d|\bUSD\b|\bdollars?\b|\bcost of\b/i, `${file} mentions money`);
     assert.doesNotMatch(text, /\/v1\/messages|api\.anthropic\.com|api\.openai\.com|curl\s/i, `${file} measures by a model request`);
-    assert.doesNotMatch(text, /`rig provider switch|`rig auth switch/, `${file} gives account-move steps`);
   }
   const usage = read(path.join(packsDir, "read-usage-honestly/practice.md"));
   assert.match(usage, /Sending a model request to "check" usage\./);
   assert.match(usage, /Adding readings from several machines into one total\./);
   assert.match(usage, /Unknown is unknown\./);
+  const move = read(path.join(packsDir, "manage-subscriptions/practice.md"));
+  assert.match(move, /person has enabled subscription management/);
+  assert.match(move, /account \*\*and\*\* an observed error-free tool/);
+  assert.match(move, /never repeat the switch or restart/);
 });
 
 const FLEET_RIG = { project: "openrig-fleet-studio", port: 9450, providerRoute: "/api/fleet-view/" };

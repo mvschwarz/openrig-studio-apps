@@ -307,6 +307,27 @@ export function restartSignal(before, now, previousPolledAt, polledAt) {
 
 const READERS = { seats: readSeats, queues: readQueues, health: readHealth, messaging: readMessaging, ceremony: readCeremony, bindings: readBindings };
 
+// A separate bounded report window on each reachable daemon, not an account assignment or a usage sample.
+async function readMoves(ctx, hosts) {
+  const route = "/api/provider/moves?limit=50";
+  const polledAt = new Date(ctx.now()).toISOString();
+  const rows = await mapLimit(hosts, ctx.concurrency, async (host) => {
+    const r = host.status === "ok" ? await getJson(ctx.fetchImpl, host.url, route, ctx.timeoutMs)
+      : { route, status: host.status, detail: host.detail };
+    let result = reading(r, polledAt);
+    if (r.httpStatus === 404) result = { ...result, status: "unavailable", detail: "this daemon has no move-report route" };
+    if (r.status === "ok") {
+      const b = r.body;
+      const valid = Array.isArray(b?.moves) && Array.isArray(b?.unreadable) && typeof b.truncated === "boolean"
+        && b.moves.every((m) => typeof m?.qitemId === "string" && m.report?.version === 1 && Array.isArray(m.report.seats) && Array.isArray(m.report.readings));
+      result = valid ? { ...result, data: { moves: b.moves, unreadable: b.unreadable, truncated: b.truncated } }
+        : { ...result, status: "unavailable", detail: "the move-report response shape is not supported" };
+    }
+    return { host: host.key, ...result };
+  });
+  return { hosts: rows };
+}
+
 // Subscription usage across machines, as the configured daemon already combines it. That route keeps
 // each machine's reading separate and never sums them; this reader keeps it that way and only maps the
 // route's host labels onto the hosts it knows.
@@ -315,24 +336,24 @@ async function readSubscriptions(ctx, daemonUrl, hosts) {
   const polledAt = new Date(now()).toISOString();
   const route = "/api/provider/usage/hosts";
   const r = await getJson(fetchImpl, daemonUrl, route, timeoutMs);
-  const moves = { status: "no-record", note: "subscription moves are not recorded yet" };
   if (r.status === "http-error" && r.httpStatus === 409) {
-    return { route, status: "not-set-up", httpStatus: 409, detail: r.detail, polledAt, observedAt: null, data: null, moves, coverage: { note: "usage windows are off on the configured daemon (provider.usage_windows)" } };
+    return { route, status: "not-set-up", httpStatus: 409, detail: r.detail, polledAt, observedAt: null, data: null, coverage: { note: "usage windows are off on the configured daemon (provider.usage_windows)" } };
   }
   if (r.status === "http-error" && r.httpStatus === 404) {
-    return { route, status: "absent", httpStatus: 404, detail: "this daemon's OpenRig version has no usage-across-machines route", polledAt, observedAt: null, data: null, moves, coverage: null };
+    return { route, status: "absent", httpStatus: 404, detail: "this daemon's OpenRig version has no usage-across-machines route", polledAt, observedAt: null, data: null, coverage: null };
   }
-  if (r.status !== "ok") return { ...reading(r, polledAt), moves };
+  if (r.status !== "ok") return reading(r, polledAt);
   const b = r.body ?? {};
   const hostFor = (label) => (label === "local" ? hosts[0] : hosts.find((h) => h.labels.includes(label))) ?? null;
   const keyFor = (label) => hostFor(label)?.key ?? `unmatched:${label}`;
-  const window = (w) => ({ window: w.window ?? null, usedPercent: w.usedPercent ?? null, resetsAt: w.resetsAt ?? null, observedAt: w.observedAt ?? null, freshness: w.freshness ?? null, level: w.level ?? null });
+  const window = (w) => ({ window: w.window ?? null, usedPercent: w.usedPercent ?? null, resetsAt: w.resetsAt ?? null, observedAt: w.observedAt ?? null, freshness: w.freshness ?? null, level: w.level ?? null, expectation: w.expectation ?? null });
   const allowances = (Array.isArray(b.items) ? b.items : []).map((g) => ({
     provider: g.provider ?? null, key: g.key ?? null, linkage: g.linkage ?? "unknown", notes: Array.isArray(g.notes) ? g.notes : [],
     // One entry per machine that read this allowance, as that machine read it. Never added up.
     observations: (Array.isArray(g.observations) ? g.observations : []).map((o) => ({
       host: keyFor(o.hostId), hostLabel: o.hostId, readAt: o.readAt ?? null,
       plan: o.row?.identity?.planType ?? o.row?.identity?.subscriptionType ?? null,
+      lastObservedExhausted: o.row?.lastObservedExhausted ?? null, signIn: o.row?.signIn ?? null,
       observedAt: o.row?.observedAt ?? null, availability: o.row?.currentAvailability ?? "unknown",
       windows: Array.isArray(o.row?.windows) ? o.row.windows.map(window) : [],
     })),
@@ -348,7 +369,6 @@ async function readSubscriptions(ctx, daemonUrl, hosts) {
   return {
     route, status: "ok", httpStatus: r.httpStatus, detail: null, polledAt, observedAt: b.asOf ?? null,
     data: { allowances, seatAccounts },
-    moves,
     coverage: {
       hosts: (Array.isArray(b.hosts) ? b.hosts : []).map((h) => ({ host: keyFor(h.hostId), hostLabel: h.hostId, status: h.status ?? null, usage: h.usage ?? null, readAt: h.readAt ?? null, reason: h.usageReason ?? h.error ?? null })),
       skipped: Array.isArray(b.skipped) ? b.skipped : [],
@@ -448,8 +468,10 @@ export async function readFleet({
   });
 
   const subscriptions = reads.includes("subscriptions")
-    ? (hosts[0]?.status === "ok" ? await readSubscriptions(ctx, daemonUrl, hosts) : { route: "/api/provider/usage/hosts", status: hosts[0]?.status ?? "unreachable", httpStatus: null, detail: hosts[0]?.detail ?? null, polledAt, observedAt: null, data: null, moves: { status: "no-record", note: "subscription moves are not recorded yet" }, coverage: null })
+    ? (hosts[0]?.status === "ok" ? await readSubscriptions(ctx, daemonUrl, hosts) : { route: "/api/provider/usage/hosts", status: hosts[0]?.status ?? "unreachable", httpStatus: null, detail: hosts[0]?.detail ?? null, polledAt, observedAt: null, data: null, coverage: null })
     : undefined;
+
+  if (subscriptions) subscriptions.moves = await readMoves(ctx, hosts);
 
   const notRead = hosts.filter((h) => h.status !== "ok").map((h) => ({ key: h.key, labels: h.labels, status: h.status }));
   return {

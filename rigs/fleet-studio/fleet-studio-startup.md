@@ -16,11 +16,12 @@
 
 ## First: make sure the know-how is in this machine's library
 
-Check `rig context list --json` for these three entries:
+Check `rig context list --json` for these entries:
 
 - `fleet-ops/recover-a-stranded-seat`
 - `fleet-ops/read-usage-honestly`
 - `fleet-ops/keep-context-healthy`
+- `fleet-ops/manage-subscriptions`
 
 Add only the ones that are missing, one at a time, from this rig's directory:
 

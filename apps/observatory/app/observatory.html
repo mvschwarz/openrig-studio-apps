@@ -307,11 +307,11 @@
         for (const b of r.data) {
           const o = observedBySeat.get(`${h.key}/${b.seat}`);
           const observed = s?.status !== 'ok' ? unknown(s?.status === 'not-set-up' ? 'not set up' : s?.status === 'absent' ? 'not available on this version' : 'not read') : o?.observed?.withheld ? `not attributed${o.observed.note ? `<span class="sub">${esc(o.observed.note)}</span>` : ''}` : o?.observed?.windowsSampled === false ? unknown('no usage windows sampled') : o?.observed ? `${o.observed.differsFrom?.length ? `<span class="stale">windows differ from ${esc(o.observed.differsFrom.join(', '))}</span> · ` : ''}sampled ${ageText(o.observed.lastSampledAt, now)}${o.observed.note ? `<span class="sub">${esc(o.observed.note)}</span>` : ''}` : unknown('no observation');
-          seatRows.push(`<tr><td><span class="name">${esc(b.seat ?? '')}</span><span class="sub">on ${hostName(h)}</span></td><td>configured: ${b.account ? `${esc(b.account.label ?? b.account.id)}${b.account.authState ? `<span class="sub">${esc(b.account.authState)}</span>` : ''}` : unknown('no account linked')}</td><td>observed: ${observed}</td><td>${esc(s?.moves?.status === 'no-record' ? 'no record' : '')}</td></tr>`);
+          seatRows.push(`<tr><td><span class="name">${esc(b.seat ?? '')}</span><span class="sub">on ${hostName(h)}</span></td><td>configured: ${b.account ? `${esc(b.account.label ?? b.account.id)}${b.account.authState ? `<span class="sub">${esc(b.account.authState)}</span>` : ''}` : unknown('no account linked')}</td><td>observed: ${observed}</td></tr>`);
         }
       }
-      if (seatRows.length) parts.push(`<div class="table-wrap"><table><thead><tr><th>Seat</th><th>Configured link</th><th>Observed</th><th>Last move</th></tr></thead><tbody>${seatRows.join('')}</tbody></table></div>`);
-      return `<section id="subscriptions"><h2>Subscriptions</h2><p class="scope">Configured links and observed use are shown side by side and never merged. Moves between accounts are not recorded yet. Nothing here is in money.</p>${parts.join('')}</section>`;
+      if (seatRows.length) parts.push(`<div class="table-wrap"><table><thead><tr><th>Seat</th><th>Configured link</th><th>Observed</th></tr></thead><tbody>${seatRows.join('')}</tbody></table></div>`);
+      return `<section id="subscriptions"><h2>Subscriptions</h2><p class="scope">Configured links and observed use are shown side by side and never merged. Move history is shown in the Fleet page when installed. Nothing here is in money.</p>${parts.join('')}</section>`;
     }
 
     // ---- one seat --------------------------------------------------------------------------------
