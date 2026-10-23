@@ -3,7 +3,7 @@
 **When this applies:** the person has enabled subscription management for you. Installing this bundle
 alone does not enable it. You are the one managing agent, not a second manager competing with the operator.
 
-Read `rig context get skills/core/openrig-user`, "Manage subscriptions across a fleet", for the complete
+Read `rig context get skills/openrig-user`, "Manage subscriptions across a fleet", for the complete
 move procedure and account-policy conversation. Use `rig <command> --help` for this installed version.
 The first supported move is a whole Codex home on Linux, including its peers; not a subset of seats on
 one home, Claude moves, or Mac restarts. If a route is missing, report it instead of improvising.
@@ -18,9 +18,11 @@ one home, Claude moves, or Mac restarts. If a route is missing, report it instea
 3. Balance machines across subscriptions rather than chasing the latest reset. Read
    `rig seat restart <seat> --keep-conversation --plan` for the home and every peer. Skip busy or
    service-bearing seats with a reason. Moving the home affects all peers, even those not restarted.
-4. On that machine, confirm the selected home with `rig auth status --runtime codex`, then run
-   `rig auth switch <profile> --runtime codex` with that exact CODEX_HOME. Restart chosen seats with
-   `rig seat restart <seat> --keep-conversation --reason "<why>"`. Preserve their conversation and settings.
+4. Confirm the selected home with `rig auth status --runtime codex --codex-home <home>`, then run
+   `rig auth switch <profile> --runtime codex --codex-home <home>`. For another machine, add
+   `--host <id>` to both auth commands and to every `rig seat restart` command in this practice.
+   Restart chosen seats with `rig seat restart <seat> --keep-conversation --reason "<why>"`.
+   Preserve their conversation and settings.
 5. After a real tool-using turn, run `rig seat restart <seat> --keep-conversation --verify
    --expect-account <target Account line>`. Only a matched account **and** an observed error-free tool
    turn confirm uptake. Missing evidence is unconfirmed or unknown; a slow reply never warrants a
