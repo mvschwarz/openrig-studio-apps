@@ -1,0 +1,8 @@
+name: fleet-ops/manage-subscriptions
+version: "1"
+taxonomy: skills
+purpose: "Manage subscriptions when the person enables the job: balance Codex homes across accounts, preserve conversations, verify uptake, and report every move with its evidence and uncertainty."
+files:
+  - path: practice.md
+    role: practice
+    summary: "Use the shipped subscription move procedure, standing account policy and separate account/turn evidence."

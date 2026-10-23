@@ -48,7 +48,7 @@
     <p class="legend">— means not reported here yet. Old readings show their time. An account shared by machines is counted once.</p>
     <p class="meta" id="meta">Reading…</p>
     <div id="content"></div>
-    <footer>For history and deeper readings, add the Observatory and open it at <a href="/surfaces/observatory.html">/surfaces/observatory.html</a>. Read only: nothing here changes any machine.</footer>
+    <footer>For seat history and deeper readings, add the Observatory and open it at <a href="/surfaces/observatory.html">/surfaces/observatory.html</a>. Read only: nothing here changes any machine.</footer>
   </main>
 
   <script type="module">
@@ -208,7 +208,7 @@
       const a = v.accounts;
       if (!a.connected && !a.noReading.length) return `<section id="accounts"><h2>Accounts</h2><p class="context">Usage is not connected.</p></section>`;
       const rows = a.accounts.map((x) => `<div class="fold"><div class="row"><span class="name">${esc(x.provider)} ${esc(x.account ?? DASH)}</span><span class="${x.state}">${x.state === 'out' ? 'out' : x.state === 'low' ? 'low' : 'has room'}</span>${x.reset ? `<span class="sub">${resetText(x.reset, v.now)}</span>` : ''}</div>
-        <div class="sub">${x.observations.map((o) => `${esc(o.host)}: ${o.windows.map((w) => `${esc(w.window ?? DASH)} ${w.usedPercent === null || w.usedPercent === undefined ? DASH : `${esc(w.usedPercent)}% used`}`).join(', ') || DASH} (${esc(ago(o.observedAt ?? o.readAt, v.now) ?? DASH)})`).join(' · ')}</div></div>`).join('');
+        <div class="sub">${x.observations.map((o) => `${esc(o.host)}: ${o.windows.map((w) => `${esc(w.window ?? DASH)} ${w.usedPercent === null || w.usedPercent === undefined ? DASH : `${esc(w.usedPercent)}% used`}${w.expectation ? `; expected full since ${esc(w.expectation.expectedFullSince)} (not measured; ${esc(w.expectation.note)})` : ''}`).join(', ') || DASH} (${esc(ago(o.observedAt ?? o.readAt, v.now) ?? DASH)})${o.signIn ? `; Sign-in: ${esc(o.signIn.state)} (${esc(o.signIn.evidence)}; ${esc(o.signIn.at ?? 'time not reported')})` : ''}${o.lastObservedExhausted ? `; Last observed exhausted: ${esc(o.lastObservedExhausted.at)} (${esc(o.lastObservedExhausted.window ?? DASH)}; ${esc(o.lastObservedExhausted.evidence)})` : ''}`).join(' · ')}</div></div>`).join('');
       const fold = a.noReading.length ? `<p class="context">No reading yet: ${a.noReading.map(esc).join(', ')}.</p>` : '';
       return `<section id="accounts"><h2>Accounts</h2>${a.connected ? '' : '<p class="context">Usage is not connected; these accounts are configured.</p>'}<div class="list">${rows}</div>${fold}${renderSeatAccounts(v)}</section>`;
     }
@@ -246,6 +246,29 @@
       return `<details><summary class="sub">Seats and their accounts</summary><table><thead><tr><th>Seat</th>${cols.map(([, t]) => `<th>${t}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.seat)}<div class="sub">${esc(r.machine)}</div></td>${cols.map(([k]) => `<td>${r[k] ? esc(r[k]) : dash()}</td>`).join('')}</tr>`).join('')}</tbody></table></details>`;
     }
 
+    export function renderMoves(fleet) {
+      const hosts = fleet.subscriptions?.moves?.hosts ?? [];
+      const id = (host, qid) => `move-${encodeURIComponent(`${host}/${qid}`)}`;
+      const blocks = hosts.map((h) => {
+        if (!h.data) return `<p class="context">${esc(h.host)}: Move reports unavailable (${esc(h.status)}${h.detail ? `; ${esc(h.detail)}` : ''}).</p>`;
+        const { moves, unreadable, truncated } = h.data;
+        const link = (qid) => moves.some((m) => m.qitemId === qid) ? `<a href="#${id(h.host, qid)}">${esc(qid)}</a>` : esc(qid);
+        const evidence = (label, e) => `${label}: ${e ? `${esc(e.state)}${e.detail ? `; ${esc(e.detail)}` : ''}; ${esc(e.at ?? 'time not reported')}` : 'not reported'}`;
+        const rows = moves.map((m) => {
+          const r = m.report;
+          const policy = r.policy?.none === true ? 'none' : r.policy ? `${r.policy.ref}, version ${r.policy.version}` : 'not stated';
+          return `<details class="fold" id="${id(h.host, m.qitemId)}"><summary>${esc(r.from)} → ${esc(r.to)} · ${esc(m.reportedAt ?? 'time not reported')} · ${esc(m.qitemId)}</summary>
+            <p>${esc(r.reason)}</p><p class="sub">${esc(r.host)} · ${esc(r.home)} · Policy: ${esc(policy)} · reported by ${esc(m.reportedBy)} to ${esc(m.reportedTo)} · ${esc(m.state)}</p>
+            <ul>${r.readings.map((x) => `<li>${esc(x.subject)}: ${x.basis === 'expected' ? `expected full since ${esc(x.expectedFullSince)} (not measured)` : esc(x.basis)}${x.observedAt ? `; observed ${esc(x.observedAt)}` : ''}; ${esc(x.summary)}</li>`).join('')}</ul>
+            <ul>${r.seats.map((x) => `<li>${esc(x.seat)}: ${esc(x.result)}; ${evidence('Account', x.accountEvidence)}; ${evidence('Tool turn', x.toolTurn)}${x.missing ? `; missing: ${esc(x.missing)}` : ''}</li>`).join('') || '<li>No seats restarted.</li>'}</ul>
+            ${(r.peers ?? []).map((x) => `<p class="sub">Peer ${esc(x.seat)}: ${esc(x.note)}</p>`).join('')}
+            ${r.follows ? `<p class="sub">Follows: ${link(r.follows)}</p>` : ''}${m.followedBy?.length ? `<p class="sub">Followed by: ${m.followedBy.map(link).join(', ')}</p>` : ''}</details>`;
+        }).join('');
+        return `<h3>${esc(h.host)}</h3><p class="context">Recent reports, up to 50 per daemon.${truncated ? ' The window is full; older reports may exist.' : ''} Follow-up links cover this window only.</p>${rows || (unreadable.length ? '' : '<p class="context">No recent move reports in this window.</p>')}${unreadable.map((x) => `<p class="context">Report ${esc(x.qitemId)} could not be read: ${esc(x.reason)}.</p>`).join('')}`;
+      });
+      return `<section id="moves"><h2>Subscription moves</h2><p class="context">Managing agents' dated reports of past moves. Configured assignments and observed usage windows stay in Accounts.</p>${blocks.join('') || '<p class="context">Move reports unavailable: not read.</p>'}</section>`;
+    }
+
     export function renderMachines(v) {
       const m = v.machines;
       const cards = m.reporting.map((x) => `<div class="machine"><div class="row"><span class="name">${esc(x.name)}</span><span class="ok">live</span>${x.version ? `<span class="sub">OpenRig ${esc(x.version)}</span>` : ''}</div>
@@ -279,7 +302,7 @@
 
     export function renderPage(fleet, now) {
       const v = { ...view(fleet, now), fleet };
-      return { meta: renderMeta(v), body: renderCards(v) + renderAccounts(v) + renderMachines(v) + renderRigs(v) };
+      return { meta: renderMeta(v), body: renderCards(v) + renderAccounts(v) + renderMoves(fleet) + renderMachines(v) + renderRigs(v) };
     }
 
     if (typeof document !== 'undefined') {

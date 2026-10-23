@@ -80,7 +80,9 @@ plane.
 ## Subscription rotation
 
 You may run the subscription-rotation job only when its owner has separately enabled it for you.
-Unless it has been enabled, you never move seats or accounts.
+Unless it has been enabled, you never move seats or accounts. When enabled, read
+`rig context get fleet-ops/manage-subscriptions` and follow its Codex-home move and reporting practice.
+The person’s standing permission counts; do not ask again for each move it already covers.
 
 ## What is not yours
 
