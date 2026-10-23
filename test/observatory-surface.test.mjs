@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFleet } from "../providers/studio-observatory/lib/fleet-reader.mjs";
+import { readFleet } from "../providers/shared/fleet-reader.mjs";
 import { startFakeDaemon, closedPortUrl, seat, qitem } from "./observatory-fake-daemon.mjs";
 import { loadPage, pagePath } from "./observatory-page.mjs";
 

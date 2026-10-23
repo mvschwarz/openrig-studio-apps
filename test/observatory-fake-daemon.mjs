@@ -25,7 +25,7 @@ export async function startFakeDaemon(opts = {}) {
   const defaults = {
     "/healthz": () => [200, { status: "ok", pid: opts.pid ?? 4242, semver: "0.0.0-test", commit: "abc", ...(opts.selfHostId ? { selfHostId: opts.selfHostId, selfHostIdSource: "named" } : {}) }],
     "/api/hosts": () => [200, { ownName: "test", selected: "local", hosts: opts.hosts ?? [] }],
-    "/api/ps": () => [200, Object.entries(rigs).map(([rigId, r]) => ({ rigId, name: r.name, rigName: r.name, nodeCount: r.nodes.length, status: "running" }))],
+    "/api/ps": () => [200, Object.entries(rigs).map(([rigId, r]) => ({ rigId, name: r.name, rigName: r.name, nodeCount: r.nodes.length, status: r.status ?? "running", lifecycleState: r.status === "stopped" ? "stopped" : "running" }))],
     "/api/queue/list": () => [200, opts.queue ?? [qitem(1), qitem(2, { state: "blocked", blockedOn: "external:x" })]],
     "/api/health-summary/nodes": () => [200, { total: 2, bySessionStatus: { running: 2 }, byLifecycle: { running: 2 }, attentionRequired: 0 }],
     "/api/health-summary/context": () => [200, { total: 2, byUrgency: { critical: 0, warning: 0, low: 2, unknown: 0 }, byFreshness: { fresh: 2, stale: 0, none: 0 }, critical: 0, warning: 0, stale: 0 }],

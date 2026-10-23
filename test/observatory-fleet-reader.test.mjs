@@ -5,7 +5,7 @@
 // All daemons here are stand-ins on loopback ports with invented data.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFleet } from "../providers/studio-observatory/lib/fleet-reader.mjs";
+import { readFleet } from "../providers/shared/fleet-reader.mjs";
 import { createObservatoryServer } from "../providers/studio-observatory/observatory-server.mjs";
 import { startFakeDaemon, closedPortUrl, seat, qitem } from "./observatory-fake-daemon.mjs";
 

@@ -25,7 +25,8 @@ export function loadRig(dir = rigDir) {
   return { dir, rig, compose, dockerfile: read("Dockerfile"), agentDir, agent: parseYaml(fs.readFileSync(path.join(agentDir, "agent.yaml"), "utf8")), role: fs.readFileSync(path.join(agentDir, "guidance/role.md"), "utf8") };
 }
 
-export function rigProblems({ dir, rig, compose }) {
+// The Fleet Studio rig runs the same shape with its own project, port and provider.
+export function rigProblems({ dir, rig, compose }, { project = PROJECT, port = 9440, providerRoute = "/api/observatory/" } = {}) {
   const p = [];
   const s = rig.services ?? {};
   if (rig.version !== "0.2") p.push(`rig version is ${rig.version}, expected "0.2"`);
@@ -34,7 +35,7 @@ export function rigProblems({ dir, rig, compose }) {
   const cf = String(s.compose_file ?? "");
   if (!cf || cf.startsWith("/") || cf.split(/[\\/]/).includes("..")) p.push(`compose_file must be relative and inside the rig directory, got "${cf}"`);
   else if (!fs.existsSync(path.join(dir, cf))) p.push(`compose_file ${cf} does not exist`);
-  if (s.project_name !== PROJECT) p.push(`project_name must be ${PROJECT}`);
+  if (s.project_name !== project) p.push(`project_name must be ${project}`);
   if (!["down", "leave_running", "down_and_volumes"].includes(s.down_policy)) p.push(`down_policy ${s.down_policy} is not one OpenRig accepts`);
   if (s.down_policy === "down_and_volumes") p.push("down_policy would delete the app's data on every rig down");
   const waits = s.wait_for ?? [];
@@ -47,8 +48,8 @@ export function rigProblems({ dir, rig, compose }) {
   if (!(s.surfaces?.urls ?? []).length) p.push("surfaces.urls names no link for the person");
   // The rig comes up on the studio alone. Provider health is a runtime reading for the agent: waiting on
   // it (the ready verb, or the compose health, which is provider-level) would roll the rig back.
-  if (!waits.some((w) => w.url === "http://127.0.0.1:9440/api/contract")) p.push("wait_for must wait for the studio (/api/contract on 9440)");
-  if (waits.some((w) => String(w.url ?? "").includes("/api/observatory/"))) p.push("wait_for must not wait on the provider");
+  if (!waits.some((w) => w.url === `http://127.0.0.1:${port}/api/contract`)) p.push(`wait_for must wait for the studio (/api/contract on ${port})`);
+  if (waits.some((w) => String(w.url ?? "").includes(providerRoute))) p.push("wait_for must not wait on the provider");
   if (waits.some((w) => w.service !== undefined)) p.push("wait_for must not wait on compose health, which is provider-level");
   const pods = rig.pods ?? [];
   const members = pods.flatMap((pod) => pod.members ?? []);
@@ -63,7 +64,7 @@ export function rigProblems({ dir, rig, compose }) {
 
 const CREDENTIALISH = /credential|auth\.json|\.ssh|\.openrig|\.claude|\.codex|docker\.sock|token|secret|password/i;
 
-export function composeProblems({ compose, dockerfile }) {
+export function composeProblems({ compose, dockerfile }, { provider = "studio-observatory" } = {}) {
   const p = [];
   const declaredVolumes = new Set(Object.keys(compose.volumes ?? {}));
   for (const [name, svc] of Object.entries(compose.services ?? {})) {
@@ -76,7 +77,7 @@ export function composeProblems({ compose, dockerfile }) {
     // inside the container, so a crash could not be tested and children would not be reaped.
     if (svc.init !== true) p.push(`${name}: init must be true`);
     // Health is the provider's ready verb through the studio's port, not the studio alone.
-    if (!(svc.healthcheck?.test ?? []).some((a) => String(a).endsWith("/providers/studio-observatory/healthcheck.mjs"))) p.push(`${name}: the healthcheck must run the provider's healthcheck (ready verb through the studio)`);
+    if (!(svc.healthcheck?.test ?? []).some((a) => String(a).endsWith(`/providers/${provider}/healthcheck.mjs`))) p.push(`${name}: the healthcheck must run the provider's healthcheck (ready verb through the studio)`);
     if (svc.privileged) p.push(`${name}: privileged`);
     for (const v of svc.volumes ?? []) {
       const source = String(v).split(":")[0];
@@ -102,7 +103,8 @@ export function composeProblems({ compose, dockerfile }) {
 const ALLOWED = [
   new RegExp(`^docker compose -p ${PROJECT}( (ps|logs|up -d studio|restart studio))?(, .*)?$`),
   /^(ps|logs|up -d studio|restart studio)$/,
-  /^rig env (status|logs) observatory( studio)?$/,
+  /^docker compose -p openrig-fleet-studio( (ps|logs|up -d studio|restart studio))?(, .*)?$/,
+  /^rig env (status|logs) (observatory|fleet-studio)( studio)?$/,
   /^rig watchdog register --policy periodic-reminder$/,
   /^rig (whoami|ps)( --json| --all-hosts)*$/,
 ];
@@ -111,7 +113,8 @@ export function scopeProblems({ role }) {
   const p = [];
   const yours = role.match(/## What is yours([\s\S]*?)\n## /)?.[1] ?? "";
   if (!yours.includes(PROJECT)) p.push("the guidance does not name the app's own Compose project");
-  const mayRun = yours.match(/You may run:([\s\S]*)$/)?.[1] ?? "";
+  const mayRun = yours.match(/You may run[^:\n]*:([\s\S]*)$/)?.[1] ?? "";
+  if (!mayRun.trim()) p.push("the guidance has no list of what the agent may run");
   for (const cmd of [...mayRun.matchAll(/`([^`]+)`/g)].map((m) => m[1])) {
     if (!ALLOWED.some((re) => re.test(cmd))) p.push(`the guidance lets the agent run \`${cmd}\``);
   }
@@ -156,7 +159,7 @@ export function scopeProblems({ role }) {
   // The path for a provider that is not serving: see unhealthy, read the logs, restart once, report.
   const path = role.match(/studio: running \(unhealthy\)[\s\S]*?logs studio[\s\S]*?restart `studio` once[\s\S]*?say what happened/);
   if (!path) p.push("the guidance does not name the unhealthy -> logs -> restart once -> report path");
-  for (const m of role.matchAll(/`docker compose(?! -p openrig-observatory)[^`]*`/g)) p.push(`a docker compose command without the app's project: ${m[0]}`);
+  for (const m of role.matchAll(/`docker compose(?! -p openrig-(observatory|fleet-studio)\b)[^`]*`/g)) p.push(`a docker compose command without the app's project: ${m[0]}`);
   return p;
 }
 
@@ -172,17 +175,22 @@ test("the agent may act on its own Compose project only, and tells an intentiona
   assert.deepEqual(scopeProblems(loadRig()), []);
 });
 
-test("the agent's startup files exist and say where the app is", () => {
-  const { agentDir, agent } = loadRig();
+test("the agent's startup files exist, and the Observatory rig's own startup says where the app is", () => {
+  const { dir, rig, agentDir, agent } = loadRig();
   for (const f of agent.startup.files) assert.ok(fs.existsSync(path.join(agentDir, f.path)), `${f.path} is missing`);
-  const ctx = fs.readFileSync(path.join(agentDir, "startup/context.md"), "utf8");
+  const general = fs.readFileSync(path.join(agentDir, "startup/context.md"), "utf8");
+  // A periodic reminder needs a spec file; the general startup shows the form that works.
+  assert.match(general, /rig watchdog register --policy periodic-reminder --spec <file> --target-session <you>\s+--interval-seconds \d+ --registered-by <you>/);
+  const member = rig.pods[0].members[0];
+  const own = member.startup.files.map((f) => f.path);
+  assert.deepEqual(own, ["observatory-startup.md"]);
+  const ctx = fs.readFileSync(path.join(dir, own[0]), "utf8");
   assert.match(ctx, /127\.0\.0\.1:9440\/surfaces\/observatory\.html/);
-  assert.match(ctx, /periodic-reminder/);
 });
 
 test("the build context sends only the observatory app and provider", () => {
   const ignore = fs.readFileSync(path.join(rigDir, "Dockerfile.dockerignore"), "utf8").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
-  assert.deepEqual(ignore, ["*", "!apps/observatory/**", "!providers/studio-observatory/**"]);
+  assert.deepEqual(ignore, ["*", "!apps/observatory/**", "!providers/studio-observatory/**", "!providers/shared/**"]);
 });
 
 // Each check above must actually catch the mistake it exists for.
@@ -239,7 +247,7 @@ test("customizing outside the app's own files is caught", () => {
 });
 
 test("an Observatory-only role is caught", () => {
-  assert.ok(planted((r) => { r.role = r.role.replace("The Observatory is one\napp you run and shape here; your other work does not depend on it.", "You are the Observatory-only agent:\nyou run the Observatory and nothing else."); }).some((m) => /Observatory-only/.test(m)));
+  assert.ok(planted((r) => { r.role = r.role.replace("The Observatory is one\napp you may run and shape; your other work does not depend on it.", "You are the Observatory-only agent:\nyou run the Observatory and nothing else."); }).some((m) => /Observatory-only/.test(m)));
 });
 
 test("growing its own rig is allowed, and removing that is caught", () => {

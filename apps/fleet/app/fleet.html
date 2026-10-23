@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fleet</title>
+  <style>
+    /* Colour carries state only: green is working or live, amber is low or waiting, red is out or
+       blocked, grey is "—" (not reported). Everything else is neutral. The layout is one column on a
+       narrow screen and never scrolls sideways. */
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e13; --panel: #121722; --line: #252c3a; --text: #f3f5f8; --muted: #929cad;
+      --ok: #47d18c; --low: #ffb44a; --out: #ff795f; --none: #77808f;
+      --gap: 14px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; overflow-wrap: anywhere; }
+    main { width: min(1200px, 100%); margin: 0 auto; padding: 20px 16px 40px; }
+    h1 { margin: 0 0 4px; font-size: clamp(26px, 6vw, 38px); letter-spacing: -.02em; }
+    h2 { margin: 28px 0 6px; font-size: 13px; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
+    .legend, .context, .meta { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--gap); margin-top: 16px; }
+    .card, .machine, .rig, .fold { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+    .card h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+    .card p { margin: 0; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--gap); }
+    .list { display: grid; gap: 8px; }
+    .row { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+    .name { font-weight: 650; }
+    .sub { color: var(--muted); font-size: 13px; }
+    .ok { color: var(--ok); } .low { color: var(--low); } .out { color: var(--out); } .none { color: var(--none); }
+    .bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line); margin: 6px 0; }
+    .bar span { display: block; height: 100%; }
+    .bar .ok { background: var(--ok); } .bar .low { background: var(--low); } .bar .out { background: var(--out); } .bar .idle { background: #3a4252; } .bar .none { background: var(--none); }
+    details > summary { cursor: pointer; list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+    th, td { text-align: left; padding: 6px 6px 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    a { color: inherit; }
+    footer { margin-top: 30px; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Fleet</h1>
+    <p class="legend">— means not reported here yet. Old readings show their time. An account shared by machines is counted once.</p>
+    <p class="meta" id="meta">Reading…</p>
+    <div id="content"></div>
+    <footer>For history and deeper readings, add the Observatory and open it at <a href="/surfaces/observatory.html">/surfaces/observatory.html</a>. Read only: nothing here changes any machine.</footer>
+  </main>
+
+  <script type="module">
+    // The view: turn the provider's fleet reading into what the page answers (which accounts have room,
+    // which machines report, what the rigs are doing), sorted by what needs the operator. Every function
+    // here is pure and exported so it can be checked without a browser; the boot at the end runs only in
+    // a page.
+
+    export const DASH = '—';
+    export const esc = (v) => String(v ?? '').replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]);
+    const dash = () => `<span class="none">${DASH}</span>`;
+
+    // Age of a measurement from its own time. Not the poll time.
+    export function ago(iso, now) {
+      const t = Date.parse(iso ?? '');
+      if (Number.isNaN(t)) return null;
+      const s = Math.max(0, Math.round((now - t) / 1000));
+      return s < 90 ? `${s} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
+    }
+    // When a reset comes, in plain words, with the exact time on hover.
+    export function until(iso, now) {
+      const t = Date.parse(iso ?? '');
+      if (Number.isNaN(t)) return null;
+      const s = Math.round((t - now) / 1000);
+      if (s <= 0) return 'due now';
+      return s < 5400 ? `in ${Math.max(1, Math.round(s / 60))} min` : s < 172800 ? `in ${Math.round(s / 3600)} h` : `in ${Math.round(s / 86400)} d`;
+    }
+    const resetText = (iso, now) => `<span title="${esc(iso)}">resets ${esc(until(iso, now) ?? iso)}</span>`;
+    const machineName = (h) => h.hostId ?? (h.lastSeenAs ? h.lastSeenAs.hostId : (h.labels ?? [])[0] ?? DASH);
+
+    const STATE_RANK = { out: 0, low: 1, ok: 2 };
+    // OpenRig's own level for a window: exhausted, nearing, ok or unknown. Nothing is computed on top.
+    const levelState = (level) => (level === 'exhausted' ? 'out' : level === 'nearing' ? 'low' : level === 'ok' ? 'ok' : null);
+
+    export function accountsView(fleet) {
+      const s = fleet.subscriptions;
+      const connected = s?.status === 'ok' && s.data;
+      const accounts = connected ? s.data.allowances.map((g) => {
+        // One account, once: its machines are links, and its readings are never added together.
+        const states = [];
+        let reset = null;
+        const machines = [];
+        for (const o of g.observations) {
+          machines.push({ host: o.host, readAt: o.readAt, observedAt: o.observedAt });
+          for (const w of o.windows) {
+            const st = levelState(w.level);
+            if (st) states.push(st);
+            if ((st === 'out' || st === 'low') && w.resetsAt && (!reset || w.resetsAt < reset)) reset = w.resetsAt;
+          }
+        }
+        const state = states.length ? states.sort((a, b) => STATE_RANK[a] - STATE_RANK[b])[0] : null;
+        return { provider: g.provider, account: g.key, plan: g.observations.map((o) => o.plan).find(Boolean) ?? null, state, reset, machines, linkage: g.linkage, observations: g.observations };
+      }) : [];
+      const withReading = accounts.filter((a) => a.state).sort((a, b) => STATE_RANK[a.state] - STATE_RANK[b.state]);
+      const noReading = accounts.filter((a) => !a.state).map((a) => `${a.provider} ${a.account ?? DASH}`);
+      // Configured accounts no machine has a reading for.
+      const seen = new Set(accounts.map((a) => a.account));
+      for (const h of fleet.hosts ?? []) for (const b of h.reads?.bindings?.data ?? []) {
+        const label = b.account?.label ?? b.account?.id;
+        if (label && !seen.has(b.account?.id) && !noReading.includes(label)) noReading.push(label);
+      }
+      return { connected, status: s?.status ?? 'not read', detail: s?.detail ?? null, accounts: withReading, noReading };
+    }
+
+    export function machinesView(fleet) {
+      const hosts = fleet.hosts ?? [];
+      const reporting = hosts.filter((h) => h.status === 'ok').map((h) => {
+        const seats = h.reads?.seats?.data ?? null;
+        const rigs = h.reads?.seats?.coverage?.rigs ?? null;
+        const ctx = h.reads?.health?.data?.context?.data ?? null;
+        const nodes = h.reads?.health?.data?.nodes?.data ?? null;
+        // Strain as OpenRig reports it: seats near their context limit, seats needing attention.
+        const strain = [];
+        if (ctx && ctx.critical > 0) strain.push(`${ctx.critical} seat${ctx.critical === 1 ? '' : 's'} near the context limit`);
+        if (nodes && nodes.attentionRequired > 0) strain.push(`${nodes.attentionRequired} needing attention`);
+        // Seats are counted only from the rigs that were read; rigs whose seats couldn't be read are named, not counted as none.
+        const rigsUnread = h.reads?.seats?.coverage?.rigsFailed?.length ?? 0;
+        return { name: machineName(h), version: h.healthz?.version ?? null, rigs: rigs ? rigs.length : null, seats: seats ? seats.length : null, rigsUnread, strain, restarted: h.restart?.status === 'restarted' };
+      });
+      const WHY = { unreachable: 'unreachable', 'unsupported-transport': 'reachable only over ssh', guarded: 'needs a token', 'http-error': 'error' };
+      const notReporting = hosts.filter((h) => h.status !== 'ok').map((h) => ({ name: machineName(h), why: WHY[h.status] ?? h.status }));
+      return { total: hosts.length, reporting, notReporting };
+    }
+
+    const WORK = { running: 'working', needs_input: 'waiting', idle: 'idle' };
+    export function seatState(s) {
+      if (s.work?.blocked > 0) return 'blocked';
+      return WORK[s.activity?.state] ?? null;
+    }
+
+    // Rigs from the machines whose rig list was read. A machine that couldn't be read, or whose rig list failed, and a rig
+    // whose seats couldn't be read are named as not read: never counted as no rigs, or a rig with no seats.
+    export function rigsView(fleet) {
+      const running = [], stopped = [], unread = [], machinesUnread = [];
+      let machinesRead = 0;
+      for (const h of fleet.hosts ?? []) {
+        const sr = h.reads?.seats;
+        if (h.status !== 'ok' || !sr?.coverage?.rigs) { machinesUnread.push({ name: machineName(h), why: h.status !== 'ok' ? h.status : sr?.status ?? 'not read' }); continue; }
+        machinesRead++;
+        const seats = sr.data ?? [];
+        const failed = new Set((sr.coverage.rigsFailed ?? []).map((x) => x.rigId));
+        for (const r of sr.coverage.rigs) {
+          if (failed.has(r.rigId)) { unread.push({ name: r.name, machine: machineName(h) }); continue; }
+          const mine = seats.filter((s) => s.rigName === r.name);
+          const counts = { working: 0, waiting: 0, blocked: 0, idle: 0, unknown: 0 };
+          for (const s of mine) counts[seatState(s) ?? 'unknown']++;
+          const row = { name: r.name, machine: machineName(h), status: r.status, seats: mine, counts };
+          (r.status === 'running' || r.status === 'partial' ? running : stopped).push(row);
+        }
+      }
+      // What needs the operator first: blocked, then waiting, then the rest.
+      running.sort((a, b) => b.counts.blocked - a.counts.blocked || b.counts.waiting - a.counts.waiting || a.name.localeCompare(b.name));
+      return { running, stopped, unread, machinesUnread, machinesRead };
+    }
+
+    export function view(fleet, now) {
+      return { accounts: accountsView(fleet), machines: machinesView(fleet), rigs: rigsView(fleet), served: fleet.served ?? null, polledAt: fleet.polledAt, now };
+    }
+
+    // ---- rendering ---------------------------------------------------------------------------------
+
+    const countWords = (c) => [c.working && `${c.working} working`, c.waiting && `${c.waiting} waiting`, c.blocked && `${c.blocked} blocked`, c.idle && `${c.idle} idle`, c.unknown && `${c.unknown} ${DASH}`].filter(Boolean).join(' · ') || DASH;
+
+    export function renderMeta(v) {
+      const sv = v.served;
+      if (!sv) return `Read ${esc(ago(v.polledAt, v.now) ?? DASH)}`;
+      const age = ago(sv.polledAt, v.now) ?? DASH;
+      return sv.stale ? `Showing the last good reading, from ${esc(age)}${sv.refreshing ? '; a fresh one is on its way' : ''}.` : `Read ${esc(age)}.`;
+    }
+
+    export function renderCards(v) {
+      const a = v.accounts, m = v.machines, r = v.rigs;
+      const out = a.accounts.filter((x) => x.state === 'out'), low = a.accounts.filter((x) => x.state === 'low');
+      const worst = out[0] ?? low[0];
+      const cap = !a.connected
+        ? [`Usage: not connected`, a.status === 'not-set-up' ? 'Usage readings are turned off on this machine.' : a.status === 'absent' ? "This machine's OpenRig doesn't report usage yet." : '']
+        : [out.length || low.length ? `<span class="out">${out.length} out</span> · <span class="low">${low.length} low</span>`
+            : a.accounts.length ? `<span class="ok">None of the ${a.accounts.length} with a reading is low or out</span>` : `<span class="none">No account has a readable window</span>`,
+           worst ? `${esc(worst.provider)} ${esc(worst.account ?? DASH)}: ${worst.state === 'out' ? 'out' : 'low'}${worst.reset ? `, ${resetText(worst.reset, v.now)}` : ''}` : '',
+           a.noReading.length ? `${a.noReading.length} with no reading` : ''];
+      const strained = m.reporting.filter((x) => x.strain.length);
+      const mach = [`<span class="${m.reporting.length === m.total ? 'ok' : 'low'}">${m.reporting.length} of ${m.total}</span> report here`,
+        strained.length ? `<span class="low">Under strain:</span> ${strained.map((x) => esc(x.name)).join(', ')}` : '',
+        m.notReporting.length ? `Not reporting: ${m.notReporting.map((x) => esc(x.name)).join(', ')}` : ''];
+      const all = r.running.reduce((c, x) => { for (const k in x.counts) c[k] += x.counts[k]; return c; }, { working: 0, waiting: 0, blocked: 0, idle: 0, unknown: 0 });
+      const unreadCount = r.unread.length + r.machinesUnread.length;
+      const teams = r.machinesRead === 0
+        ? [`<span class="none">Rigs not read</span>`, r.machinesUnread.length ? `Not read: ${r.machinesUnread.map((x) => esc(x.name)).join(', ')}` : '']
+        : [`${r.running.length} rig${r.running.length === 1 ? '' : 's'} running${unreadCount ? ` among what was read` : ''}`,
+          r.running.length ? `<span class="ok">${all.working} working</span> · <span class="low">${all.waiting} waiting</span> · <span class="out">${all.blocked} blocked</span>` : '',
+          unreadCount ? `<span class="low">Not read:</span> ${[...r.unread.map((x) => `${esc(x.name)} (${esc(x.machine)})`), ...r.machinesUnread.map((x) => esc(x.name))].join(', ')}` : r.stopped.length ? `${r.stopped.length} not running` : ''];
+      const card = (title, lines) => `<div class="card"><h3>${title}</h3>${lines.filter(Boolean).slice(0, 3).map((l) => `<p>${l}</p>`).join('')}</div>`;
+      return `<div class="cards" id="glance">${card('Capacity', cap)}${card('Machines', mach)}${card('Teams', teams)}</div>`;
+    }
+
+    export function renderAccounts(v) {
+      const a = v.accounts;
+      if (!a.connected && !a.noReading.length) return `<section id="accounts"><h2>Accounts</h2><p class="context">Usage is not connected.</p></section>`;
+      const rows = a.accounts.map((x) => `<div class="fold"><div class="row"><span class="name">${esc(x.provider)} ${esc(x.account ?? DASH)}</span><span class="${x.state}">${x.state === 'out' ? 'out' : x.state === 'low' ? 'low' : 'has room'}</span>${x.reset ? `<span class="sub">${resetText(x.reset, v.now)}</span>` : ''}</div>
+        <div class="sub">${x.observations.map((o) => `${esc(o.host)}: ${o.windows.map((w) => `${esc(w.window ?? DASH)} ${w.usedPercent === null || w.usedPercent === undefined ? DASH : `${esc(w.usedPercent)}% used`}`).join(', ') || DASH} (${esc(ago(o.observedAt ?? o.readAt, v.now) ?? DASH)})`).join(' · ')}</div></div>`).join('');
+      const fold = a.noReading.length ? `<p class="context">No reading yet: ${a.noReading.map(esc).join(', ')}.</p>` : '';
+      return `<section id="accounts"><h2>Accounts</h2>${a.connected ? '' : '<p class="context">Usage is not connected; these accounts are configured.</p>'}<div class="list">${rows}</div>${fold}${renderSeatAccounts(v)}</section>`;
+    }
+
+    // Planned assignment, a machine's default login and the usage windows a seat was observed reporting: three facts,
+    // three columns, never merged. A column nobody has a value for is left out.
+    export function seatAccountsRows(fleet, now = Date.now()) {
+      const rows = new Map();
+      const keyOf = (host, seat) => `${host}/${seat}`;
+      for (const h of fleet.hosts ?? []) for (const b of h.reads?.bindings?.data ?? []) {
+        rows.set(keyOf(h.key, b.seat), { seat: b.seat, machine: machineName(h), planned: b.account?.label ?? b.account?.id ?? null, login: null, seen: null });
+      }
+      for (const s of fleet.subscriptions?.data?.seatAccounts ?? []) {
+        const r = rows.get(keyOf(s.host, s.seat)) ?? { seat: s.seat, machine: s.host, planned: null, login: null, seen: null };
+        if (s.configured?.source === 'default_login') r.login = 'default login';
+        if (s.configured?.source === 'registry' && !r.planned) r.planned = s.configured.profile;
+        // What the daemon observed is this seat's own sampled usage windows, never an account: when they were sampled, and
+        // the other seats whose windows differ, with the daemon's own qualification.
+        if (s.observed) {
+          const o = s.observed;
+          r.seen = o.withheld ? `not attributed${o.note ? ` (${o.note})` : ''}`
+            : o.lastSampledAt ? `windows sampled ${ago(o.lastSampledAt, now) ?? o.lastSampledAt}${o.differsFrom?.length ? `; they differ from ${o.differsFrom.join(', ')}${o.note ? ` (${o.note})` : ''}` : ''}`
+            : null;
+        }
+        rows.set(keyOf(s.host, s.seat), r);
+      }
+      return [...rows.values()];
+    }
+
+    function renderSeatAccounts(v) {
+      const rows = seatAccountsRows(v.fleet ?? {}, v.now);
+      if (!rows.length) return '';
+      const cols = [['planned', 'Planned'], ['login', 'Default login'], ['seen', 'Usage windows observed']].filter(([k]) => rows.some((r) => r[k]));
+      if (!cols.length) return '';
+      return `<details><summary class="sub">Seats and their accounts</summary><table><thead><tr><th>Seat</th>${cols.map(([, t]) => `<th>${t}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.seat)}<div class="sub">${esc(r.machine)}</div></td>${cols.map(([k]) => `<td>${r[k] ? esc(r[k]) : dash()}</td>`).join('')}</tr>`).join('')}</tbody></table></details>`;
+    }
+
+    export function renderMachines(v) {
+      const m = v.machines;
+      const cards = m.reporting.map((x) => `<div class="machine"><div class="row"><span class="name">${esc(x.name)}</span><span class="ok">live</span>${x.version ? `<span class="sub">OpenRig ${esc(x.version)}</span>` : ''}</div>
+        <div class="sub">${x.rigs ?? DASH} rig${x.rigs === 1 ? '' : 's'} · ${x.seats ?? DASH}${x.rigsUnread ? '+' : ''} seat${x.seats === 1 && !x.rigsUnread ? '' : 's'}${x.rigsUnread ? ` (${x.rigsUnread} rig${x.rigsUnread === 1 ? '' : 's'} not read)` : ''}${x.restarted ? ' · restarted since the last reading' : ''}</div>${x.strain.length ? `<div class="low">${esc(x.strain.join(' · '))}</div>` : ''}</div>`).join('');
+      const fold = m.notReporting.length ? `<p class="context">Not reporting here: ${m.notReporting.map((x) => `${esc(x.name)} (${esc(x.why)})`).join(' · ')}.</p>` : '';
+      return `<section id="machines"><h2>Machines</h2><div class="grid">${cards}</div>${fold}</section>`;
+    }
+
+    const SEG = [['working', 'ok'], ['waiting', 'low'], ['blocked', 'out'], ['idle', 'idle'], ['unknown', 'none']];
+    export function renderRigs(v) {
+      const r = v.rigs;
+      const rows = r.running.map((x) => {
+        const total = x.seats.length || 1;
+        const bar = SEG.map(([k, cls]) => (x.counts[k] ? `<span class="${cls}" style="width:${(100 * x.counts[k] / total).toFixed(1)}%"></span>` : '')).join('');
+        const table = x.seats.length ? `<table><thead><tr><th>Seat</th><th>State</th><th>On</th></tr></thead><tbody>${x.seats.map((s) => {
+          const st = seatState(s);
+          const cls = st === 'working' ? 'ok' : st === 'waiting' ? 'low' : st === 'blocked' ? 'out' : st ? '' : 'none';
+          const since = ago(s.activity?.observedAt, v.now);
+          const on = [s.work?.inProgress ? `${s.work.inProgress} in progress` : '', s.work?.blocked ? `${s.work.blocked} blocked` : ''].filter(Boolean).join(' · ');
+          return `<tr><td>${esc(s.logicalId ?? DASH)}</td><td><span class="${cls}">${esc(st ?? DASH)}</span>${since ? `<div class="sub">since ${esc(since)}</div>` : ''}</td><td>${on ? esc(on) : dash()}</td></tr>`;
+        }).join('')}</tbody></table>` : '';
+        return `<details class="rig"><summary><div class="row"><span class="name">${esc(x.name)}</span><span class="sub">${esc(x.machine)} · ${x.seats.length} seat${x.seats.length === 1 ? '' : 's'}</span></div><div class="bar">${bar}</div><div class="sub">${countWords(x.counts)}</div></summary>${table}</details>`;
+      }).join('');
+      const fold = r.stopped.length ? `<p class="context">Not running: ${r.stopped.map((x) => `${esc(x.name)} (${esc(x.machine)})`).join(', ')}.</p>` : '';
+      const unreadFold = [r.unread.length ? `Seats not read: ${r.unread.map((x) => `${esc(x.name)} (${esc(x.machine)})`).join(', ')}.` : '',
+        r.machinesUnread.length ? `Rigs not read on: ${r.machinesUnread.map((x) => `${esc(x.name)} (${esc(x.why)})`).join(', ')}.` : ''].filter(Boolean).map((l) => `<p class="context">${l}</p>`).join('');
+      const empty = r.machinesRead === 0 ? `<p class="context">Rigs not read.</p>`
+        : r.unread.length || r.machinesUnread.length ? `<p class="context">No running rig among what was read.</p>` : `<p class="context">No rig is running.</p>`;
+      return `<section id="rigs"><h2>Rigs</h2>${unreadFold}<div class="list">${rows || empty}</div>${fold}</section>`;
+    }
+
+    export function renderPage(fleet, now) {
+      const v = { ...view(fleet, now), fleet };
+      return { meta: renderMeta(v), body: renderCards(v) + renderAccounts(v) + renderMachines(v) + renderRigs(v) };
+    }
+
+    if (typeof document !== 'undefined') {
+      const content = document.querySelector('#content');
+      const meta = document.querySelector('#meta');
+      async function load() {
+        try {
+          const r = await fetch('/api/fleet-view/fleet');
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const out = renderPage(await r.json(), Date.now());
+          meta.innerHTML = out.meta;
+          content.innerHTML = out.body;
+        } catch (e) {
+          meta.textContent = 'Not connected.';
+          content.innerHTML = `<p class="context">Could not read the fleet (${esc(e.message)}). This is a failure to read, not an empty fleet.</p>`;
+        }
+      }
+      load();
+      // Refresh only while the page is open and visible; nothing is read when nobody is looking.
+      setInterval(() => { if (!document.hidden) load(); }, 30000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+    }
+  </script>
+</body>
+</html>

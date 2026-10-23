@@ -1,0 +1,36 @@
+# The Fleet page as one container in its own Compose project.
+#
+# - Built from this checkout's Fleet page and provider plus the Studio SDK at a pinned commit (see Dockerfile).
+# - Host networking: the studio listens on 127.0.0.1 only, and it reads the OpenRig daemon on
+#   127.0.0.1 too, so the container shares the host's loopback. This works on Linux. On macOS,
+#   Docker Desktop's host networking is a separate opt-in feature and is not verified here.
+# - Its only storage is its own named volume. Nothing from the host's home, OpenRig's home,
+#   ssh or any credential is mounted, and no token is passed in.
+name: openrig-fleet-studio
+
+services:
+  studio:
+    build:
+      context: ../..
+      dockerfile: rigs/fleet-studio/Dockerfile
+    image: openrig-fleet-studio:0.1.0
+    network_mode: host
+    # Docker's init runs as PID 1, forwards signals and reaps the studio's child processes.
+    init: true
+    restart: unless-stopped
+    environment:
+      FLEET_DAEMON_URL: ${FLEET_DAEMON_URL:-http://127.0.0.1:7433}
+    volumes:
+      - fleet-studio-data:/data
+    healthcheck:
+      # The app's own health only: the studio AND the Fleet provider answering, asked through the
+      # studio's port (the provider's ready verb makes no daemon call). A daemon that is down is a
+      # reading the app shows, not a reason to call the app unhealthy.
+      test: ["CMD", "node", "/studio/apps/providers/studio-fleet-view/healthcheck.mjs"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  fleet-studio-data:

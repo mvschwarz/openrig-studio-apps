@@ -22,6 +22,12 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const providerDir = path.resolve(here, "../providers/studio-observatory");
+// Code both read-only providers run (the fleet reader and the server core). It ships with them and is
+// checked as part of each provider's closure.
+const sharedDir = path.resolve(here, "../providers/shared");
+// The Fleet provider and app get every check the Observatory's get.
+const fleetProviderDir = path.resolve(here, "../providers/studio-fleet-view");
+const PROVIDER_DIRS = [providerDir, fleetProviderDir];
 
 const PATTERNS = [
   { name: "a macOS home path", re: /\/Users\// },
@@ -31,6 +37,8 @@ const PATTERNS = [
   { name: "an ssh key or config path", re: /\.ssh\// },
   { name: "a tailnet host name", re: /\.ts\.net\b/ },
   { name: "a model provider endpoint", re: /api\.anthropic\.com|api\.openai\.com|chatgpt\.com/ },
+  // A request that spends an account's allowance, or an OAuth or sign-in flow: never in these apps.
+  { name: "a model request or sign-in flow", re: /\/v1\/messages|\boauth\b|device[_-]?code|sign-?in code/i },
   // The provider reads open GET routes. It never acquires or sends a token, so an
   // authorization header anywhere in what it runs is a design change, not a detail.
   { name: "an authorization header", re: /authorization|\bbearer\b/i },
@@ -45,7 +53,7 @@ function extraPatterns() {
 
 const IMPORT_RE = /(?:^|[^\w.])(?:import|export)\s[^"'`]*?from\s*["']([^"']+)["']|(?:^|[^\w.])import\s*\(\s*["']([^"']+)["']\s*\)|(?:^|[^\w.])import\s*["']([^"']+)["']/g;
 
-export function runtimeClosure(dir) {
+export function runtimeClosure(dir, allowed = [dir, sharedDir]) {
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, "provider.json"), "utf8"));
   // Plus the container healthcheck script, which runs inside the image too.
   const roots = [manifest.run.entry, ...(manifest.run.companions ?? []).map((c) => c.entry), ...(fs.existsSync(path.join(dir, "healthcheck.mjs")) ? ["healthcheck.mjs"] : [])];
@@ -56,7 +64,7 @@ export function runtimeClosure(dir) {
     const file = queue.shift();
     if (seen.has(file)) continue;
     seen.add(file);
-    if (!file.startsWith(dir + path.sep)) { problems.push(`${file} is outside the provider`); continue; }
+    if (!allowed.some((root) => file.startsWith(root + path.sep))) { problems.push(`${file} is outside the provider`); continue; }
     if (!fs.existsSync(file)) { problems.push(`${path.relative(dir, file)} is started or imported but missing`); continue; }
     const src = fs.readFileSync(file, "utf8");
     for (const m of src.matchAll(IMPORT_RE)) {
@@ -76,12 +84,13 @@ test("the closure is found by following imports from what provider.json starts",
   // The positive control: if the walk silently stopped at the entry, every pattern
   // check below would pass on one file.
   assert.ok(rel.includes("observatory-server.mjs"));
-  assert.ok(rel.includes(path.join("lib", "fleet-reader.mjs")), `the reader must be in the closure, got ${rel.join(", ")}`);
+  assert.ok(rel.includes(path.join("..", "shared", "fleet-reader.mjs")) && rel.includes(path.join("..", "shared", "reader-server.mjs")), `the shared code must be in the closure, got ${rel.join(", ")}`);
   assert.ok(rel.includes("healthcheck.mjs"), "the healthcheck the container runs is checked too");
 });
 
-test("nothing in the closure names a machine, an account path or a credential", () => {
-  const { files } = runtimeClosure(providerDir);
+test("nothing in either provider's closure names a machine, an account path or a credential", () => {
+  const files = new Set(PROVIDER_DIRS.flatMap((d) => runtimeClosure(d).files));
+  assert.ok([...files].some((f) => f.endsWith("fleet-view-server.mjs")), "the Fleet provider is scanned");
   const patterns = [...PATTERNS, ...extraPatterns()];
   const hits = [];
   for (const file of files) {
@@ -97,6 +106,7 @@ test("nothing in the closure names a machine, an account path or a credential", 
 // references by src, href or import, and any vendor directory the manifest ships. Nothing may come
 // from another origin, so a page can't quietly pull code or data from somewhere unreviewed.
 const appDir = path.resolve(here, "../apps/observatory");
+const APP_DIRS = [appDir, path.resolve(here, "../apps/fleet")];
 const REF_RE = /\b(?:src|href)\s*=\s*["']([^"'#]+)["']|\bimport\s*(?:[^"'`]*?from\s*)?["']([^"']+)["']|@import\s+(?:url\()?["']?([^"')]+)/g;
 
 export function appClosure(dir) {
@@ -135,8 +145,9 @@ test("the app's closure loads nothing from another origin and nothing missing", 
   assert.deepEqual(rel, ["app.json", path.join("app", "observatory.html")]);
 });
 
-test("nothing in the app's closure names a machine, an account path or a credential", () => {
-  const { files } = appClosure(appDir);
+test("nothing in either app's closure names a machine, an account path or a credential", () => {
+  const files = APP_DIRS.flatMap((d) => appClosure(d).files);
+  assert.ok(files.some((f) => f.endsWith("fleet.html")), "the Fleet page is scanned");
   const patterns = [...PATTERNS, ...extraPatterns()];
   const hits = [];
   for (const file of files) {
@@ -160,13 +171,13 @@ test("the app check does catch a page that loads from another origin", () => {
   }
 });
 
-// The launch rig ships whole: its spec, compose file, Dockerfile, agent and notes. Every file in it
-// gets the same patterns.
-test("nothing in the launch rig names a machine, an account path or a credential", () => {
-  const rigDir = path.resolve(here, "../rigs/observatory");
+// The launch rigs ship whole: their specs, compose file, Dockerfile, the shared agent, the know-how and
+// notes. Every file under rigs/ gets the same patterns.
+test("nothing in the launch rigs names a machine, an account path or a credential", () => {
+  const rigDir = path.resolve(here, "../rigs");
   const patterns = [...PATTERNS, ...extraPatterns()];
   const files = fs.readdirSync(rigDir, { recursive: true }).map((f) => path.join(rigDir, f)).filter((f) => fs.statSync(f).isFile());
-  assert.ok(files.length >= 8, `expected the rig's files, found ${files.length}`);
+  assert.ok(files.length >= 18, `expected the rigs' files, found ${files.length}`);
   const hits = [];
   for (const file of files) {
     fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => {
@@ -180,8 +191,8 @@ test("nothing in the launch rig names a machine, an account path or a credential
 // may carry a currency field or label.
 const MONEY = /\bUSD\b|\busd\b|costUsd|CostUsd|CostEstimate|\bdollars?\b|\bbilling\b/i;
 
-test("nothing the provider runs or the page loads deals in money", () => {
-  const files = [...runtimeClosure(providerDir).files, ...appClosure(appDir).files];
+test("nothing the providers run or the pages load deals in money", () => {
+  const files = [...new Set(PROVIDER_DIRS.flatMap((d) => runtimeClosure(d).files)), ...APP_DIRS.flatMap((d) => appClosure(d).files)];
   const hits = [];
   for (const file of files) fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => { if (MONEY.test(line)) hits.push(`${path.relative(path.resolve(here, ".."), file)}:${i + 1}`); });
   assert.deepEqual(hits, []);
@@ -192,8 +203,8 @@ test("nothing the provider runs or the page loads deals in money", () => {
 // token (generation record, previews, compaction, the terminal).
 const GUARDED_ROUTES = /\/generation-record|\/preview\b|\/api\/compaction|\/api\/transcripts|\/api\/terminal|\/api\/startup\//;
 
-test("nothing the provider runs or the page loads asks for transcripts or token-guarded routes", () => {
-  const files = [...runtimeClosure(providerDir).files, ...appClosure(appDir).files];
+test("nothing the providers run or the pages load asks for transcripts or token-guarded routes", () => {
+  const files = [...new Set(PROVIDER_DIRS.flatMap((d) => runtimeClosure(d).files)), ...APP_DIRS.flatMap((d) => appClosure(d).files)];
   const hits = [];
   for (const file of files) fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => { if (GUARDED_ROUTES.test(line)) hits.push(`${path.relative(path.resolve(here, ".."), file)}:${i + 1}`); });
   assert.deepEqual(hits, []);
@@ -203,6 +214,6 @@ test("nothing the provider runs or the page loads asks for transcripts or token-
 test("the pattern check does catch a planted path", () => {
   // Without this, a regular expression that never matches would keep the test
   // above green whatever the provider contained.
-  const planted = ["const home = '/Users/someone/.config';", "fetch(url, { headers: { Authorization: x } })", "read('~/.codex/auth.json')"];
+  const planted = ["const home = '/Users/someone/.config';", "fetch(url, { headers: { Authorization: x } })", "read('~/.codex/auth.json')", "read('~/.claude/.credentials.json')", "fetch(base + '/v1/messages')", "start the OAuth device_code flow"];
   for (const line of planted) assert.ok(PATTERNS.some((p) => p.re.test(line)), `no pattern caught: ${line}`);
 });

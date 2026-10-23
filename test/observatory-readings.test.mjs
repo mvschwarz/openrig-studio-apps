@@ -3,7 +3,7 @@
 // daemons (invented data, shaped from OpenRig's routes) and the page's own render functions.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFleet } from "../providers/studio-observatory/lib/fleet-reader.mjs";
+import { readFleet } from "../providers/shared/fleet-reader.mjs";
 import { startFakeDaemon, qitem } from "./observatory-fake-daemon.mjs";
 import { loadPage } from "./observatory-page.mjs";
 

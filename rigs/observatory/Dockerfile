@@ -17,6 +17,7 @@ RUN git init -q /studio/sdk \
 
 COPY apps/observatory /studio/apps/apps/observatory
 COPY providers/studio-observatory /studio/apps/providers/studio-observatory
+COPY providers/shared /studio/apps/providers/shared
 
 # The SDK's install tool installs the APP, not its provider's dependencies; provisioning does
 # those separately, so this step does too. The observatory provider has no dependencies today,

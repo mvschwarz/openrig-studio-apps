@@ -1,0 +1,45 @@
+version: "0.2"
+name: fleet-studio
+summary: >
+  Fleet Studio: a starter operations agent for this OpenRig setup, carrying the fleet know-how
+  (recovering a stranded seat, reading usage honestly, keeping context healthy) and making it
+  available to every agent on the machine. Its Fleet page shows accounts, machines and rigs at a glance;
+  the Observatory is an optional addition, never required.
+
+services:
+  kind: compose
+  compose_file: fleet-studio.compose.yaml
+  project_name: openrig-fleet-studio
+  down_policy: down
+  # The rig comes up when the studio answers. Whether the Fleet provider behind it is serving is a
+  # runtime reading, which the container healthcheck reports and the agent acts on; waiting on it here
+  # would roll the whole rig back on the very failure the agent is there to handle.
+  wait_for:
+    - url: http://127.0.0.1:9450/api/contract
+  surfaces:
+    urls:
+      - name: Fleet
+        url: http://127.0.0.1:9450/surfaces/fleet.html
+    commands:
+      - name: Fleet status
+        command: "rig env status fleet-studio"
+      - name: Fleet logs
+        command: "rig env logs fleet-studio studio --tail 100"
+
+pods:
+  - id: ops
+    label: Operations
+    members:
+      - id: operator
+        agent_ref: "local:../agents/starter-ops"
+        runtime: claude-code
+        profile: default
+        cwd: "."
+        startup:
+          files:
+            - path: fleet-studio-startup.md
+              delivery_hint: send_text
+              required: true
+    edges: []
+
+edges: []

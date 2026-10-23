@@ -1,0 +1,12 @@
+{
+  "package": "@openrig/studio-fleet-view",
+  "run": {
+    "entry": "fleet-view-server.mjs",
+    "args": ["--port", "{{port}}"]
+  },
+  "verbs": [
+    "/api/fleet-view/fleet",
+    "/api/fleet-view/ready"
+  ],
+  "_note": "Read only. /api/fleet-view/fleet is the fleet as OpenRig's own daemons report it (the daemon on this machine, FLEET_DAEMON_URL, default http://127.0.0.1:7433, and each HTTP host in its host list): machines, rigs and seats, machine health summaries, configured subscription links and usage readings. A reading is served from the last good read at once and refreshed outside the request; nothing polls when nobody asks. No token is read, stored or sent, and no request is made to a model provider."
+}

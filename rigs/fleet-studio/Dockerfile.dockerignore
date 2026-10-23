@@ -1,0 +1,5 @@
+# The build context is the repository root; the image needs only the Fleet page, its provider and the shared code.
+*
+!apps/fleet/**
+!providers/studio-fleet-view/**
+!providers/shared/**

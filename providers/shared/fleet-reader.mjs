@@ -108,7 +108,11 @@ async function readSeats(ctx, host) {
     // Seats carry their own observedAt (the activity sample time); the read as a whole has none.
     observedAt: null,
     data: seats,
-    coverage: { rigsListed: rigs.length, rigsRead: rigs.length - failed.length, rigsFailed: failed, archivedRigs: "excluded (the route's default)", complete: failed.length === 0 },
+    coverage: {
+      rigsListed: rigs.length, rigsRead: rigs.length - failed.length, rigsFailed: failed, archivedRigs: "excluded (the route's default)", complete: failed.length === 0,
+      // Each rig as the daemon's own summary describes it (whether it is running), for views that group by rig.
+      rigs: rigs.map((r) => ({ key: `${host.key}/${r.name ?? r.rigId}`, rigId: r.rigId, name: r.name ?? null, status: r.status ?? null, lifecycleState: r.lifecycleState ?? null, nodeCount: r.nodeCount ?? null, runningCount: r.runningCount ?? null })),
+    },
   };
 }
 
