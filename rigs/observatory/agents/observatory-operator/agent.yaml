@@ -1,0 +1,30 @@
+name: observatory-operator
+version: "0.1"
+description: Starter operations agent; runs and shapes the Observatory, may grow its own rig, changes nothing outside it
+
+defaults:
+  runtime: claude-code
+
+profiles:
+  default:
+    uses:
+      skills: []
+      guidance: [role]
+      subagents: []
+      plugins: []
+      runtime_resources: []
+
+resources:
+  guidance:
+    - id: role
+      path: guidance/role.md
+
+startup:
+  files:
+    - path: guidance/role.md
+      delivery_hint: send_text
+      required: true
+    - path: startup/context.md
+      delivery_hint: send_text
+      required: true
+  actions: []
