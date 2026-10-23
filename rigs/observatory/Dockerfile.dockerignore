@@ -1,0 +1,4 @@
+# The build context is the repository root; the image needs only the observatory app and provider.
+*
+!apps/observatory/**
+!providers/studio-observatory/**

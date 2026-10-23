@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "id": "observatory",
+  "name": "OBSERVATORY",
+  "summary": "How your OpenRig machines are doing: each machine, its seats, its queues and its health, with where and when every reading was measured.",
+  "category": "studio",
+  "maker": {
+    "name": "OpenRig",
+    "url": "https://github.com/mvschwarz"
+  },
+  "surface": {
+    "entry": "app/observatory.html",
+    "path": "/surfaces/observatory.html",
+    "glyph": "◉",
+    "hint": "your machines: seats, queues and health, with the age of each reading"
+  },
+  "calls": {
+    "/api/observatory/hosts": { "required": true },
+    "/api/observatory/seats": { "required": true },
+    "/api/observatory/queues": { "required": true },
+    "/api/observatory/health": { "required": true },
+    "/api/observatory/messaging": { "required": true },
+    "/api/observatory/ceremony": { "required": true },
+    "/api/observatory/subscriptions": { "required": true },
+    "/api/observatory/seat": { "required": true }
+  },
+  "vendor": [],
+  "provider": {
+    "package": "@openrig/studio-observatory",
+    "required": true
+  },
+  "_note": "Read only. The page asks the provider, the provider reads each machine's OpenRig daemon, and nothing is written anywhere. A machine that can't be read is shown with the reason, never as empty or healthy."
+}

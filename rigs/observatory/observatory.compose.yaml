@@ -1,0 +1,39 @@
+# The Observatory as one container in its own Compose project.
+#
+# - Built from this checkout's app and provider plus the Studio SDK at a pinned commit (see Dockerfile).
+# - Host networking: the studio listens on 127.0.0.1 only, and it reads the OpenRig daemon on
+#   127.0.0.1 too, so the container shares the host's loopback. This works on Linux. On macOS,
+#   Docker Desktop's host networking is a separate opt-in feature and is not verified here.
+# - Its only storage is its own named volume. Nothing from the host's home, OpenRig's home,
+#   ssh or any credential is mounted, and no token is passed in.
+name: openrig-observatory
+
+services:
+  studio:
+    build:
+      context: ../..
+      dockerfile: rigs/observatory/Dockerfile
+    image: openrig-observatory-studio:0.1.0
+    network_mode: host
+    # Docker's init (tini) runs as PID 1, forwards signals, and reaps the studio's child processes. It
+    # also makes a crash testable: the studio is init's child, so killing it ends the container with a
+    # non-zero status and the restart policy brings it back (see p6/kill-studio.cjs).
+    init: true
+    restart: unless-stopped
+    environment:
+      OBSERVATORY_DAEMON_URL: ${OBSERVATORY_DAEMON_URL:-http://127.0.0.1:7433}
+    volumes:
+      - observatory-data:/data
+    healthcheck:
+      # The app's own health only: the studio AND the observatory provider answering, asked through the
+      # studio's port (the provider's ready verb makes no daemon call). A daemon that is down is a
+      # reading the app shows, not a reason to call the app unhealthy. Docker does not restart an
+      # unhealthy container; this status is for `rig env status` and the app's agent to act on.
+      test: ["CMD", "node", "/studio/apps/providers/studio-observatory/healthcheck.mjs"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  observatory-data:

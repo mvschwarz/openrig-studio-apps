@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Observatory</title>
+  <style>
+    /* Same tokens and table idiom as the other glanceable tables in the studio. */
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e13;
+      --panel: #121722;
+      --line: #252c3a;
+      --text: #f3f5f8;
+      --muted: #929cad;
+      --fresh: #47d18c;
+      --stale: #ffb44a;
+      --unknown: #77808f;
+      --hot: #ff795f;
+      --info: #6d9eff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      background: radial-gradient(circle at 80% 0%, #172032 0, transparent 34%), var(--bg);
+      color: var(--text);
+      font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    main { width: min(1200px, 100%); margin: 0 auto; padding: 28px 16px; }
+    header { margin-bottom: 20px; }
+    .eyebrow { color: var(--fresh); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 4px 0 6px; font: 600 clamp(28px, 5vw, 46px)/1.05 system-ui, sans-serif; letter-spacing: -.04em; }
+    .lede { color: var(--muted); font-size: 12px; max-width: 80ch; }
+    section { margin-top: 24px; }
+    h2 { margin: 0 0 6px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+    .scope { color: var(--muted); font-size: 11px; margin: 0 0 8px; }
+    .table-wrap, .notice { border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); border-radius: 8px; }
+    .table-wrap { overflow-x: auto; margin-bottom: 10px; }
+    .notice { padding: 12px 14px; font-size: 12px; color: #cbd1db; margin-bottom: 10px; }
+    table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; }
+    th { padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--muted); background: rgba(255,255,255,.018); font-size: 9px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+    td { padding: 9px 12px; border-bottom: 1px solid var(--line); color: #cbd1db; font-size: 11px; vertical-align: top; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .name { color: var(--text); font-weight: 650; white-space: nowrap; }
+    .sub { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+    .muted { color: var(--muted); }
+    .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .status { white-space: nowrap; font-weight: 650; }
+    .status.ok { color: var(--fresh); }
+    .status.bad { color: var(--hot); }
+    .status.unknown, .unknown { color: var(--unknown); }
+    .stale { color: var(--stale); }
+    .placeholder { color: var(--muted); font-size: 12px; }
+    footer { margin-top: 28px; color: var(--muted); font-size: 11px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">Observatory</div>
+      <h1>Your machines</h1>
+      <div class="lede" id="lede">Reading…</div>
+    </header>
+    <div id="seat-detail"></div>
+    <div id="content"></div>
+    <footer id="foot"></footer>
+  </main>
+
+  <script type="module">
+    // Everything that turns a reading into words lives in these exported functions, so it can
+    // be checked without a browser. The boot at the bottom runs only in a page.
+    //
+    // The rules the whole page follows:
+    //  - A machine or reading that couldn't be read says so, and why. It never shows as
+    //    empty, zero or healthy.
+    //  - The age of a reading is how long ago the SOURCE measured it, not when this page asked.
+    //    Where the source reports no time, the page says "time not reported".
+    //  - A queue list is a filtered, bounded slice of one machine's queue, never a total.
+    //  - Activity is activity. It is not a measure of productivity.
+
+    export const esc = (v) => String(v ?? '').replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]);
+    const unknown = (label = 'unknown') => `<span class="unknown">${esc(label)}</span>`;
+
+    const STATUS_WORDS = {
+      ok: 'read',
+      partial: 'partly read',
+      unreachable: 'unreachable',
+      guarded: 'needs a token (not read)',
+      'unsupported-transport': 'not readable over HTTP',
+      'http-error': 'error',
+    };
+    export function statusText(status) {
+      const cls = status === 'ok' ? 'ok' : status === 'partial' ? 'unknown' : 'bad';
+      return `<span class="status ${cls}">${esc(STATUS_WORDS[status] ?? status ?? 'unknown')}</span>`;
+    }
+
+    // How old a measurement is, from the source's own time. polledAt is deliberately not a
+    // parameter: a sample fetched a second ago can still be an hour old.
+    export function ageText(observedAt, now) {
+      if (!observedAt) return unknown('time not reported');
+      const t = Date.parse(observedAt);
+      if (Number.isNaN(t)) return unknown('time not reported');
+      const s = Math.round((now - t) / 1000);
+      if (s < 0) return `<span title="${esc(observedAt)}">just now</span>`;
+      const text = s < 90 ? `${s} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
+      return `<span title="${esc(observedAt)}">${text}</span>`;
+    }
+
+    export const hostName = (h) => (h.hostId ? esc(h.hostId) : h.lastSeenAs ? `${unknown('identity not reported')} <span class="muted">(last seen as ${esc(h.lastSeenAs.hostId)})</span>` : unknown('identity not reported'));
+    const hostCell = (h) => `<span class="name">${hostName(h)}</span><span class="sub">listed as ${esc((h.labels ?? []).join(', '))}</span>`;
+    const why = (r) => [r?.detail, r?.httpStatus ? `HTTP ${r.httpStatus}` : null].filter(Boolean).map(esc).join(' · ');
+
+    function notRead(h, r, what) {
+      return `<div class="notice"><b>${hostName(h)}</b>: ${esc(what)} not read: ${statusText(r?.status ?? h.status)}${why(r ?? h) ? ` · ${why(r ?? h)}` : ''}. This is a failure to read, not an empty result.</div>`;
+    }
+
+    // How old the provider's read is. A kept read is shown with its age, never as fresh.
+    export function servedText(fleet, now) {
+      const sv = fleet.served;
+      if (!sv) return `asked at ${esc(fleet.polledAt ?? '')}`;
+      const age = Math.max(sv.cacheAgeSeconds ?? 0, Math.round((now - Date.parse(sv.servedAt)) / 1000) + (sv.cacheAgeSeconds ?? 0));
+      return `read by the provider ${ageText(sv.polledAt, now)}${sv.fromCache ? ` (a kept read, ${esc(age)} s old; reads are kept up to ${esc(sv.keptForSeconds)} s)` : ''}`;
+    }
+
+    export function restartText(h) {
+      const r = h.restart;
+      if (!r || r.status === 'first-read' || r.status === 'same') return '';
+      if (r.status === 'restarted') return `<span class="sub stale">daemon restarted since the last read (between ${esc(r.between?.[0] ?? '?')} and ${esc(r.between?.[1] ?? '?')}, by ${esc(r.method)}); history from before it may not continue</span>`;
+      return `<span class="sub unknown">restart not known: ${esc(r.detail ?? '')}</span>`;
+    }
+
+    export function renderHosts(fleet, now = Date.now()) {
+      const rows = (fleet.hosts ?? []).map((h) => `<tr>
+        <td>${hostCell(h)}</td>
+        <td>${statusText(h.status)}${h.status !== 'ok' && why(h) ? `<span class="sub">${why(h)}</span>` : ''}${restartText(h)}</td>
+        <td>${h.healthz?.version ? esc(h.healthz.version) : unknown()}</td>
+        <td>${esc(h.transport ?? '')}<span class="sub">${esc(h.url ?? '')}</span></td>
+        <td>${h.identitySource === 'self-reported' ? 'reported by the machine' : h.identitySource === 'declared' ? 'declared in the host list' : unknown('not reported')}${(h.identityConflicts ?? []).length ? `<span class="sub stale">listed as ${esc(h.identityConflicts.map((c) => c.declared).join(', '))}, reports ${esc(h.hostId)}</span>` : ''}</td>
+      </tr>`).join('');
+      const c = fleet.coverage ?? {};
+      const reg = fleet.registry ?? {};
+      const regNote = reg.status === 'ok' ? `the host list has ${esc(reg.listed)} entr${reg.listed === 1 ? 'y' : 'ies'}` : `the host list could not be read: ${statusText(reg.status)}${why(reg) ? ` · ${why(reg)}` : ''}`;
+      return `<section id="hosts"><h2>Machines</h2>
+        <p class="scope">${esc(c.hostsRead ?? 0)} of ${esc(c.hostsKnown ?? 0)} machines read · ${regNote}${c.complete ? '' : ' · <span class="stale">this view is incomplete</span>'} · ${servedText(fleet, now)}</p>
+        <div class="table-wrap"><table><thead><tr><th>Machine</th><th>Status</th><th>OpenRig</th><th>Reached by</th><th>Identity</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+    }
+
+    const pct = (v) => (v === null || v === undefined ? unknown() : `${esc(v)}%`);
+    const count = (v) => (v === null || v === undefined ? unknown() : esc(v));
+
+    export function renderSeats(fleet, now) {
+      const parts = [];
+      const rows = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.seats;
+        if (!r || r.data === null || r.data === undefined) { parts.push(notRead(h, r, 'seats')); continue; }
+        const cov = r.coverage ?? null;
+        const unreadRigs = esc((cov?.rigsFailed ?? []).map((x) => `${x.rigName ?? x.rigId} (${STATUS_WORDS[x.status] ?? x.status})`).join(', '));
+        if (cov && cov.rigsListed > 0 && cov.rigsRead === 0) {
+          // Rigs were listed but none of their seats could be read: that is not an empty machine.
+          parts.push(`<div class="notice"><b>${hostName(h)}</b>: seats not read. It lists ${esc(cov.rigsListed)} rig${cov.rigsListed === 1 ? '' : 's'}, and none could be read: ${unreadRigs}.</div>`);
+          continue;
+        }
+        if (r.status === 'partial') parts.push(`<div class="notice"><b>${hostName(h)}</b>: seats partly read. Rigs not read: ${unreadRigs}.</div>`);
+        if (!r.data.length) {
+          parts.push(cov && cov.rigsListed > 0
+            ? `<div class="notice"><b>${hostName(h)}</b>: the ${esc(cov.rigsRead)} rig${cov.rigsRead === 1 ? '' : 's'} read ${cov.rigsRead === 1 ? 'has' : 'have'} no seats.</div>`
+            : `<div class="notice"><b>${hostName(h)}</b>: read, and it reports no rigs running.</div>`);
+        }
+        for (const s of r.data) {
+          const a = s.activity ?? {};
+          const ctx = s.context;
+          rows.push(`<tr>
+            <td><a class="name" href="#seat=${encodeURIComponent(s.key)}">${esc(s.rigName ?? '')}/${esc(s.logicalId ?? '')}</a><span class="sub">on ${hostName(h)}</span></td>
+            <td>${a.state && a.state !== 'unknown' ? esc(a.state) : unknown()}${a.reason ? `<span class="sub">${esc(a.reason)}</span>` : ''}</td>
+            <td>${a.method ? esc(a.method) : unknown('method not reported')}</td>
+            <td>${ageText(a.observedAt, now)}${a.stale ? ' <span class="stale">stale (the source says)</span>' : ''}</td>
+            <td>${ctx && ctx.availability === 'known' ? `${pct(ctx.usedPercentage)}${ctx.windowSize ? ` of ${esc(ctx.windowSize)}` : ''}<span class="sub">${ageText(ctx.observedAt, now)}${ctx.fresh ? '' : ' · <span class="stale">not fresh</span>'}</span>` : unknown()}</td>
+            <td class="numeric">${count(s.work?.assigned)} / ${count(s.work?.inProgress)} / ${count(s.work?.blocked)}</td>
+          </tr>`);
+        }
+      }
+      const table = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Seat</th><th>Activity</th><th>Method</th><th>Measured</th><th>Context used</th><th>Work: assigned / in progress / blocked</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>` : '';
+      return `<section id="seats"><h2>Seats</h2><p class="scope">Activity is what each seat was doing when its machine last sampled it. It is not a measure of productivity.</p>${parts.join('')}${table}</section>`;
+    }
+
+    export function renderQueues(fleet, now) {
+      const blocks = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.queues;
+        if (!r || r.data === null || r.data === undefined) { blocks.push(notRead(h, r, 'queue')); continue; }
+        const cov = r.coverage ?? {};
+        const scope = `<p class="scope"><b>${hostName(h)}</b>: filtered and bounded; not a total. States ${esc((cov.filter?.state ?? []).join(', '))}, at most ${esc(cov.limit)} rows, ${esc(cov.returned)} returned.${cov.possiblyTruncated ? ' <span class="stale">The page is full, so more rows may exist.</span>' : ''}</p>`;
+        const rows = r.data.map((q) => `<tr>
+          <td><span class="name">${esc(q.id)}</span>${q.summary ? `<span class="sub">${esc(q.summary)}</span>` : ''}</td>
+          <td>${esc(q.state)}${q.blockedOn ? `<span class="sub">on ${esc(q.blockedOn)}</span>` : ''}</td>
+          <td>${esc(q.priority ?? '')}</td>
+          <td>${esc(q.from ?? '')} → ${esc(q.to ?? '')}</td>
+          <td>${ageText(q.updatedAt, now)}</td>
+          <td>${q.delivery ? esc(q.delivery) : unknown()}</td>
+        </tr>`).join('');
+        blocks.push(scope + (rows ? `<div class="table-wrap"><table><thead><tr><th>Item</th><th>State</th><th>Priority</th><th>From → to</th><th>Updated</th><th>Delivery</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">No rows matched this filter on ${hostName(h)}.</div>`));
+      }
+      return `<section id="queues"><h2>Queues</h2>${blocks.join('')}</section>`;
+    }
+
+    const summaryLine = (label, part, body, now) => `<tr><td class="name">${esc(label)}</td><td>${part.status === 'ok' ? body(part.data) : `${statusText(part.status)}${why(part) ? ` · ${why(part)}` : ''}`}</td><td>${part.status === 'ok' ? ageText(part.observedAt, now) : ''}</td></tr>`;
+    const kv = (o) => Object.entries(o ?? {}).map(([k, v]) => `${esc(k)} ${esc(v)}`).join(', ') || unknown('none reported');
+
+    export function renderHealth(fleet, now) {
+      const blocks = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.health;
+        if (!r || !r.data) { blocks.push(notRead(h, r, 'health')); continue; }
+        const d = r.data;
+        const summary = `<div class="table-wrap"><table><thead><tr><th>${hostName(h)}</th><th>Summary</th><th>Measured</th></tr></thead><tbody>
+          ${summaryLine('Seats', d.nodes, (x) => `${esc(x.total)} seats · ${kv(x.byLifecycle)} · ${esc(x.attentionRequired)} need attention`, now)}
+          ${summaryLine('Context', d.context, (x) => `${esc(x.critical)} critical, ${esc(x.warning)} warning, ${esc(x.stale)} stale of ${esc(x.total)}`, now)}
+          ${summaryLine('Gateway', d.gateway, (x) => esc(x.state), now)}
+        </tbody></table></div>`;
+        const f = d.findings;
+        let findings;
+        if (f.status !== 'ok' || !Array.isArray(f.data)) findings = `<div class="notice">Findings not read: ${statusText(f.status)}${why(f) ? ` · ${why(f)}` : ''}. This is a failure to read, not a clean bill of health.</div>`;
+        else {
+          const cov = f.coverage ?? {};
+          const partialSources = (cov.sources ?? []).filter((s) => s.partial || s.status === 'unavailable');
+          const scope = `<p class="scope">Findings evaluated ${ageText(f.observedAt, now)} · showing ${esc(f.data.length)} of ${count(cov.total)}${cov.truncated ? ' <span class="stale">(truncated)</span>' : ''}${partialSources.length ? ` · <span class="stale">sources not fully evaluated: ${esc(partialSources.map((s) => s.source).join(', '))}</span>` : ''}</p>`;
+          const rows = f.data.map((x) => `<tr><td>${esc(x.severity ?? '')}</td><td class="name">${esc(x.detector ?? '')}</td><td>${esc(x.summary ?? '')}</td><td>${ageText(x.lastObservedAt, now)}</td><td>${esc(x.status ?? '')}</td></tr>`).join('');
+          findings = scope + (rows ? `<div class="table-wrap"><table><thead><tr><th>Severity</th><th>Detector</th><th>Finding</th><th>Last seen</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">No active findings among those evaluated.</div>`);
+        }
+        blocks.push(summary + findings);
+      }
+      return `<section id="health"><h2>Health</h2>${blocks.join('')}</section>`;
+    }
+
+    export function renderMessaging(fleet, now) {
+      const blocks = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.messaging;
+        if (!r || r.data === null || r.data === undefined) { blocks.push(notRead(h, r, 'undelivered messages')); continue; }
+        const cov = r.coverage ?? {};
+        const scope = `<p class="scope"><b>${hostName(h)}</b>: undelivered rows, filtered and bounded; not a total. At most ${esc(cov.limit)} rows, ${esc(cov.returned)} returned.${cov.possiblyTruncated ? ' <span class="stale">The page is full, so more rows may exist.</span>' : ''} Held messages are per seat and not shown here.</p>`;
+        const rows = r.data.map((q) => `<tr>
+          <td><span class="name">${esc(q.id)}</span>${q.summary ? `<span class="sub">${esc(q.summary)}</span>` : ''}</td>
+          <td>${esc(q.from ?? '')} → ${esc(q.to ?? '')}</td>
+          <td>${q.outcome ? esc(q.outcome) : q.lastResult ? esc(q.lastResult) : unknown()}${q.failureClass ? `<span class="sub">${esc(q.failureClass)}</span>` : ''}</td>
+          <td>${ageText(q.lastAttempt, now)}</td>
+          <td>${ageText(q.createdAt, now)}</td>
+        </tr>`).join('');
+        blocks.push(scope + (rows ? `<div class="table-wrap"><table><thead><tr><th>Item</th><th>From → to</th><th>Delivery</th><th>Last attempt</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">${hostName(h)} reports no undelivered rows.</div>`));
+      }
+      return `<section id="messaging"><h2>Messaging</h2>${blocks.join('')}</section>`;
+    }
+
+    const DETECTOR_STATE = {
+      findings: (d) => `${esc(d.findings.length)} finding${d.findings.length === 1 ? '' : 's'}`,
+      'no-active-finding': () => 'no active finding among those evaluated',
+      'no-source': (d) => `<span class="unknown">no source in OpenRig as of ${esc((d.sourceTable?.checkedAgainst ?? []).join(', '))}</span>${d.sourceTable?.matchesDaemon === false ? `<span class="sub stale">not checked against this daemon's version (${esc(String(d.sourceTable.daemonCommit).slice(0, 8))})</span>` : d.sourceTable?.matchesDaemon === null ? '<span class="sub unknown">this daemon does not report its version</span>' : ''}`,
+      disabled: () => '<span class="unknown">turned off on this machine</span>',
+    };
+
+    export function renderCeremony(fleet, now) {
+      const blocks = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.ceremony;
+        if (!r || !r.data) { blocks.push(notRead(h, r, 'ceremony')); continue; }
+        const d = r.data;
+        const pol = d.policy?.status === 'ok' && d.policy.windowSeconds ? ` · window ${esc(Math.round(d.policy.windowSeconds / 3600))} h` : d.policy?.status !== 'ok' ? ` · policy not read: ${statusText(d.policy?.status)}` : '';
+        const scope = `<p class="scope"><b>${hostName(h)}</b>: as OpenRig's own detectors see it, evaluated ${ageText(r.observedAt, now)}${pol}${r.coverage?.truncated ? ' · <span class="stale">findings list truncated</span>' : ''}.</p>`;
+        const rows = d.detectors.map((x) => {
+          const cov = (x.sourceCoverage ?? []).map((c) => c.status === 'unavailable' ? `${esc(c.source)} unavailable` : `${esc(c.source)}: ${esc(c.evaluated)} of ${esc(c.total)} evaluated${c.partial ? ' (partial)' : ''}`).join('; ');
+          const f = x.findings.map((g) => `<span class="sub">${esc(g.severity ?? '')} · ${esc(g.summary ?? '')} · ${esc(g.threshold ?? '')} · last seen ${ageText(g.lastObservedAt, now)}${g.stage ? ` · ${esc(g.stage)}` : ''}</span>`).join('');
+          return `<tr><td class="name">${esc(x.detector)}</td><td>${(DETECTOR_STATE[x.state] ?? (() => esc(x.state)))(x)}${f}</td><td>${esc(x.method)}${cov ? `<span class="sub">${cov}</span>` : ''}</td></tr>`;
+        }).join('');
+        blocks.push(scope + `<div class="table-wrap"><table><thead><tr><th>Detector</th><th>Reading</th><th>Method and coverage</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+      }
+      return `<section id="ceremony"><h2>Ceremony</h2><p class="scope">Ceremony against what ships, from OpenRig's detectors. The oversight team's weekly readings: <span class="unknown">not connected</span>.</p>${blocks.join('')}</section>`;
+    }
+
+    const windowText = (w, now) => `${esc(w.window ?? '')}: ${pct(w.usedPercent)} used${w.resetsAt ? `, resets ${esc(w.resetsAt)}` : ''} · measured ${ageText(w.observedAt, now)}${w.freshness && w.freshness !== 'fresh' ? ` <span class="stale">${esc(w.freshness)}</span>` : ''}`;
+
+    export function renderSubscriptions(fleet, now) {
+      const s = fleet.subscriptions;
+      const parts = [];
+      if (!s) parts.push(`<div class="notice">Subscription usage was not read.</div>`);
+      else if (s.status === 'not-set-up') parts.push(`<div class="notice">Usage across machines: <span class="unknown">not set up</span>. Usage windows are off on the configured machine (provider.usage_windows), so there is no reading, not a zero.</div>`);
+      else if (s.status === 'absent') parts.push(`<div class="notice">Usage across machines: <span class="unknown">not available</span>. ${esc(s.detail)}, so there is no reading, not a zero.</div>`);
+      else if (s.status !== 'ok' || !s.data) parts.push(`<div class="notice">Usage across machines not read: ${statusText(s.status)}${why(s) ? ` · ${why(s)}` : ''}. This is a failure to read, not a zero.</div>`);
+      else {
+        const hostCov = (s.coverage?.hosts ?? []).map((c) => `${esc(c.host)}: ${esc(c.usage ?? c.status)}`).join(' · ');
+        parts.push(`<p class="scope">Composed ${ageText(s.observedAt, now)} by the configured machine${hostCov ? ` · ${hostCov}` : ''}. Each machine's reading is shown separately; allowances are never added up across machines.</p>`);
+        const rows = s.data.allowances.flatMap((g) => g.observations.map((o, i) => `<tr>
+          <td>${i === 0 ? `<span class="name">${esc(g.provider ?? '')}</span><span class="sub">${esc(g.linkage)} across machines${g.notes.length ? ` · ${esc(g.notes.join('; '))}` : ''}</span>` : ''}</td>
+          <td>${esc(o.host)}${o.plan ? `<span class="sub">${esc(o.plan)}</span>` : ''}</td>
+          <td>${o.windows.length ? o.windows.map((w) => windowText(w, now)).join('<br>') : unknown()}</td>
+          <td>${ageText(o.readAt, now)}</td>
+        </tr>`)).join('');
+        parts.push(rows ? `<div class="table-wrap"><table><thead><tr><th>Allowance</th><th>Read on</th><th>Windows</th><th>Read</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">No allowance readings were returned.</div>`);
+      }
+      // Configured and observed stay in separate columns. Neither is "the current account".
+      const observedBySeat = new Map((s?.data?.seatAccounts ?? []).map((x) => [`${x.host}/${x.seat}`, x]));
+      const seatRows = [];
+      for (const h of fleet.hosts ?? []) {
+        const r = h.reads?.bindings;
+        if (!r || r.data === null || r.data === undefined) { if (r) parts.push(notRead(h, r, 'configured subscription links')); continue; }
+        for (const b of r.data) {
+          const o = observedBySeat.get(`${h.key}/${b.seat}`);
+          const observed = s?.status !== 'ok' ? unknown(s?.status === 'not-set-up' ? 'not set up' : s?.status === 'absent' ? 'not available on this version' : 'not read') : o?.observed?.withheld ? `not attributed${o.observed.note ? `<span class="sub">${esc(o.observed.note)}</span>` : ''}` : o?.observed?.windowsSampled === false ? unknown('no usage windows sampled') : o?.observed ? `${o.observed.differsFrom?.length ? `<span class="stale">windows differ from ${esc(o.observed.differsFrom.join(', '))}</span> · ` : ''}sampled ${ageText(o.observed.lastSampledAt, now)}${o.observed.note ? `<span class="sub">${esc(o.observed.note)}</span>` : ''}` : unknown('no observation');
+          seatRows.push(`<tr><td><span class="name">${esc(b.seat ?? '')}</span><span class="sub">on ${hostName(h)}</span></td><td>configured: ${b.account ? `${esc(b.account.label ?? b.account.id)}${b.account.authState ? `<span class="sub">${esc(b.account.authState)}</span>` : ''}` : unknown('no account linked')}</td><td>observed: ${observed}</td><td>${esc(s?.moves?.status === 'no-record' ? 'no record' : '')}</td></tr>`);
+        }
+      }
+      if (seatRows.length) parts.push(`<div class="table-wrap"><table><thead><tr><th>Seat</th><th>Configured link</th><th>Observed</th><th>Last move</th></tr></thead><tbody>${seatRows.join('')}</tbody></table></div>`);
+      return `<section id="subscriptions"><h2>Subscriptions</h2><p class="scope">Configured links and observed use are shown side by side and never merged. Moves between accounts are not recorded yet. Nothing here is in money.</p>${parts.join('')}</section>`;
+    }
+
+    // ---- one seat --------------------------------------------------------------------------------
+    //
+    // A context trend is drawn from the daemon's own samples at their own times. A missing value is
+    // a hole, never a zero. The line is broken, never bridged, across a daemon restart, a new
+    // generation of the seat, or a silence much longer than the usual spacing (more than twice the
+    // median gap), and each break says why.
+
+    const pointTime = (p) => Date.parse(p.sampledAt ?? p.capturedAt ?? '');
+
+    export function trendSegments(points, breaks = []) {
+      const pts = (points ?? []).filter((p) => !Number.isNaN(pointTime(p))).sort((a, b) => pointTime(a) - pointTime(b));
+      const gaps = pts.slice(1).map((p, i) => pointTime(p) - pointTime(pts[i])).filter((g) => g > 0).sort((a, b) => a - b);
+      const median = gaps.length ? gaps[Math.floor(gaps.length / 2)] : null;
+      const segments = [];
+      const reasons = [];
+      let cur = [];
+      pts.forEach((p, i) => {
+        if (i > 0) {
+          const a = pointTime(pts[i - 1]), b = pointTime(p);
+          const hit = breaks.find((k) => k.at > a && k.at <= b);
+          const silence = median !== null && b - a > 2 * median;
+          if (hit || silence) {
+            if (cur.length) segments.push(cur);
+            cur = [];
+            reasons.push({ from: pts[i - 1].sampledAt ?? pts[i - 1].capturedAt, to: p.sampledAt ?? p.capturedAt, why: hit ? hit.why : 'no samples for longer than twice the usual spacing' });
+          }
+        }
+        if (p.usedPercentage === null || p.usedPercentage === undefined) {
+          if (cur.length) segments.push(cur);
+          cur = [];
+          reasons.push({ from: p.sampledAt ?? p.capturedAt, to: p.sampledAt ?? p.capturedAt, why: 'the sample has no value' });
+        } else cur.push(p);
+      });
+      if (cur.length) segments.push(cur);
+      return { segments, breaks: reasons, points: pts };
+    }
+
+    export function trendBreaks(seat) {
+      const out = [];
+      const r = seat.host?.restart;
+      if (r?.status === 'restarted' && r.between?.[1]) out.push({ at: Date.parse(r.between[1]), why: `the daemon restarted (between ${r.between[0]} and ${r.between[1]})` });
+      for (const g of seat.generations?.rows ?? []) if (g.startedAt) out.push({ at: Date.parse(g.startedAt), why: `a new generation of the seat began (${g.kind ?? 'unknown kind'})` });
+      return out;
+    }
+
+    function trendSvg({ segments, points }) {
+      if (!points.length) return '';
+      const t0 = pointTime(points[0]), t1 = pointTime(points[points.length - 1]);
+      const span = Math.max(1, t1 - t0);
+      const xy = (p) => `${(10 + 380 * (pointTime(p) - t0) / span).toFixed(1)},${(90 - 0.8 * p.usedPercentage).toFixed(1)}`;
+      const lines = segments.map((seg) => seg.length === 1 ? `<circle cx="${xy(seg[0]).split(',')[0]}" cy="${xy(seg[0]).split(',')[1]}" r="2" fill="currentColor"/>` : `<polyline fill="none" stroke="currentColor" stroke-width="1.5" points="${seg.map(xy).join(' ')}"/>`).join('');
+      return `<svg viewBox="0 0 400 100" width="400" height="100" role="img" aria-label="context used over time">${lines}</svg>`;
+    }
+
+    // Generation pages, newest first. Older pages come from the route's own cursor; a row already shown
+    // is not shown twice, and a page that comes back unverified (a cursor from before a daemon restart)
+    // stops the history there rather than being added to it.
+    export function mergeGenerationPages(first, older = []) {
+      if (!first || first.status !== 'ok') return { status: first?.status ?? 'unknown', rows: null, hasMore: false, nextCursor: null, unverified: first?.status === 'history-unverified', pages: 0 };
+      const seen = new Set();
+      const rows = [];
+      const add = (list) => { for (const r of list ?? []) { const k = String(r.ordinal); if (!seen.has(k)) { seen.add(k); rows.push(r); } } };
+      add(first.rows);
+      let last = first, unverified = false, pages = 1;
+      for (const page of older) {
+        if (page?.status === 'history-unverified') { unverified = true; break; }
+        if (page?.status !== 'ok') break;
+        add(page.rows);
+        last = page; pages++;
+      }
+      rows.sort((a, b) => Number(b.ordinal) - Number(a.ordinal));
+      return { status: 'ok', rows, hasMore: !unverified && last.coverage?.hasMore === true && !!last.coverage?.nextCursor, nextCursor: unverified ? null : last.coverage?.nextCursor ?? null, unverified, pages, coverage: first.coverage };
+    }
+
+    export function renderSeat(seat, now, olderPages = []) {
+      if (!seat) return '';
+      if (seat.status !== 'ok') return `<section id="seat"><h2>Seat</h2><div class="notice">${esc(seat.error ?? seat.status)}</div></section>`;
+      const c = seat.current ?? {};
+      const a = c.activity ?? {};
+      const parts = [];
+      parts.push(`<p class="scope"><b>${esc(c.rigName ?? '')}/${esc(c.logicalId ?? '')}</b> on ${esc(seat.host?.hostId ?? seat.host?.key ?? '')} · ${esc(c.session ?? '')} · activity ${a.state && a.state !== 'unknown' ? esc(a.state) : unknown()} by ${a.method ? esc(a.method) : unknown('method not reported')}, measured ${ageText(a.observedAt, now)}${seat.fleetServed ? ` · the fleet read is ${esc(seat.fleetServed.cacheAgeSeconds ?? 0)} s old` : ''}</p>`);
+      const t = seat.trend ?? {};
+      if (t.status === 'absent') parts.push(`<div class="notice">Context trend: <span class="unknown">not available</span>. ${esc(t.detail)}.</div>`);
+      else if (t.status !== 'ok') parts.push(`<div class="notice">Context trend not read: ${statusText(t.status)}${why(t) ? ` · ${why(t)}` : ''}. This is a failure to read, not a flat line.</div>`);
+      else {
+        const shaped = trendSegments(t.points, trendBreaks(seat));
+        const cov = t.coverage ?? {};
+        parts.push(`<p class="scope">Context used over the last ${esc(t.window?.hours)} h (bounded by ${esc(t.window?.boundOn)}): ${esc(cov.returned)} samples, at most ${esc(cov.limit)}${cov.possiblyTruncated ? ` · <span class="stale">${esc(cov.note)}</span>` : ''}. Each point is drawn at its own sample time; nothing is filled in.</p>`);
+        parts.push(shaped.points.length ? trendSvg(shaped) : `<div class="notice">No context samples in this window.</div>`);
+        if (shaped.breaks.length) parts.push(`<p class="scope">The line is broken ${esc(shaped.breaks.length)} time${shaped.breaks.length === 1 ? '' : 's'}: ${shaped.breaks.map((b) => `${esc(b.why)} (${esc(b.from)} → ${esc(b.to)})`).join('; ')}.</p>`);
+        const rows = shaped.points.slice(-12).reverse().map((p) => `<tr><td>${ageText(p.sampledAt, now)}<span class="sub">recorded ${ageText(p.capturedAt, now)}</span></td><td class="numeric">${pct(p.usedPercentage)}</td><td>${p.source ? esc(p.source) : unknown()}</td></tr>`).join('');
+        if (rows) parts.push(`<div class="table-wrap"><table><thead><tr><th>Sampled</th><th>Context used</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+      }
+      const g = seat.generations ?? {};
+      const merged = mergeGenerationPages(g, olderPages);
+      if (g.status === 'history-unverified') parts.push(`<div class="notice">Generation history: <span class="stale">history unverified across a daemon restart</span>. ${esc(g.coverage?.note ?? '')}. Nothing from before the restart is shown as the whole history.</div>`);
+      else if (g.status !== 'ok') parts.push(`<div class="notice">Generation history not read: ${statusText(g.status)}${why(g) ? ` · ${why(g)}` : ''}.</div>`);
+      else {
+        const rows = (merged.rows ?? []).map((x) => `<tr><td class="numeric">${esc(x.ordinal)}</td><td>${esc(x.kind ?? '')}</td><td>${ageText(x.startedAt, now)}</td><td>${esc(String(x.generation ?? '').slice(0, 8))}</td></tr>`).join('');
+        const pagesNote = merged.pages > 1 ? ` · ${esc(merged.pages)} pages read` : '';
+        const more = merged.hasMore ? ' · older generations exist' : '';
+        parts.push(`<p class="scope">Generations, newest first, from the daemon's bounded telemetry (at most 20 per page): coverage ${esc(g.coverage?.status)}, completeness ${esc(g.coverage?.historyCompleteness)}${g.coverage?.gapCount ? ` · gaps: ${esc(g.coverage.gaps.join(', '))}` : ''}${pagesNote}${more}.</p>` + (rows ? `<div class="table-wrap"><table><thead><tr><th>#</th><th>Kind</th><th>Started</th><th>Generation</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="notice">No generations reported.</div>`));
+        if (merged.unverified) parts.push(`<div class="notice">Older generations: <span class="stale">history unverified across a daemon restart</span>. The daemon restarted since the first page was read, so nothing older is added.</div>`);
+        if (merged.hasMore) parts.push(`<p><button type="button" data-older-cursor="${esc(merged.nextCursor)}">Load older generations</button></p>`);
+      }
+      const q = seat.queue ?? {};
+      if (!Array.isArray(q.rows)) parts.push(`<div class="notice">This seat's queue rows: not read (${statusText(q.status)}).</div>`);
+      else parts.push(`<p class="scope">${esc(q.note)}: ${esc(q.rows.length)} row${q.rows.length === 1 ? '' : 's'}.</p>` + (q.rows.length ? `<div class="table-wrap"><table><thead><tr><th>Item</th><th>State</th><th>From → to</th><th>Updated</th></tr></thead><tbody>${q.rows.map((r) => `<tr><td class="name">${esc(r.id)}</td><td>${esc(r.state)}</td><td>${esc(r.from ?? '')} → ${esc(r.to ?? '')}</td><td>${ageText(r.updatedAt, now)}</td></tr>`).join('')}</tbody></table></div>` : ''));
+      parts.push(`<p class="placeholder">Not connected here: ${esc((seat.notConnected ?? []).join(', '))}.</p>`);
+      return `<section id="seat"><h2>Seat</h2>${parts.join('')}</section>`;
+    }
+
+    export function renderLater() {
+      return `<section id="later"><h2>Not set up yet</h2><p class="placeholder">Productivity has no agreed definition yet, so only activity is shown. The oversight team's readings and subscription moves are not connected. Nothing here estimates them.</p></section>`;
+    }
+
+    // One seat's detail at a time. Each response is bound to the seat it was asked for: an answer (or an error) that
+    // arrives after the person moved to another seat, or closed the detail, is dropped, so it never shows under the
+    // wrong seat.
+    export function makeSeatLoader({ fetchJson, show, now = () => Date.now() }) {
+      let view = null; // { key, seat, older: [] }
+      let asked = 0;
+      return {
+        async open(key) {
+          const ticket = ++asked;
+          view = null;
+          if (!key) { show(''); return; }
+          try {
+            const seat = await fetchJson(`/api/observatory/seat?key=${encodeURIComponent(key)}`);
+            if (ticket !== asked) return;
+            view = { key, seat, older: [] };
+            show(renderSeat(seat, now(), view.older));
+          } catch (e) {
+            if (ticket === asked) show(`<div class="notice"><b>Could not read this seat:</b> ${esc(e.message)}.</div>`);
+          }
+        },
+        async older(cursor) {
+          const v = view;
+          if (!v) return;
+          let page;
+          try { page = (await fetchJson(`/api/observatory/seat?key=${encodeURIComponent(v.key)}&cursor=${encodeURIComponent(cursor)}`)).generations; }
+          catch (e) { page = { status: 'unreachable', detail: e.message }; }
+          if (view !== v) return;
+          v.older.push(page);
+          show(renderSeat(v.seat, now(), v.older));
+        },
+      };
+    }
+
+    export function renderPage({ hosts, seats, queues, health, messaging, ceremony, subscriptions }, now) {
+      return [hosts ? renderHosts(hosts, now) : '', seats ? renderSeats(seats, now) : '', queues ? renderQueues(queues, now) : '', messaging ? renderMessaging(messaging, now) : '', health ? renderHealth(health, now) : '', ceremony ? renderCeremony(ceremony, now) : '', subscriptions ? renderSubscriptions(subscriptions, now) : '', renderLater()].join('');
+    }
+
+    if (typeof document !== 'undefined') {
+      const content = document.querySelector('#content');
+      const lede = document.querySelector('#lede');
+      const foot = document.querySelector('#foot');
+      const verbs = { hosts: '/api/observatory/hosts', seats: '/api/observatory/seats', queues: '/api/observatory/queues', health: '/api/observatory/health', messaging: '/api/observatory/messaging', ceremony: '/api/observatory/ceremony', subscriptions: '/api/observatory/subscriptions' };
+      const seats = makeSeatLoader({ fetchJson: async (url) => (await fetch(url)).json(), show: (html) => { document.querySelector('#seat-detail').innerHTML = html; } });
+      function loadSeat() {
+        const m = location.hash.match(/^#seat=(.+)$/);
+        seats.open(m ? decodeURIComponent(m[1]) : null);
+      }
+      document.addEventListener('click', (ev) => {
+        const btn = ev.target.closest?.('[data-older-cursor]');
+        if (!btn) return;
+        btn.disabled = true;
+        seats.older(btn.dataset.olderCursor);
+      });
+      window.addEventListener('hashchange', loadSeat);
+      loadSeat();
+      async function load() {
+        const got = {};
+        const failed = [];
+        await Promise.all(Object.entries(verbs).map(async ([k, path]) => {
+          try {
+            const r = await fetch(path);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            got[k] = await r.json();
+          } catch (e) { failed.push(`${k}: ${e.message}`); }
+        }));
+        lede.textContent = 'Each machine as its own OpenRig daemon reports it. Ages are from when the machine measured, not when this page asked.';
+        content.innerHTML = (failed.length ? `<div class="notice"><b>Could not read:</b> ${esc(failed.join('; '))}. This is a failure, not an empty fleet.</div>` : '') + renderPage(got, Date.now());
+        foot.textContent = `Page refreshed ${new Date().toISOString()}. Read only: nothing on any machine is changed from here.`;
+      }
+      load();
+      setInterval(load, 30000);
+    }
+  </script>
+</body>
+</html>
