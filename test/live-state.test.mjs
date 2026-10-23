@@ -158,3 +158,42 @@ test("bounded: at most 10 done rows shown from the newest 100 looked at; a queue
     : args.includes("done") ? { ok: false, reason: "rig-error", detail: "rig queue timed out" } : { ok: true, value: [] }) });
   assert.deepEqual(down.done, { rows: [], coverage: { looked: 0, shown: 0, unreadable: "rig queue timed out" } });
 });
+
+// Review fixes on the first candidate. Each fails on it.
+test("open work is this rig's and active only: another rig's pending item and a canceled one of ours never show", async () => {
+  const OPEN = [
+    { qitemId: "qitem-own-pending", state: "pending", summary: "ours", sourceSession: "lab-qa@lab", destinationSession: "lab-impl@lab", tsUpdated: "2026-10-23T07:10:00Z" },
+    { qitemId: "qitem-foreign-pending", state: "pending", summary: "theirs", sourceSession: "x@other", destinationSession: "y@other", tsUpdated: "2026-10-23T07:09:00Z" },
+    { qitemId: "qitem-own-canceled", state: "canceled", summary: "gone", sourceSession: "lab-qa@lab", destinationSession: "lab-impl@lab", tsUpdated: "2026-10-23T07:08:00Z" },
+  ];
+  const calls = [];
+  const s = await buildLiveState({ resultCache: new Map(), runRig: async (a) => { calls.push(a.join(" "));
+    if (a[0] === "ps") return { ok: true, value: SEATS }; if (a[0] === "whoami") return { ok: true, value: { identity: { rigName: "lab" } } };
+    if (a[1] === "list") return { ok: true, value: a.includes("done") ? [] : OPEN }; return { ok: true, value: [] }; } });
+  assert.deepEqual(s.queue.map((q) => q.id), ["qitem-own-pending"]);
+  assert.ok(calls.includes("queue list -a --state pending,in-progress,blocked --full --json"), "open work is asked for by state");
+});
+
+test("a note is taken only from the same version of the row: a later close, a reopen, or an unrelated answer reads as unreadable and isn't cached", async () => {
+  const row = DONE[0];
+  for (const [why, shown] of [["closed again later", { ...row, tsUpdated: "2026-10-23T07:45:00.000Z", closingTransition: { transitionNote: "a LATER answer" } }],
+    ["reopened", { ...row, state: "pending", tsUpdated: row.tsUpdated, closingTransition: { transitionNote: "old answer" } }],
+    ["another row", { qitemId: "qitem-something-else", state: "done", tsUpdated: row.tsUpdated, closingTransition: { transitionNote: "x" } }],
+    ["not an object", "garbage"]]) {
+    const cache = new Map();
+    const s = await buildLiveState({ resultCache: cache, runRig: async (a) => {
+      if (a[0] === "ps") return { ok: true, value: SEATS }; if (a[0] === "whoami") return { ok: true, value: { identity: { rigName: "lab" } } };
+      if (a[1] === "list") return { ok: true, value: a.includes("done") ? [row] : [] }; if (a[1] === "show") return { ok: true, value: shown }; return { ok: true, value: [] }; } });
+    assert.equal(s.done.rows[0].resultRead, false, why); assert.equal(s.done.rows[0].result, null, why); assert.equal(cache.size, 0, `${why}: not cached`);
+    assert.equal(s.done.rows[0].closedAt, row.tsUpdated, "the row's own decision and time are kept");
+  }
+});
+
+test("a done-list answer that isn't a list is unreadable, not 'no finished work'", async () => {
+  for (const value of [{}, { items: [] }, null, "x"]) {
+    const s = await buildLiveState({ resultCache: new Map(), runRig: async (a) => {
+      if (a[0] === "ps") return { ok: true, value: SEATS }; if (a[0] === "whoami") return { ok: true, value: { identity: { rigName: "lab" } } };
+      if (a[1] === "list") return { ok: true, value: a.includes("done") ? value : [] }; return { ok: true, value: [] }; } });
+    assert.deepEqual(s.done, { rows: [], coverage: { looked: 0, shown: 0, unreadable: "the queue's answer wasn't a list" } }, JSON.stringify(value));
+  }
+});

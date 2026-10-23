@@ -144,10 +144,15 @@ export async function buildLiveState(options = {}) {
     };
   });
 
-  const qResult = await runRig(["queue", "list", "-a", "--full", "--json"]);
+  // OPEN WORK, ONE RIG'S. Like the seats above, the queue is this floor's: an item with one of its seats at either end. It was the
+  // whole box's, which a floor that finds work by id can't stand behind ("this rig's open work" that isn't). And open means the
+  // CLI's active states (pending, in-progress, blocked): asked for, not every state but "done", which counted canceled, failed and
+  // handed-off items as queued.
+  const ourSeats = new Set(seats.map((s) => s.seat));
+  const qResult = await runRig(["queue", "list", "-a", "--state", ACTIVE.join(","), "--full", "--json"]);
   const qRaw = qResult.ok ? qResult.value : [];
   const queue = (Array.isArray(qRaw) ? qRaw : [])
-    .filter((q) => q.state !== "done")
+    .filter((q) => q && ACTIVE.includes(q.state) && (ourSeats.has(q.destinationSession) || ourSeats.has(q.sourceSession)))
     .slice(0, 20)
     .map((q) => ({
       id: q.qitemId,
@@ -161,7 +166,7 @@ export async function buildLiveState(options = {}) {
       title: q.summary ? String(q.summary).split(/(?<=\.)\s/)[0].slice(0, 120) : q.qitemId,
     }));
 
-  const done = await recentDone(runRig, new Set(seats.map((s) => s.seat)), options.resultCache || RESULTS);
+  const done = await recentDone(runRig, ourSeats, options.resultCache || RESULTS);
 
   // `reason` carries the ambiguity when there was one, so a floor showing a
   // union says WHY rather than presenting it as this studio's rig. Attached is
@@ -177,21 +182,29 @@ export async function buildLiveState(options = {}) {
 // how it ended. Only this rig's rows (a seat of the floor at either end), the newest DONE_SHOWN of the newest DONE_LOOKED done
 // rows on the box, each said as such in `done.coverage`. The note isn't in `queue list`, only in `queue show --full` on a closed
 // row, so it is read once per row and cached by id AND tsUpdated: a row that changes again (a reopen, a later close) is read again.
-// Nothing here is invented: a field the row doesn't carry is null, and a note that couldn't be read says so.
+// The note is taken only from the SAME version of the row the list showed (same id, still done, same tsUpdated): a row that moved
+// between the two reads would pair a later answer with an earlier decision, so that reads as "couldn't be read" and is tried again
+// on the next tick, never cached. Nothing here is invented: a field the row doesn't carry is null, and an answer that isn't the
+// expected shape is unreadable, never "none" or "not recorded".
+const ACTIVE = ["pending", "in-progress", "blocked"];
 const DONE_LOOKED = 100, DONE_SHOWN = 10;
 const RESULTS = new Map();
 async function recentDone(runRig, ourSeats, cache) {
   const r = await runRig(["queue", "list", "-a", "--state", "done", "--full", "--json", "--limit", String(DONE_LOOKED)]);
-  if (!r.ok) return { rows: [], coverage: { looked: 0, shown: 0, unreadable: r.detail || "the queue couldn't be read" } };
-  const all = Array.isArray(r.value) ? r.value : [];
-  const ours = all.filter((q) => q.state === "done" && (ourSeats.has(q.destinationSession) || ourSeats.has(q.sourceSession)));
+  const unreadable = (why) => ({ rows: [], coverage: { looked: 0, shown: 0, unreadable: why } });
+  if (!r.ok) return unreadable(r.detail || "the queue couldn't be read");
+  if (!Array.isArray(r.value)) return unreadable("the queue's answer wasn't a list");
+  const all = r.value;
+  const ours = all.filter((q) => q && q.state === "done" && typeof q.qitemId === "string" && (ourSeats.has(q.destinationSession) || ourSeats.has(q.sourceSession)));
   const rows = [];
   for (const q of ours.slice(0, DONE_SHOWN)) {
     const key = `${q.qitemId}@${q.tsUpdated}`;
     let note = cache.get(key);
     if (note === undefined) {
       const s = await runRig(["queue", "show", q.qitemId, "--full", "--json"]);
-      note = !s.ok ? { read: false } : { read: true, text: s.value?.closingTransition?.transitionNote ?? null };
+      const v = s.ok ? s.value : null;
+      const same = !!v && typeof v === "object" && v.qitemId === q.qitemId && v.state === "done" && v.tsUpdated === q.tsUpdated;
+      note = same ? { read: true, text: typeof v.closingTransition?.transitionNote === "string" ? v.closingTransition.transitionNote : null } : { read: false };
       if (note.read) { for (const k of cache.keys()) if (k.startsWith(`${q.qitemId}@`)) cache.delete(k); cache.set(key, note); }
     }
     rows.push({
