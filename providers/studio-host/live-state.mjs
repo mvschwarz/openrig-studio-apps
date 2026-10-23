@@ -161,12 +161,53 @@ export async function buildLiveState(options = {}) {
       title: q.summary ? String(q.summary).split(/(?<=\.)\s/)[0].slice(0, 120) : q.qitemId,
     }));
 
+  const done = await recentDone(runRig, new Set(seats.map((s) => s.seat)), options.resultCache || RESULTS);
+
   // `reason` carries the ambiguity when there was one, so a floor showing a
   // union says WHY rather than presenting it as this studio's rig. Attached is
   // still true — there are real seats on screen; what is uncertain is which of
   // them are ours.
   return { rig: rig || "rig", attached: true, reason: ambiguity ? "ambiguous-rig" : null,
-    seats, queue, ...(ambiguity ? { detail: ambiguity } : {}) };
+    seats, queue, done, ...(ambiguity ? { detail: ambiguity } : {}) };
+}
+
+// WORK THAT FINISHED stays findable. Work handed to a seat from outside (a chat assistant through the MCP queue tools, say) is
+// answered by closing its row: the decision in closureReason/closureTarget, the answer in the CLOSING TRANSITION's note, the
+// artifact in evidenceRef. The open list above drops done rows, so without this a person could watch work arrive and never see
+// how it ended. Only this rig's rows (a seat of the floor at either end), the newest DONE_SHOWN of the newest DONE_LOOKED done
+// rows on the box, each said as such in `done.coverage`. The note isn't in `queue list`, only in `queue show --full` on a closed
+// row, so it is read once per row and cached by id AND tsUpdated: a row that changes again (a reopen, a later close) is read again.
+// Nothing here is invented: a field the row doesn't carry is null, and a note that couldn't be read says so.
+const DONE_LOOKED = 100, DONE_SHOWN = 10;
+const RESULTS = new Map();
+async function recentDone(runRig, ourSeats, cache) {
+  const r = await runRig(["queue", "list", "-a", "--state", "done", "--full", "--json", "--limit", String(DONE_LOOKED)]);
+  if (!r.ok) return { rows: [], coverage: { looked: 0, shown: 0, unreadable: r.detail || "the queue couldn't be read" } };
+  const all = Array.isArray(r.value) ? r.value : [];
+  const ours = all.filter((q) => q.state === "done" && (ourSeats.has(q.destinationSession) || ourSeats.has(q.sourceSession)));
+  const rows = [];
+  for (const q of ours.slice(0, DONE_SHOWN)) {
+    const key = `${q.qitemId}@${q.tsUpdated}`;
+    let note = cache.get(key);
+    if (note === undefined) {
+      const s = await runRig(["queue", "show", q.qitemId, "--full", "--json"]);
+      note = !s.ok ? { read: false } : { read: true, text: s.value?.closingTransition?.transitionNote ?? null };
+      if (note.read) { for (const k of cache.keys()) if (k.startsWith(`${q.qitemId}@`)) cache.delete(k); cache.set(key, note); }
+    }
+    rows.push({
+      id: q.qitemId, state: q.state,
+      title: q.summary ? String(q.summary).split(/(?<=\.)\s/)[0].slice(0, 120) : q.qitemId,
+      source: q.sourceSession, destination: q.destinationSession, closedAt: q.tsUpdated,
+      decision: { reason: q.closureReason ?? null, target: q.closureTarget ?? null },
+      result: note.read ? note.text : null, resultRead: note.read,
+      resolution: q.resolution ?? null, artifact: q.evidenceRef ?? null,
+      handedOffTo: q.handedOffTo ?? null, handedOffFrom: q.handedOffFrom ?? null,
+    });
+  }
+  // Keep the cache to the rows on screen, so it never grows past DONE_SHOWN.
+  const keep = new Set(rows.filter((x) => x.resultRead).map((x) => `${x.id}@${x.closedAt}`));
+  for (const k of cache.keys()) if (!keep.has(k)) cache.delete(k);
+  return { rows, coverage: { looked: all.length, ours: ours.length, shown: rows.length, limit: DONE_LOOKED } };
 }
 
 // Safe by construction rather than by validation: the directory comes from the
