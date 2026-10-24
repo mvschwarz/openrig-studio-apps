@@ -87,6 +87,27 @@ test("a seat's configured link and its observed use stay in separate columns", a
   assert.doesNotMatch(out, /current account|currently using/i);
 });
 
+const seatObserved = async (observed) => {
+  const page = await loadPage();
+  const a = await daemon({
+    selfHostId: "box-a",
+    usageHosts: usage([obs("local", 10)], { seatAccounts: [{ hostId: "local", seats: [{ seatSession: "dev-impl@alpha", rigName: "alpha", runtime: "codex", configured: { source: "registry", profileRef: "team-a" }, observed }] }] }),
+  });
+  return text(page.renderSubscriptions(await readFleet({ daemonUrl: a.url, now, reads: ["bindings", "subscriptions"] }), NOW));
+};
+
+test("a seat with no usage windows sampled reads so, never a sample time that doesn't exist", async () => {
+  const out = await seatObserved({ windowsSampled: false });
+  assert.match(out, /dev-impl@alpha on box-a configured: .* observed: no usage windows sampled/);
+  assert.doesNotMatch(out, /sampled time not reported|sampled \d/);
+});
+
+test("a seat whose use is withheld reads not attributed, with the daemon's note", async () => {
+  const out = await seatObserved({ withheld: true, note: "this seat shares a login with another" });
+  assert.match(out, /dev-impl@alpha on box-a configured: .* observed: not attributed this seat shares a login with another/);
+  assert.doesNotMatch(out, /sampled time not reported|sampled \d/);
+});
+
 test("the Observatory points to Fleet for moves, and nothing is shown in money", async () => {
   const page = await loadPage();
   const a = await daemon({ selfHostId: "box-a", usageHosts: usage([obs("local", 10)]) });
