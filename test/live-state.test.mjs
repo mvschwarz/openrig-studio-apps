@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildLiveState } from "../providers/studio-host/live-state.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { buildLiveState, writeLiveState, startLiveState } from "../providers/studio-host/live-state.mjs";
 
 test("live state distinguishes a missing rig CLI from a rig command failure", async () => {
   const missing = await buildLiveState({
@@ -196,4 +199,45 @@ test("a done-list answer that isn't a list is unreadable, not 'no finished work'
       if (a[1] === "list") return { ok: true, value: a.includes("done") ? value : [] }; return { ok: true, value: [] }; } });
     assert.deepEqual(s.done, { rows: [], coverage: { looked: 0, shown: 0, unreadable: "the queue's answer wasn't a list" } }, JSON.stringify(value));
   }
+});
+
+// NEWER WINS: a refresh that started earlier and finishes later never replaces one already written. Invented rows.
+const raceRow = { qitemId: "qitem-20261024220000-race", state: "done", summary: "Race", sourceSession: "lab-qa@lab", destinationSession: "lab-impl@lab",
+  tsUpdated: "2026-10-24T22:00:00.000Z", closureReason: "no-follow-on", closureTarget: null, resolution: "Old answer" };
+const raceCLI = (row, show) => async (a) => {
+  if (a[0] === "ps") return { ok: true, value: SEATS }; if (a[0] === "whoami") return { ok: true, value: { identity: { rigName: "lab" } } };
+  if (a[1] === "list") return { ok: true, value: a.includes("done") ? [row] : [] }; if (a[1] === "show") return show(); return { ok: true, value: [] };
+};
+test("an older refresh that finishes last never writes over a newer one already written", async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "live-state-race-"));
+  let entered, release; const inShow = new Promise((r) => (entered = r)), held = new Promise((r) => (release = r));
+  try {
+    const older = writeLiveState(out, { resultCache: new Map(), runRig: raceCLI(raceRow, async () => { entered(); await held; return { ok: true, value: { ...raceRow, closingTransition: { transitionNote: "earlier" } } }; }) });
+    await inShow;
+    const newer = { ...raceRow, tsUpdated: "2026-10-24T22:02:00.000Z", resolution: "New answer" };
+    await writeLiveState(out, { resultCache: new Map(), runRig: raceCLI(newer, async () => ({ ok: true, value: { ...newer, closingTransition: { transitionNote: "later" } } })) });
+    release(); await older;
+    const shown = JSON.parse(fs.readFileSync(path.join(out, "factory-state.json"), "utf8")).done.rows[0];
+    assert.equal(shown.closedAt, "2026-10-24T22:02:00.000Z"); assert.equal(shown.resolution, "New answer"); assert.equal(shown.result, "later");
+  } finally { release(); fs.rmSync(out, { recursive: true, force: true }); }
+});
+
+test("the companion's scheduler runs one refresh at a time: the next is scheduled only after the current one finishes", async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "live-state-tick-"));
+  const timers = []; let builds = 0, release; const held = new Promise((r) => (release = r));
+  const log = { log() {}, error() {} };
+  try {
+    const run = startLiveState(out, { resultCache: new Map(), runRig: async (a) => { if (a[0] === "ps") { builds++; if (builds === 1) await held; } return raceCLI(raceRow, async () => ({ ok: true, value: { ...raceRow, closingTransition: null } }))(a); } },
+      { interval: 10000, schedule: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, cancel() {}, log });
+    await new Promise((r) => setImmediate(r));
+    assert.equal(timers.length, 0, "nothing is scheduled while the first refresh is still reading");
+    assert.equal(builds, 1);
+    release(); await run.first;
+    assert.deepEqual(timers.map((t) => t.ms), [10000], "the next refresh is scheduled once, after the first finished");
+    await timers[0].fn();
+    assert.equal(builds, 2); assert.equal(timers.length, 2);
+    run.stop(); await timers[1].fn(); assert.equal(timers.length, 2, "stopped: nothing more is scheduled");
+    const once = startLiveState(out, { resultCache: new Map(), runRig: raceCLI(raceRow, async () => ({ ok: false })) }, { interval: 0, schedule: () => assert.fail("interval 0 runs once"), log });
+    await once.first;
+  } finally { release(); fs.rmSync(out, { recursive: true, force: true }); }
 });

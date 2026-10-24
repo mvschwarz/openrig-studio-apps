@@ -226,12 +226,24 @@ async function recentDone(runRig, ourSeats, cache) {
 // Safe by construction rather than by validation: the directory comes from the
 // studio's own configuration, never from a request, and the filename is fixed
 // here. There is no caller-supplied path to sanitise because none is accepted.
+//
+// NEWER WINS. A refresh is many rig calls (up to ten closing-note reads, each
+// allowed six seconds), so two refreshes of one output can be in flight at
+// once, and the older one can finish last. Each refresh is numbered when it
+// STARTS, per output file; one that started before a refresh already written
+// there is dropped, never written over it, or the floor would step back to an
+// older answer after a newer one was on screen.
+const STARTED = new Map(), WRITTEN = new Map();
 export async function writeLiveState(outDir, options = {}) {
   if (!outDir) throw new Error("live-state: --out <dir> is required");
   const dir = path.resolve(outDir);
-  const state = await buildLiveState(options);
-  fs.mkdirSync(dir, { recursive: true });
   const target = path.join(dir, "factory-state.json");
+  const gen = (STARTED.get(target) || 0) + 1;
+  STARTED.set(target, gen);
+  const state = await buildLiveState(options);
+  if ((WRITTEN.get(target) || 0) > gen) return state;
+  WRITTEN.set(target, gen);
+  fs.mkdirSync(dir, { recursive: true });
   const next = JSON.stringify(state, null, 2) + "\n";
   // Only write on change: an unchanged rewrite fires the runtime's file watcher
   // and makes the floor look busier than the rig is.
@@ -240,21 +252,30 @@ export async function writeLiveState(outDir, options = {}) {
   return state;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// ONE REFRESH AT A TIME. The next refresh is scheduled when the current one
+// has finished, never on a fixed clock: a clock starts a new refresh while a
+// slow one is still reading, which is how an older answer could land last.
+// `interval` 0 runs once. `schedule`/`cancel` are the timer, swappable in tests.
+export function startLiveState(outDir, options = {}, { interval = INTERVAL, schedule = setTimeout, cancel = clearTimeout, log = console } = {}) {
+  let stopped = false, timer = null;
   const tick = async () => {
     try {
-      const s = await writeLiveState(OUT, RIG ? { rig: RIG } : {});
-      if (!s.attached) console.log(`live-state: ${s.reason} — ${s.detail}`);
-      else if (s.reason === "ambiguous-rig") console.log(`live-state: ${s.detail} — pass --rig <name> to scope the floor`);
+      const s = await writeLiveState(outDir, options);
+      if (!s.attached) log.log(`live-state: ${s.reason} — ${s.detail}`);
+      else if (s.reason === "ambiguous-rig") log.log(`live-state: ${s.detail} — pass --rig <name> to scope the floor`);
     } catch (e) {
       // Fail loudly and keep going: a state generator that dies silently
       // leaves the last-written state on screen looking current.
-      console.error(`live-state: ${e.message}`);
+      log.error(`live-state: ${e.message}`);
     }
+    if (!stopped && interval > 0) timer = schedule(tick, interval);
   };
-  await tick();
-  if (!ONCE) {
-    console.log(`live-state: ${path.resolve(OUT)} refreshed every ${INTERVAL}ms`);
-    setInterval(tick, INTERVAL);
-  }
+  const first = tick();
+  return { first, stop() { stopped = true; if (timer !== null) cancel(timer); } };
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const run = startLiveState(OUT, RIG ? { rig: RIG } : {}, { interval: ONCE ? 0 : INTERVAL });
+  await run.first;
+  if (!ONCE) console.log(`live-state: ${path.resolve(OUT)} refreshed ${INTERVAL}ms after each refresh finishes`);
 }
