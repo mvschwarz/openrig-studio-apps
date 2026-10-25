@@ -188,6 +188,13 @@ test("the agent's startup files exist, and the Observatory rig's own startup say
   assert.match(ctx, /127\.0\.0\.1:9440\/surfaces\/observatory\.html/);
 });
 
+test("the agent is told subscription moves are in the Fleet page, never that they aren't set up", () => {
+  const ctx = fs.readFileSync(path.join(rigDir, "observatory-startup.md"), "utf8");
+  assert.match(ctx, /Productivity and the oversight team's readings\s+are\s+not\s+set\s+up\s+yet/);
+  assert.match(ctx, /Move\s+history\s+is\s+shown\s+in\s+the\s+Fleet\s+page\s+when\s+installed\./);
+  assert.doesNotMatch(ctx, /moves[^.]*not (connected|set up)/i);
+});
+
 test("the build context sends only the observatory app and provider", () => {
   const ignore = fs.readFileSync(path.join(rigDir, "Dockerfile.dockerignore"), "utf8").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
   assert.deepEqual(ignore, ["*", "!apps/observatory/**", "!providers/studio-observatory/**", "!providers/shared/**"]);

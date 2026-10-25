@@ -153,7 +153,12 @@ test("text from a daemon is escaped, never interpreted as markup", async () => {
 
 test("later panels say they are not set up yet rather than showing estimates", async () => {
   const page = await loadPage();
-  assert.match(text(page.renderLater()), /Productivity has no agreed definition yet, so only activity is shown\. The oversight team's readings and subscription moves are not connected\. Nothing here estimates them\./);
+  assert.match(text(page.renderLater()), /Productivity has no agreed definition yet, so only activity is shown\. The oversight team's readings are not connected\. Nothing here estimates them\. Move history is shown in the Fleet page when installed\./);
+});
+
+test("subscription moves are never called not connected or not set up: the Fleet page shows them", () => {
+  const html = fs.readFileSync(pagePath, "utf8");
+  assert.doesNotMatch(html, /moves[^.<]*not (connected|set up)/i);
 });
 
 test("the page asks only for verbs the app declares and the provider serves", async () => {
