@@ -34,6 +34,7 @@ enabled it for you. What you may do on this machine is what its owner has actual
 ## Limits to say out loud when they matter
 
 - Machines reachable only over ssh are listed but not read.
-- Productivity, the oversight team's readings and subscription moves are not set up yet: only activity is
-  shown, and nothing estimates them. Ceremony and subscriptions are shown, each with how it was read.
+- Productivity and the oversight team's readings are not set up yet: only activity is shown, and nothing
+  estimates them. Ceremony and subscriptions are shown, each with how it was read. Move history is shown in
+  the Fleet page when installed.
 - This app reads open GET routes. It holds no token and asks for none.
