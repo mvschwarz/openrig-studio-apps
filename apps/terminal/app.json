@@ -1,0 +1,20 @@
+{
+  "manifest_version": 1,
+  "id": "terminal",
+  "name": "Terminal",
+  "summary": "A terminal on your machine, inside Studio, plus your team's agents side by side, live, where Studio has them. Everyone signed in sees the same view, each through their own sign-in.",
+  "category": "studio",
+  "maker": {
+    "name": "OpenRig",
+    "url": "https://openrig.dev"
+  },
+  "surface": {
+    "entry": "app/terminal.html",
+    "path": "/surfaces/terminal.html",
+    "glyph": "›_",
+    "icon": "terminal",
+    "hint": "a terminal on your machine"
+  },
+  "vendor": ["terminal", "theme16", "kit"],
+  "_calls_note": "No provider: what is set up comes from the Studio's own /api/studio/place (terminal, team and agents: each its path, or null). The views are the Studio's own /terminal/ (tools/start-terminal.mjs in the SDK), /team/, and the agents' watch and type paths with their list at /api/agents/terminals and Add view at /api/agents/ensure, which a Studio serves only behind server hooks."
+}

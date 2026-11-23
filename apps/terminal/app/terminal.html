@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terminal</title>
+<!-- Copyright 2026 mvschwarz. Licensed under the Apache License, Version 2.0. -->
+<!-- A shell on this machine (the Studio's own /terminal/), and, where the Studio serves it, the team's agents, each in its own tile (the
+     Studio's own watch / type paths, one terminal per tile, from its list at /api/agents/terminals). The place says which are set up:
+     on a Studio reached only from this computer the agents view is never served, and this page is the shell alone. #agents asks for
+     the agents; with both set up, a switch shows either, and switching only hides the other (it stays connected). With neither a
+     terminal of your own nor the agents view, the team's shared terminal opens. The words, the tile rules and what a read of the place
+     means come from vendor/terminal/terminal.js. While a view is open the page reads the place again on a timer, on focus and when a
+     frame reloads: a view the Studio no longer serves is removed, and a refused sign-in removes every view and says so. The agents'
+     grid opens as many tiles as fit at a readable size and names the rest above it; a tile that leaves the list stays while it's
+     pinned or typed in, or for a few seconds while it has the keyboard; a failed read of the list keeps the tiles and says so; a typing
+     tile whose connection closes goes back to Watch. #agents&view=qitem:<id> shows one task's agents: a verified terminal is watched
+     by default, and a member without a view yet offers Add view (the person's click). -->
+<link rel="stylesheet" href="/vendor/theme16/kit-app.css?v=0f29a66a3506f8dc6e55f2f1aae304054224369a7d0f7454927f02dff8e91355">
+<script type="module" src="/vendor/kit/or-icon.mjs?v=f4161695e69b4d3148b50b248541513b51efc9ec997f131b758bd47a003e69ff"></script>
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; display: flex; flex-direction: column; min-height: 0; }
+  #status { flex: none; padding: 12px 16px 8px; }
+  #status .say-line { margin: 0 0 2px; font-weight: 500; }
+  #status .meta { margin: 0 0 8px; color: var(--or-muted); font-size: var(--or-label-size); line-height: var(--or-label-lh); }
+  #status .lead { font-weight: 500; margin: 0 0 8px; }
+  #status .cover { color: var(--or-muted); margin: 0; }
+  #status pre { margin: 0 0 12px; padding: 12px; background: var(--or-panel); box-shadow: var(--or-edge); border-radius: var(--or-radius-card);
+    overflow-x: auto; font: 13px/20px var(--or-mono); user-select: all; }
+  #status .next.warn .lead { color: var(--or-wait); }
+  #tstate[data-state="open"] .meta { margin: 0; }
+  #status .next > :last-child { margin-bottom: 0; }
+  /* On a short window the terminal gets the height: the first line says what this is. */
+  @media (max-height: 520px) { #tstate[data-state="open"] .meta { display: none; } }
+  #status .modes { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
+  .chip.on { background: var(--or-raised); color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }   /* selected: ink, never the accent */
+  #screen { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; background: var(--or-base); }
+  #screen:empty, #screen[hidden] { display: none; }
+  #screen > iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  #screen > [hidden] { display: none; }
+  #agents { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
+  #agentbar { flex: none; margin: 0; padding: 8px 16px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--or-muted);
+    font-size: var(--or-label-size); }
+  #agentbar:empty { display: none; }
+  #agentbar > .bar-line { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  #agentbar > .bar-line.warn { color: var(--or-wait); }
+  #tiles { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 8px; padding: 8px; box-sizing: border-box;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); grid-auto-rows: minmax(260px, 1fr); }
+  #tiles > p { margin: 8px; }
+  #tiles > .terminal-empty { grid-column: 1 / -1; align-self: start; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .tile { display: flex; flex-direction: column; min-height: 0; min-width: 0; box-shadow: var(--or-edge); border-radius: var(--or-radius-card); overflow: hidden; background: var(--or-base); }
+  .tile-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 6px 8px; background: var(--panel); box-shadow: var(--or-edge-bottom); font-size: var(--or-label-size); }
+  .tile-head .nm { font-weight: 500; overflow-wrap: anywhere; }
+  .tile-head .st { color: var(--or-muted); }
+  .tile-head .st.warn { color: var(--or-wait); }
+  .tile-head .acts { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+  .tile iframe { flex: 1 1 auto; min-height: 0; width: 100%; border: 0; }
+  /* The agents with nothing to show here, after the terminals: one compact line each (why, and its buttons), never an empty terminal. */
+  #members { flex: none; max-height: 45%; overflow: auto; margin: 0; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 6px; }
+  #members:empty { display: none; }
+  #members > .tile { flex: none; background: var(--panel); }
+  /* At a phone's width the page scrolls as one: the agents' view takes its height from its tiles; the shell keeps its full-height frame. */
+  @media (max-width: 600px) {
+    html:has(#agents:not([hidden])), body:has(#agents:not([hidden])) { height: auto; }
+    #screen:has(> #agents:not([hidden])) { flex: none; overflow: visible; }
+    #agents { position: static; }
+    #tiles { flex: none; overflow: visible; }
+    #members { max-height: none; overflow: visible; }
+  }
+</style>
+</head>
+<body>
+<div id="status"><p class="cover">Checking your terminal…</p></div>
+<div id="screen"></div>
+<script type="module">
+import * as T from "/vendor/terminal/terminal.js?v=d33dc7c807d13d9aa188f522c6a8e71ff51c1ef799dcb177f0b94ea77c3923b0";
+
+const status = document.getElementById("status"), screen = document.getElementById("screen");
+let team = false, teamUrl = null, account = null, state = null, gen = 0, timer = null, reads = 0, lists = 0;
+let mode = "shell", avail = { shell: false, agents: false }, paths = null;
+// Hidden by a deployment's own control (window.studioTerminal.setHidden, from vendor/terminal/local.js): every view is kept, connected
+// and hidden; nothing new is shown; the sign-in ending still removes them all.
+let hidden = false;
+// The task this view shows (#agents&view=qitem:<id>), or null for the Studio's own list; with it, the task as last read.
+let view = null, task = null;
+// The shell's frame and the agents' view (its line, its grid of terminals, and the agents with nothing to show here), each kept while open.
+let shellFrame = null, agentsView = null, bar = null, grid = null, members = null;
+const tiles = new Map();   // tile key -> { el, head, frame, t, mode, pinned, gone, kept, note, url }
+// The last list read, what was in it before, whether the person asked to see more than fit, the last cap, and the line above the grid.
+let list = null, before = null, override = false, capNow = null, notes = [], listView = null, unread = false, unsupported = false;
+const views = () => (shellFrame ? 1 : 0) + (agentsView ? 1 : 0);
+const show = (s, place) => {
+  state = s;
+  status.innerHTML = T.stateHtml(s, { reason: T.reasonOf(place), account, mode, both: avail.shell && avail.agents, inTask: !!view && !unsupported, team, local: place?.profile === "local", filesOnly: place?.workspace === "files" });
+};
+const forgetAgents = () => { agentsView = bar = grid = members = null; tiles.clear(); list = before = listView = capNow = task = null; override = unread = unsupported = false; notes = []; };
+// Remove every view: the frames go, which closes their connections (a shell ends; the agents keep running).
+const close = () => { clearInterval(timer); timer = null; forgetAgents(); shellFrame = null; screen.replaceChildren(); screen.hidden = false; };
+// { status, body, signInEnded }, or { status: 0 } when it didn't answer in time. A 401, or a 403 a sign-in front end marks with its
+// x-openrig-front-door header, is the sign-in refused.
+async function readJson(url) {
+  try {
+    const r = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(T.PLACE_MS) });
+    const body = await r.json().catch(() => null);
+    const marked = !!r.headers?.get?.("x-openrig-front-door");
+    return { status: r.ok && !body ? 0 : r.status, body, signInEnded: r.status === 401 || (r.status === 403 && marked) };
+  } catch {
+    return { status: 0, body: null, signInEnded: false };
+  }
+}
+const readPlace = () => readJson("/api/studio/place");
+// A view loaded (or reloaded): check the sign-in (the place) only; the list isn't read for it (see LIST_MIN_MS).
+const reload = (g) => { if (g === gen) recheck(g, "none"); };
+
+// ---- the agents' tiles ----
+// Watching only: a tile someone is typing in stays exactly where they left it.
+setInterval(() => {
+  if (document.hidden) return;
+  for (const x of tiles.values()) { if (x.mode !== "watch" || !x.frame) continue; try { x.reveal = T.keepTextInView(x.frame.contentWindow?.term, x.reveal || {}); } catch {} }
+}, 2000);
+function setTileMode(x, m) {
+  if (!x.frame || (m !== "watch" && x.t.readOnly)) return;   // a read-only view is Watch only
+  const url = T.tileUrl(paths, x.t.id, m, x.t.fromBox ? null : view);
+  if (!url) return;
+  x.mode = m; x.url = url;
+  // Back must not reconnect an earlier Type or Take over from this frame's history.
+  let target = null;
+  try { target = x.frame.contentWindow?.location; } catch {}
+  if (typeof target?.replace === "function") target.replace(url); else x.frame.src = url;
+  if (x.gone) x.kept = keptFor(x);
+  drawHead(x);
+}
+function drawHead(x) {
+  const h = document.createElement("div");
+  h.innerHTML = T.tileHeadHtml(x.t, { mode: x.mode, pinned: x.pinned, gone: x.gone, kept: x.kept, note: x.note, canType: !!paths?.type, inTask: !!view, adding: !!x.adding });
+  // A head button the person was on keeps the keyboard when the head is redrawn.
+  const a = document.activeElement, had = a && x.head.contains?.(a) ? a.dataset?.act : null;
+  const head = h.firstElementChild; x.head.replaceWith(head); x.head = head;
+  if (had) head.querySelector?.(`[data-act="${had}"]`)?.focus();
+}
+const drawBar = () => { if (bar) bar.innerHTML = T.barHtml({ view: listView, notes, hidden: hiddenNames(), override, unread: unread && tiles.size > 0, shown: tiles.size, task }); };
+const hiddenNames = () => (list || []).filter((t) => !tiles.has(t.key)).map((t) => t.name ?? t.seat);
+const focused = (x) => !!x.frame && document.activeElement === x.frame;
+const HOLD_MS = T.FOCUS_HOLD_S * 1000;
+const NARROW = "(max-width: 600px)";   // the page scrolls as one below this width (the same breakpoint as the CSS)
+// Why a tile that left the list stays: pinned, typed in, or has the keyboard (for FOCUS_HOLD_S after it left). Never closed under the
+// person's hands.
+const keptFor = (x) => (x.pinned ? "pinned" : x.frame && x.mode !== "watch" ? "typing" : focused(x) && (x.leftAt == null || Date.now() - x.leftAt < HOLD_MS) ? "using" : null);
+const survivor = (but) => [...tiles.values()].find((y) => y !== but && y.frame && !y.gone);
+// ttyd makes its terminal (window.term) after it reads its token, usually after the frame's load: fn gets it now, or when it's set.
+function whenTerm(w, fn) {
+  try {
+    if (w.term) return fn(w.term);
+    let v; Object.defineProperty(w, "term", { configurable: true, get: () => v, set: (t) => { v = t; try { fn(t); } catch {} } });
+  } catch {}
+}
+// Each time a tile's view loads. A watching tile never takes the keyboard by itself, and if it did, it goes back. Every tile is
+// watched for its connection closing (ttyd's own words over the terminal), and the terminal's last lines say why (T.afterClose).
+function loaded(x, giveBack) {
+  let w = null;
+  try { w = x.frame.contentWindow; } catch {}
+  if (!w) return;
+  x.closed = false;
+  if (x.mode === "watch") {
+    whenTerm(w, (t) => { t.focus = () => {}; });
+    if (giveBack && document.activeElement === x.frame) giveBack.focus?.();
+  }
+  const url = x.url, doc = (() => { try { return w.document?.documentElement; } catch { return null; } })();
+  if (!doc || !w.MutationObserver) return;
+  const isClose = (n) => { const el = w.term?.element; return !!el && n?.parentNode === el && T.CLOSE_WORDS.includes(n.textContent); };
+  const closed = () => {
+    seen.disconnect();
+    // The terminal's last lines say why it closed; read them once xterm has drawn what arrived just before the close.
+    let done = false;
+    const decide = () => {
+      if (done || x.url !== url) return;
+      done = true;
+      const lines = [];
+      try {
+        const b = w.term.buffer.active, end = b.baseY + b.cursorY;
+        for (let i = Math.max(0, end - 8); i <= end; i++) { const l = b.getLine(i), s = l?.translateToString(true) ?? ""; if (l?.isWrapped && lines.length) lines[lines.length - 1] += s; else lines.push(s); }
+      } catch {}
+      const { note, next } = T.afterClose(T.closeReasonOf(lines), x.mode);
+      x.note = note; x.closed = true;
+      if (next === "watch") return setTileMode(x, "watch");
+      drawHead(x);
+      if (next === "list") readTiles(gen, true);
+    };
+    try { w.term.write("", decide); } catch {}
+    setTimeout(decide, 300);
+  };
+  const seen = new w.MutationObserver((ms) => {
+    if (x.url !== url || tiles.get(x.t.key) !== x) return seen.disconnect();
+    for (const m of ms) for (const n of [m.target, ...m.addedNodes]) if (isClose(n)) return closed();
+  });
+  seen.observe(doc, { childList: true, subtree: true });
+  // A refused attach ends at once, before this frame may have finished loading: look once now as well.
+  if ([...(w.term?.element?.children ?? [])].some(isClose)) closed();
+}
+// A member without a terminal yet gets a tile with no frame, in the list after the grid. A tile that replaces another of its kind takes
+// its place; a member's first terminal moves up into the grid.
+function addTile(t, g) {
+  const el = document.createElement("section"), head = document.createElement("div");
+  el.className = "tile"; el.dataset.id = t.key;
+  const a = document.activeElement, giveBack = a && a.tagName === "IFRAME" ? a : null;
+  let frame = null;
+  if (!t.unavailable) {
+    frame = document.createElement("iframe"); frame.title = `${t.name ?? t.seat}`;
+    frame.addEventListener("load", () => {
+      try { frame.contentDocument.documentElement.style.colorScheme = "dark"; } catch {}   // a terminal is dark: its scrollbar too
+      const y = tiles.get(t.key);
+      if (y?.frame === frame) { if (y.t.changed) { y.t.changed = false; drawHead(y); } loaded(y, giveBack); }
+      reload(g);
+    });
+  }
+  el.append(...(frame ? [head, frame] : [head]));
+  const home = frame ? grid : members;
+  if (t.replaces?.el.isConnected && t.replaces.el.parentNode === home) t.replaces.el.replaceWith(el); else { t.replaces?.el.remove(); home.append(el); }
+  const x = { el, head, frame, t, mode: "watch", pinned: !!t.pinnedFrom, asked: !!t.askedFrom, gone: false, kept: null, note: null, url: null };
+  delete t.pinnedFrom; delete t.askedFrom;
+  tiles.set(t.key, x);
+  if (frame) setTileMode(x, "watch"); else drawHead(x);
+}
+// The tile set follows the Studio's list. force: the timer or a terminal that changed; otherwise no sooner than LIST_MIN_MS after the last.
+let listAt = 0;
+async function readTiles(g, force = false) {
+  if (!force && Date.now() - listAt < T.LIST_MIN_MS) return;
+  listAt = Date.now();
+  const n = ++lists;
+  const r = await readJson(view ? `/api/agents/terminals?view=${encodeURIComponent(view)}` : "/api/agents/terminals");
+  if (g !== gen || n !== lists || !grid) return;
+  let res = T.terminalsOf(r);
+  if (view && res.read && res.task && res.terminals.some((t) => !t.id)) {
+    const box = T.terminalsOf(await readJson("/api/agents/terminals"));
+    if (g !== gen || n !== lists || !grid) return;
+    res = T.withBoxTerminals(res, box);
+  }
+  grid.querySelector(":scope > p")?.remove();
+  // No task views on this machine: said, with the way back to all the agents; nothing else changes.
+  if (res.unsupported) {
+    unsupported = true; if (state === "open") show("open"); drawBar();
+    if (!tiles.size) grid.insertAdjacentHTML("afterbegin", `<p class="meta">${T.TASK_VIEWS_UNSUPPORTED.replace(/'/g, "&#39;")} <a href="#agents">Show all agents</a></p>`);
+    return;
+  }
+  // A task this workspace doesn't know: said once, with the way back to all the agents. Tiles already open stay.
+  if (res.notFound) {
+    unread = false; drawBar();
+    if (!tiles.size) grid.insertAdjacentHTML("afterbegin", `<p class="meta">${T.TASK_NOT_FOUND.replace(/'/g, "&#39;")} <a href="#agents">Show all agents</a></p>`);
+    return;
+  }
+  // A failed read is not an empty list: the tiles stay, and the page says the list couldn't be read. Only a read list changes them.
+  if (!res.read) { unread = true; drawBar(); if (!tiles.size) grid.insertAdjacentHTML("afterbegin", T.gridStateHtml("unread", { team: teamUrl })); return; }
+  unread = false;
+  if (unsupported) { unsupported = false; if (state === "open") show("open"); }
+  list = res.terminals; listView = res.view ?? null; task = res.task ? { ...res.task, plan: res.plan, ensure: res.ensure } : null;
+  fit(g, true);
+}
+// Make the grid match the list, within the cap. fromRead: a new list (its joins and leaves are said above the grid); else the size or
+// Show them / Show fewer changed.
+function fit(g, fromRead) {
+  if (!grid || !list) return;
+  const terminals = list, now = new Set(terminals.map((t) => t.key)), say = [];
+  // A terminal id is never kept across a change (a Herdr restart gives every terminal a new one): a tile whose id left while the SAME
+  // seat now has exactly one terminal under a new id is replaced by a fresh watching tile for it, its pin carried.
+  const count = new Map(); for (const t of terminals) if (!t.unavailable) count.set(t.seat, (count.get(t.seat) || 0) + 1);
+  for (const [key, x] of [...tiles]) {
+    if (now.has(key) || x.t.unavailable) continue;
+    const next = terminals.find((t) => !t.unavailable && t.seat === x.t.seat && count.get(t.seat) === 1 && !tiles.has(t.key) && !t.replaces);
+    if (!next) continue;
+    tiles.delete(key); next.replaces = x; next.changed = true; if (x.pinned) next.pinnedFrom = true;
+  }
+  // A member that now has a terminal replaces its "not available" tile (keeping its pin, and its place when Add view asked for it).
+  for (const t of terminals) if (!t.unavailable && !t.replaces) { const old = tiles.get(`seat:${t.seat}`); if (old) { tiles.delete(old.t.key); t.replaces = old; if (old.pinned) t.pinnedFrom = true; if (old.asked) t.askedFrom = true; } }
+  // A view that became watch only while the person was typing in it: back to Watch, saying why.
+  for (const t of terminals) {
+    const x = tiles.get(t.key); if (!x) continue;
+    x.t = t; x.gone = false; x.kept = null; x.leftAt = null;
+    if (x.frame && t.readOnly && x.mode !== "watch") { x.note = T.READ_ONLY_BACK; setTileMode(x, "watch"); } else drawHead(x);
+  }
+  // One that left: kept (marked, saying why) while pinned, typed in or focused; else closed, and said. Before a focused one closes, the
+  // keyboard goes to a tile still in the list.
+  for (const [key, x] of [...tiles]) if (!now.has(key)) {
+    x.leftAt ??= Date.now();
+    const kept = keptFor(x);
+    if (kept) {
+      x.gone = true; x.kept = kept; drawHead(x);
+      if (kept === "using" && !x.hold) x.hold = setTimeout(() => { x.hold = null; fit(gen, false); }, HOLD_MS - (Date.now() - x.leftAt) + 50);
+    } else {
+      if (focused(x)) survivor(x)?.frame.focus?.();
+      x.el.remove(); tiles.delete(key); say.push(T.leftNote(x.t.name ?? x.t.seat, !!view));
+    }
+  }
+  // At a phone's width the page scrolls as one, so the screen's height decides what fits.
+  const narrow = typeof matchMedia === "function" && matchMedia(NARROW).matches;
+  const cap = T.capFor((grid.clientWidth || 0) - 16, (narrow ? innerHeight : grid.clientHeight || 0) - 16) ?? capNow ?? 2;
+  capNow = cap;
+  const limit = override ? Math.max(cap, T.CEILING) : cap;
+  // The cap is for terminals: a tile with no frame never takes a terminal's place, and a view asked for with Add view is on top of it.
+  const framed = () => { let n = 0; for (const x of tiles.values()) if (x.frame && !x.asked) n++; return n; };
+  // New tiles: replacements first (they free their own place), then in the list's order while there's room; the rest are named above.
+  for (const t of [...terminals.filter((t) => t.replaces), ...terminals.filter((t) => !t.replaces)]) {
+    if (tiles.has(t.key)) continue;
+    if (t.replaces || t.unavailable || framed() < limit) addTile(t, g);
+    if (fromRead && before && !before.has(t.key) && !t.replaces) say.push(T.joinedNote(t.name ?? t.seat));
+    delete t.replaces;
+  }
+  // Fewer fit than are open: close watching tiles from the end; never one that's pinned, typed in, focused, asked for, or gone.
+  for (const [key, x] of [...tiles].reverse()) {
+    if (framed() <= limit) break;
+    if (!x.frame || x.asked || x.gone || keptFor(x)) continue;
+    x.el.remove(); tiles.delete(key);
+  }
+  if (fromRead) before = now;
+  if (say.length) notes = say;
+  drawBar();
+  grid.querySelector(":scope > p")?.remove();
+  if (!tiles.size && (unread || !hiddenNames().length)) grid.insertAdjacentHTML("afterbegin", T.gridStateHtml(unread ? "unread" : "empty", { team: teamUrl }));
+}
+// Add view: the person's click asks OpenRig to set up a view of this member's terminal (one viewer, made or reused; nothing closed,
+// moved or taken over). The answer is said on the tile, and the task is read again.
+async function addView(x) {
+  if (!view || !task?.plan || !x.t.member || x.adding) return;
+  const g = gen; x.adding = true; x.asked = true; x.note = null; drawHead(x);
+  let r = { status: 0, body: null };
+  try {
+    const res = await fetch("/api/agents/ensure", { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store", signal: AbortSignal.timeout(T.ENSURE_MS),
+      body: JSON.stringify({ view, member: x.t.member, expectedPlan: task.plan }) });
+    r = { status: res.status, body: await res.json().catch(() => null) };
+  } catch {}
+  if (g !== gen) return;
+  x.adding = false;
+  const { note, next } = T.ensureResult(r);
+  x.note = note; drawHead(x);
+  if (next === "list") readTiles(g, true);
+}
+screen.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  if (b.dataset.act === "more" || b.dataset.act === "fewer") { override = b.dataset.act === "more"; return fit(gen, false); }
+  const x = b.dataset.id != null && tiles.get(b.dataset.id);
+  if (!x) return;
+  x.note = null;
+  if (b.dataset.act === "ensure") return addView(x);
+  if (b.dataset.act === "pin") { x.pinned = !x.pinned; if (x.gone) x.kept = keptFor(x); if (x.gone && !x.kept) { x.el.remove(); tiles.delete(x.t.key); fit(gen, false); } else drawHead(x); }
+  else if (T.TILE_MODES.includes(b.dataset.act) && (x.mode !== b.dataset.act || x.closed)) setTileMode(x, b.dataset.act);
+});
+addEventListener("resize", () => { if (grid && !agentsView?.hidden) fit(gen, false); });
+
+// ---- the modes ----
+// Show one mode's view (made the first time it's shown), hide the other.
+function openMode(m, g, body) {
+  mode = m;
+  if (m === "shell" && !shellFrame) {
+    team = !!T.teamOf(body);
+    shellFrame = document.createElement("iframe"); shellFrame.dataset.mode = "shell";
+    shellFrame.title = team ? "All terminals" : T.MODE_NAMES.shell;
+    shellFrame.src = T.terminalOf(body) || T.teamOf(body);
+    shellFrame.addEventListener("load", () => reload(g));
+    screen.append(shellFrame);
+  }
+  if (m === "agents" && !agentsView) {
+    paths = T.agentsOf(body);
+    agentsView = document.createElement("div"); agentsView.id = "agents"; agentsView.dataset.mode = "agents";
+    bar = document.createElement("p"); bar.id = "agentbar";
+    grid = document.createElement("div"); grid.id = "tiles";
+    grid.insertAdjacentHTML("afterbegin", '<p class="meta" role="status">Reading agent terminals…</p>');
+    members = document.createElement("div"); members.id = "members";
+    agentsView.append(bar, grid, members); screen.append(agentsView);
+    readTiles(g, true);
+  }
+  if (shellFrame) shellFrame.hidden = m !== "shell";
+  if (agentsView) agentsView.hidden = m !== "agents";
+  // Hidden (it can come on while a read is out, or a check falls back to the other view): made and kept connected, never shown.
+  if (hidden) { screen.hidden = true; return show("hidden"); }
+  screen.hidden = false;
+  show("open", body);
+  if (m === "agents") fit(g, false);   // shown again: it has a size now
+}
+// Read what's set up, then open the asked-for mode (#agents, else the shell), or say why not. Only the newest start acts.
+async function start() {
+  const g = ++gen;
+  close();
+  view = T.viewOf(location.hash);
+  mode = T.modeFor(T.asksAgents(location.hash) ? "agents" : "shell", avail);
+  if (hidden) return show("hidden");
+  show("checking");
+  const r = await readPlace();
+  if (g !== gen) return;
+  if (r.status === 200) { account = T.accountOf(r.body) || account; avail = T.availOf(r.body, location.hash); teamUrl = r.body?.team ?? null; }
+  mode = T.modeFor(T.asksAgents(location.hash) ? "agents" : "shell", avail);
+  const s = T.stateOf({ ...r, set: r.status === 200 && avail[mode] });
+  if (s !== "open") return show(s, r.body);
+  if (hidden) return show("hidden");
+  openMode(mode, g, r.body);
+  timer = setInterval(() => { if (!document.hidden) recheck(g, "timer"); }, T.CHECK_MS);
+}
+// While open: the sign-in refused -> remove everything and say so; a mode no longer set up -> remove its view (and show the other, or
+// say it); the agents' list is read again. A check that didn't answer leaves things open. Only the newest check acts.
+// list: "timer" reads the agents list, "event" reads it unless it was read within LIST_MIN_MS, "none" doesn't.
+async function recheck(g, list = "event") {
+  const n = ++reads;
+  const r = await readPlace();
+  if (g !== gen || n !== reads || !views()) return;
+  if (T.stateOf(r) === "refused") { gen++; close(); return show("refused"); }
+  if (r.status !== 200) return;
+  avail = T.availOf(r.body, location.hash); teamUrl = r.body?.team ?? null;
+  if (shellFrame && !avail.shell) { shellFrame.remove(); shellFrame = null; }
+  if (agentsView && !avail.agents) { agentsView.remove(); forgetAgents(); }
+  if (!views()) { gen++; close(); return show("notset", r.body); }
+  if (mode === "shell" && !shellFrame) return openMode("agents", g, r.body);
+  if (mode === "agents" && !agentsView) return openMode("shell", g, r.body);
+  if (agentsView) { paths = T.agentsOf(r.body); if (list !== "none") readTiles(g, list === "timer"); }
+  if (state === "open") show("open", r.body);
+}
+addEventListener("focus", () => { if (views()) recheck(gen); });
+// A different task (or none) in the address: the agents' view starts again for it. An open shell is its own view and stays.
+addEventListener("hashchange", async () => {
+  const next = T.viewOf(location.hash), agents = T.asksAgents(location.hash);
+  if (next === view && !(agents && mode !== "agents")) return;
+  if (!shellFrame || !["open", "hidden"].includes(state) || !agents) return start();
+  const g = gen;
+  if (agentsView) { agentsView.remove(); forgetAgents(); }
+  view = next;
+  const r = await readPlace();
+  if (g !== gen || r.status !== 200 || !T.availOf(r.body, location.hash).agents) return recheck(g);
+  openMode("agents", g, r.body);
+});
+document.addEventListener("visibilitychange", () => { if (!document.hidden && views()) recheck(gen); });
+status.addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  if (b.dataset.act === "retry") start();
+  else if (b.dataset.act === "signin") (window.top || window).location.reload();
+  else if (b.dataset.act === "mode" && T.MODES.includes(b.dataset.mode) && avail[b.dataset.mode] && state === "open") {
+    // The other mode's view is made the first time from a fresh read of the place (its paths come from there).
+    const g = gen, m = b.dataset.mode;
+    if ((m === "shell" && shellFrame) || (m === "agents" && agentsView)) return openMode(m, g);
+    const r = await readPlace();
+    if (g !== gen || r.status !== 200 || !T.availOf(r.body, location.hash)[m]) return recheck(g);
+    openMode(m, g, r.body);
+  }
+});
+// Hidden on: hide the open views (they stay connected) or open none. Off again: show the same ones, or start.
+function hiddenChanged() {
+  if (hidden) { if (state !== "hidden") { screen.hidden = true; show("hidden"); } }
+  else if (state === "hidden") { if (views()) { screen.hidden = false; show("open"); for (const x of tiles.values()) drawHead(x); drawBar(); } else start(); }
+}
+// A deployment's own controls (vendor/terminal/local.js) hide or show every terminal here without disconnecting it.
+window.studioTerminal = Object.freeze({ setHidden(on) { hidden = !!on; hiddenChanged(); } });
+start();
+</script>
+<!-- A deployment's own controls for this page (empty here). Its own module, after the page's: missing or failing, it changes nothing. -->
+<script type="module" src="/vendor/terminal/local.js?v=a29baf6b5d1afd2d62ec4ebb4cb8d11dc51453f33b5a59a8c8c566bf56abb4a9"></script>
+</body>
+</html>

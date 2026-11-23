@@ -1,53 +1,31 @@
 {
   "manifest_version": 1,
   "id": "canvas",
-  "name": "CANVAS",
+  "name": "Canvas",
   "summary": "Documents and canvases you and an agent can assemble and mark up together. Every drawing stays attached to a named element.",
   "category": "studio",
-  "maker": {
-    "name": "OpenRig",
-    "url": "https://github.com/openrig"
-  },
+  "maker": { "name": "OpenRig", "url": "https://openrig.dev" },
   "surface": {
     "entry": "app/canvas.html",
     "path": "/surfaces/canvas.html",
     "glyph": "✎",
+    "icon": "app-canvas",
     "hint": "paste images into a document or canvas, arrange them, and share structured annotations with an agent"
   },
+  "vendor": ["theme16", "kit"],
   "roots": {
-    "artifacts": {
-      "required": true
-    }
+    "artifacts": { "required": true }
   },
   "calls": {
-    "/api/annotations": {
-      "required": true
-    },
-    "/api/artifacts": {
-      "required": true
-    },
-    "/api/artifacts/item": {
-      "required": true
-    },
-    "/api/artifacts/annotations": {
-      "required": true
-    },
-    "/api/artifacts/annotations/migrate": {
-      "required": true
-    },
-    "/api/artifacts/assets": {
-      "required": true
-    },
-    "/api/artifacts/items": {
-      "required": true
-    },
-    "/api/artifacts/screenshot": {
-      "required": true
-    }
+    "/api/annotations": { "required": true },
+    "/api/artifacts": { "required": true },
+    "/api/artifacts/item": { "required": true },
+    "/api/artifacts/annotations": { "required": true },
+    "/api/artifacts/annotations/migrate": { "required": true },
+    "/api/artifacts/assets": { "required": true },
+    "/api/artifacts/items": { "required": true },
+    "/api/artifacts/screenshot": { "required": true }
   },
-  "provider": {
-    "package": "@openrig/studio-artifacts",
-    "required": true
-  },
-  "_rename_note": "WAS `artifacts`. The word collided with Claude's own artifacts, which is a real cost in a studio you drive by talking to agents: two different things called the same name in the same sentence. The PROVIDER keeps its name and its verbs — @openrig/studio-artifacts, /api/artifacts*, the /artifacts/ byte route and the `artifacts` root kind are all unchanged, because they describe what is STORED (saved views, marks, assets) rather than what the surface is CALLED. An app is a label on a rail; a verb is a contract with every consumer."
+  "provider": { "package": "@openrig/studio-artifacts", "required": true },
+  "_name_note": "The app is CANVAS; its provider, verbs, /artifacts/ byte route and `artifacts` root kind keep the word artifacts, because they describe what is stored rather than what the page is called."
 }

@@ -4,34 +4,37 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Canvas</title>
+<!-- Copyright 2026 mvschwarz. Licensed under the Apache License, Version 2.0. -->
+<link rel="stylesheet" href="/vendor/theme16/kit-app.css?v=0f29a66a3506f8dc6e55f2f1aae304054224369a7d0f7454927f02dff8e91355">
+<script type="module" src="/vendor/kit/or-icon.mjs?v=f4161695e69b4d3148b50b248541513b51efc9ec997f131b758bd47a003e69ff"></script>
 <style>
+  /* On the OpenRig UI kit (kit-app.css above): this page's colour names point at the kit's tokens. Dark only. The open document and
+     canvas keep their own page colours (the white sheet, the canvas board, the sample page): they are the work, not the app. */
   :root {
-    color-scheme:dark;
-    --bg:#121214; --fg:rgba(255,255,255,.95); --body:rgba(255,255,255,.68);
-    --dim:rgba(255,255,255,.52); --faint:rgba(255,255,255,.38);
-    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.16);
-    --card:rgba(255,255,255,.07); --raised:rgba(255,255,255,.12);
-    --coral:#ff6b5a; --indigo:#8b93ff; --sage:#7ea36f;
-    --sans:Helvetica,"Helvetica Neue",Arial,sans-serif;
+    --bg:var(--or-base); --fg:var(--or-text); --body:var(--or-text);
+    --dim:var(--or-muted); --faint:var(--or-dim);
+    --line:var(--or-line); --line2:var(--or-muted);
+    --card:var(--or-panel); --raised:color-mix(in srgb, var(--or-text) 6%, var(--or-panel));
+    --coral:var(--or-danger); --indigo:var(--or-signal); --sage:var(--or-ok);
+    --sans:var(--or-sans);
   }
   * { box-sizing:border-box; }
   [hidden] { display:none !important; }
   html,body { height:100%; margin:0; overflow:hidden; }
-  body { color:var(--fg); background:var(--bg); font:13.5px/1.4 var(--sans); -webkit-font-smoothing:antialiased; }
-  body::before { content:""; position:fixed; inset:-10%; z-index:-1; pointer-events:none;
-    background:radial-gradient(42% 55% at 18% 22%,rgba(139,147,255,.08),transparent 70%),radial-gradient(48% 60% at 82% 18%,rgba(255,107,90,.05),transparent 70%);
-    filter:blur(56px) saturate(1.2) brightness(.9); transform:scale(1.1); }
+  body { color:var(--fg); background:var(--bg); font:14px/20px var(--sans); -webkit-font-smoothing:antialiased; }
   button,input,textarea,select { font:inherit; }
   button { color:inherit; }
-  button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible { outline:2px solid var(--indigo); outline-offset:2px; }
-  /* One row, not 54px + the rest: that 54 was this surface's own header, and
-     leaving it would reserve a strip for a bar nothing draws. A stale magic
-     number is the usual souvenir of deleting chrome. */
+  button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible { outline:var(--or-focus); outline-offset:2px; }
+  /* One row: the shell draws the header, so this page reserves no strip for one. */
   .shell { height:100%; display:grid; grid-template-rows:minmax(0,1fr); }
-  .label { color:var(--faint); text-transform:uppercase; letter-spacing:.14em; font-size:10px; font-weight:700; }
-  .action,.icon-btn { border:1px solid var(--line); background:var(--card); border-radius:2px; min-height:30px; padding:0 11px; cursor:pointer; transition:.12s; font-size:9px; letter-spacing:.14em; text-transform:uppercase; font-weight:600; }
-  .action:hover,.icon-btn:hover { background:var(--raised); border-color:var(--line2); }
-  .action.primary { color:#101014; background:var(--fg); border-color:var(--fg); font-weight:700; }
+  .label { color:var(--dim); text-transform:uppercase; letter-spacing:var(--or-mono-label-track); font:var(--or-mono-label); }
+  /* The kit's small button (a tool page: toolbar and dialog actions). */
+  .action,.icon-btn { display:inline-flex; align-items:center; justify-content:center; gap:var(--or-space-1); border:0; box-shadow:var(--or-edge); background:transparent; border-radius:var(--or-radius-control); min-height:40px; padding:8px 14px; cursor:pointer; transition:.08s; font:var(--or-button-weight) var(--or-label-size)/var(--or-label-lh) var(--or-sans); letter-spacing:0; }
+  .action:hover,.icon-btn:hover { box-shadow:inset 0 0 0 1px var(--or-muted); }
+  .icon-btn { padding:8px 10px; white-space:nowrap; }
+  .action.primary { color:var(--or-on-signal); background:var(--or-signal); box-shadow:inset 0 0 0 1px var(--or-signal); }
+  .action.primary:hover { filter:brightness(1.08); }
+  .action:disabled,.icon-btn:disabled { background:transparent; color:var(--or-muted); box-shadow:none; outline:1px dashed var(--or-muted); outline-offset:-1px; cursor:not-allowed; }
   main { min-height:0; display:grid; grid-template-columns:220px minmax(360px,1fr); }
   /* COLLAPSED: a strip of type glyphs, not nothing. You lose the titles and keep
      the ability to switch — which is the whole point of collapsing rather than
@@ -47,91 +50,94 @@
   body.lib-collapsed .artifact-row { padding:9px 0; text-align:center; }
   /* span.artifact-glyph, not .artifact-glyph: the hide-everything rule above is
      `body.lib-collapsed .artifact-row span` at (0,2,2) and a bare
-     .artifact-glyph is (0,2,1), so the glyph stayed hidden in the very state
-     it exists for. Second time tonight the same trap — a rule that reads as
-     an exception is not one unless it out-specifies what it is excepting. */
+     .artifact-glyph is (0,2,1), so the glyph would stay hidden in the very
+     state it exists for. A rule that reads as an exception is not one unless
+     it out-specifies what it is excepting. */
   body.lib-collapsed .artifact-row span.artifact-glyph { display:block; font-size:15px; }
-  .artifact-glyph { display:none; }
+  /* span.artifact-glyph again, for the mirror-image reason: `.artifact-row
+     span` is (0,1,1) and a bare .artifact-glyph is (0,1,0), so the glyph
+     would show in the EXPANDED list where it is noise. */
+  .artifact-row span.artifact-glyph { display:none; }
   #libToggle { flex:none; width:26px; height:24px; padding:0; display:inline-flex;
-    align-items:center; justify-content:center; border:1px solid var(--line);
-    background:var(--card); border-radius:2px; color:var(--dim); cursor:pointer; }
-  #libToggle:hover { color:var(--fg); border-color:var(--line2); }
-  body.lib-collapsed #libToggle svg { transform:scaleX(-1); }
-  aside { min-height:0; overflow:auto; background:rgba(18,18,20,.6); border-right:1px solid var(--line); }
-  .aside-head { position:sticky; top:0; z-index:3; padding:17px 14px 11px; background:#151519; border-bottom:1px solid var(--line); }
+    align-items:center; justify-content:center; border:0; box-shadow:var(--or-edge);
+    background:transparent; border-radius:var(--or-radius-control); color:var(--dim); cursor:pointer; }
+  #libToggle:hover { color:var(--fg); box-shadow:inset 0 0 0 1px var(--or-muted); }
+  aside { min-height:0; overflow:auto; background:var(--or-base); box-shadow:inset -1px 0 0 var(--line); }
+  .aside-head { position:sticky; top:0; z-index:3; padding:16px 14px 12px; background:var(--or-base); box-shadow:var(--or-edge-bottom); }
   .aside-head-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; }
-  .aside-head h2 { font-size:15px; margin:0; letter-spacing:-.01em; }
+  .aside-head h2 { font-size:15px; font-weight:500; margin:0; }
   .artifact-list { padding:8px; display:grid; gap:5px; }
   .artifact-entry { position:relative; }
-  .artifact-row { width:100%; text-align:left; border:1px solid transparent; border-radius:2px; background:transparent; color:var(--body); padding:10px 58px 10px 10px; cursor:pointer; }
+  .artifact-row { width:100%; text-align:left; border:0; border-radius:var(--or-radius-control); background:transparent; color:var(--body); padding:10px 58px 10px 10px; cursor:pointer; }
   .artifact-row:hover { background:var(--card); color:var(--fg); }
-  .artifact-row.active { border-color:var(--line2); background:var(--card); color:var(--fg); }
-  .artifact-row strong { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .artifact-row.active { box-shadow:inset 2px 0 0 var(--or-text); background:var(--or-raised); color:var(--fg); }
+  .artifact-row strong { display:block; font-size:14px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .artifact-row span { display:block; color:var(--faint); font-size:11px; margin-top:4px; }
-  .artifact-row .artifact-type { display:inline-block; margin-top:7px; padding:2px 5px; border:1px solid var(--line); color:var(--dim); font-size:8px; letter-spacing:.1em; text-transform:uppercase; }
-  /* A VISIBLE AFFORDANCE. This said "Delete" in 8px uppercase, in --faint, inside
-     58px of reserved padding — present in the DOM and invisible on screen, which
-     is indistinguishable from absent. It is a × you can see, and it is bordered on
-     hover so it reads as a button rather than a decoration. */
+  .artifact-row .artifact-type { display:inline-block; margin-top:8px; padding:1px 8px; box-shadow:var(--or-edge); border-radius:var(--or-radius-control); color:var(--dim); font:400 11px/18px var(--or-mono); letter-spacing:.5px; text-transform:uppercase; }
+  /* A VISIBLE AFFORDANCE: a × you can see, bordered on hover so it reads as a
+     button rather than a decoration. */
   .delete-page { position:absolute; right:6px; top:50%; transform:translateY(-50%); z-index:2;
-    width:20px; height:20px; display:grid; place-items:center; border:1px solid transparent;
-    background:transparent; color:var(--dim); border-radius:2px; font-size:14px; line-height:1; cursor:pointer; }
-  .artifact-entry:hover .delete-page { color:var(--fg); border-color:var(--line); }
-  .delete-page:hover { color:var(--coral); background:rgba(255,107,90,.1); }
-  .stage { min-width:0; min-height:0; display:grid; grid-template-rows:39px minmax(0,1fr); background:rgba(5,7,12,.4); }
-  .stagebar { display:flex; align-items:center; gap:9px; padding:0 12px; border-bottom:1px solid var(--line); color:var(--faint); }
-  .stagebar .title { color:var(--body); font-weight:600; margin-right:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .status-dot { width:6px; height:6px; border-radius:50%; background:var(--sage); box-shadow:0 0 10px rgba(126,163,111,.7); }
+    width:28px; height:28px; display:grid; place-items:center; border:0;
+    background:transparent; color:var(--dim); border-radius:var(--or-radius-control); font-size:14px; line-height:1; cursor:pointer; }
+  .artifact-entry:hover .delete-page { color:var(--fg); box-shadow:var(--or-edge); }
+  .delete-page:hover { color:var(--coral); background:color-mix(in srgb, var(--or-danger) 12%, transparent); }
+  .stage { min-width:0; min-height:0; display:grid; grid-template-rows:48px minmax(0,1fr); background:var(--or-base); }
+  .stagebar { display:flex; align-items:center; gap:8px; padding:0 12px; box-shadow:var(--or-edge-bottom); color:var(--dim); }
+  .stagebar .title { color:var(--body); font-weight:500; margin-right:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .status-dot { width:7px; height:7px; border-radius:50%; background:var(--or-ok); flex:none; }   /* the kit's ok dot */
   .viewport-wrap { min-height:0; padding:20px; display:grid; place-items:center; overflow:auto; }
-  .viewport { position:relative; width:min(100%,1120px); height:min(100%,760px); min-height:420px; background:#fff; border:1px solid rgba(255,255,255,.2); box-shadow:0 18px 70px rgba(0,0,0,.42); }
-  .viewport.canvas-mode { width:100%; height:100%; max-width:none; min-height:0; background:#d8d5cd; }
+  .viewport { position:relative; width:min(100%,1120px); height:min(100%,760px); min-height:420px; background:#fff; box-shadow:var(--or-edge); border-radius:var(--or-radius-control); overflow:hidden; }   /* #fff: the document's own sheet */
+  .viewport.canvas-mode { width:100%; height:100%; max-width:none; min-height:0; background:#d8d5cd; }   /* the canvas board: the work's colour */
   iframe { display:block; width:100%; height:100%; border:0; background:white; }
-  .empty { color:var(--faint); line-height:1.55; padding:20px 14px; }
+  .empty { color:var(--dim); line-height:1.55; padding:20px 14px; }
   .welcome { display:grid; place-items:center; height:100%; text-align:center; padding:30px; color:var(--body); }
   .welcome-inner { max-width:450px; }
-  .welcome .glyph { font-size:50px; font-weight:200; color:var(--fg); line-height:1; margin-bottom:18px; }
-  .welcome h1 { margin:0 0 10px; color:var(--fg); font-size:25px; letter-spacing:-.035em; }
+  .welcome .glyph { color:var(--dim); line-height:1; margin-bottom:16px; }
+  .welcome h1 { margin:0 0 12px; color:var(--fg); font:var(--or-subhead-weight) var(--or-subhead-size)/var(--or-subhead-lh) var(--or-sans); letter-spacing:var(--or-subhead-track); }
   .welcome p { margin:0 auto 20px; line-height:1.55; }
-  dialog { color:var(--fg); width:min(780px,calc(100vw - 40px)); border:1px solid var(--line2); border-radius:3px; padding:0; background:#19191e; box-shadow:0 30px 100px rgba(0,0,0,.65); }
-  dialog::backdrop { background:rgba(0,0,0,.66); backdrop-filter:blur(3px); }
-  .dialog-head { display:flex; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); }
-  .dialog-head h2 { margin:0; font-size:16px; }
+  dialog { color:var(--fg); width:min(780px,calc(100vw - 40px)); border:0; border-radius:var(--or-radius-card); padding:0; background:var(--or-panel); box-shadow:var(--or-edge), var(--or-shadow-1); }   /* the kit menu's shadow */
+  dialog::backdrop { background:var(--or-scrim); }
+  .dialog-head { display:flex; align-items:center; padding:12px 16px; box-shadow:var(--or-edge-bottom); }
+  .dialog-head h2 { margin:0; font-size:17px; font-weight:500; }
   .dialog-head button { margin-left:auto; }
   .form { padding:16px; display:grid; gap:12px; }
   .field { display:grid; gap:6px; }
-  .field input,.field textarea,.field select { color:var(--fg); background:#101014; border:1px solid var(--line2); border-radius:2px; padding:9px; }
-  .field textarea { min-height:360px; resize:vertical; font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; tab-size:2; }
+  .field input,.field textarea,.field select { color:var(--fg); background:var(--or-base); border:0; box-shadow:var(--or-edge); border-radius:var(--or-radius-control); padding:10px 12px; }
+  .field input:hover,.field textarea:hover,.field select:hover { box-shadow:inset 0 0 0 1px var(--or-muted); }
+  .field textarea { min-height:360px; resize:vertical; font:13px/20px var(--or-mono); tab-size:2; }
   .dialog-actions { display:flex; justify-content:flex-end; gap:7px; padding:0 16px 16px; }
-  .toast { position:fixed; left:50%; bottom:24px; z-index:20; transform:translate(-50%,12px); opacity:0; pointer-events:none; color:#111; background:var(--fg); padding:9px 13px; border-radius:2px; font-weight:700; transition:.18s; }
+  .toast { position:fixed; left:50%; bottom:24px; z-index:20; transform:translate(-50%,12px); opacity:0; pointer-events:none; color:var(--or-base); background:var(--fg); padding:8px 14px; border-radius:var(--or-radius-control); font-weight:500; transition:.18s; }
   .toast.show { transform:translate(-50%,0); opacity:1; }
-  @media(max-width:760px) { header { padding-right:90px; } main { grid-template-columns:170px minmax(300px,1fr); } }
+  /* Narrow screens: the work pane may shrink, so the page never runs off the right edge. At 390 px the 300 px
+     minimum used to cut off the welcome, its button and New. A phone also starts with the library as a strip (below). */
+  @media(max-width:760px) { header { padding-right:90px; } main { grid-template-columns:170px minmax(0,1fr); } body.lib-collapsed main { grid-template-columns:46px minmax(0,1fr); } }
 </style>
 </head>
 <body>
 <div class="shell">
   <!-- NO TITLE BAR HERE ON PURPOSE. The shell draws one and this surface DECLARES
-       its half (contract/shell-protocol.md). It had to go with the rename anyway:
-       left alone it would have said ARTIFACTS in its own bar while the shell said
-       CANVAS above it — one app claiming two names, which is the exact confusion
-       the rename exists to remove. Edit HTML and Save view are header actions
-       now; see declareHeader(). -->
+       its half (contract/shell-protocol.md). Edit HTML and Save view are header
+       actions; see declareHeader(). -->
   <main>
     <aside>
-      <div class="aside-head"><span class="label">Library</span><div class="aside-head-row"><h2>Documents &amp; boards</h2><button id="libToggle" title="collapse the library to a strip" aria-label="collapse the library"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.25" y="2.75" width="13.5" height="10.5" rx="1.75" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.25 3.4v9.2" stroke="currentColor" stroke-width="1.3"/><path d="M2.6 4.4h2.3v7.2H2.6z" fill="currentColor" opacity=".85"/></svg></button><button id="newBtn" class="icon-btn">＋ New</button></div></div>
+      <div class="aside-head"><span class="label">Library</span><div class="aside-head-row"><h2>Documents &amp; boards</h2><button id="libToggle" title="collapse the library to a strip" aria-label="collapse the library"><or-icon name="collapse"></or-icon></button><button id="newBtn" class="icon-btn"><or-icon name="add"></or-icon> New</button></div></div>
       <div id="artifactList" class="artifact-list"></div>
     </aside>
     <section class="stage">
       <div class="stagebar"><span class="status-dot"></span><span id="stageTitle" class="title">No artifact open</span><span id="modeText">Browse</span></div>
       <div class="viewport-wrap">
-        <div id="welcome" class="welcome"><div class="welcome-inner"><div class="glyph">✎</div><h1>Draw where the work is.</h1><p>Open a document or canvas, then use MARKUP in the Studio header. Human and agent marks share one structured thread.</p><button id="exampleBtn" class="action primary">Make an example page</button></div></div>
-        <div id="viewport" class="viewport" hidden><iframe id="artifactFrame" title="Artifact preview"></iframe></div>
+        <div id="welcome" class="welcome"><div class="welcome-inner"><div class="glyph"><or-icon name="edit" size="48"></or-icon></div><h1>Draw where the work is.</h1><p>Open a document or canvas, then use MARKUP in the Studio header. Human and agent marks share one structured thread.</p><button id="exampleBtn" class="action primary">Make an example page</button></div></div>
+        <!-- The document runs none of its own script (and its provider says the same in its CSP), but stays this page's
+             origin: the annotation layer, the board's pan and zoom, paste and Save view all reach into it. Never add
+             allow-scripts beside allow-same-origin: together they let a document lift its own sandbox. -->
+        <div id="viewport" class="viewport" hidden><iframe id="artifactFrame" title="Artifact preview" sandbox="allow-same-origin"></iframe></div>
       </div>
     </section>
   </main>
 </div>
 
 <dialog id="editorDialog">
-  <div class="dialog-head"><h2 id="editorTitle">New artifact</h2><button class="icon-btn" data-close>×</button></div>
+  <div class="dialog-head"><h2 id="editorTitle">New artifact</h2><button class="icon-btn" data-close aria-label="Close"><or-icon name="close"></or-icon></button></div>
   <form id="editorForm" class="form">
     <div class="field"><label class="label" for="artifactName">Name</label><input id="artifactName" required maxlength="120"></div>
     <div id="idField" class="field"><label class="label" for="artifactId">ID</label><input id="artifactId" required pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="launch-page"></div>
@@ -155,11 +161,9 @@
 
   // ---- our half of the shell's header ---------------------------------------
   //
-  // DECLARED, never drawn — the shell renders it, so there is one header on
-  // screen instead of two. Edit HTML and Save view were buttons in this
-  // surface's own bar; they are actions now, and "Edit HTML" is ABSENT rather
-  // than disabled on a drawing board, which is what els.edit.hidden used to do.
-  // An action that cannot act is worse than no action.
+  // DECLARED, never drawn: the shell renders it, so there is one header on
+  // screen instead of two. "Edit HTML" is ABSENT rather than disabled on a
+  // drawing board. An action that cannot act is worse than no action.
   let canEdit = true;
   function declareHeader() {
     const actions = [];
@@ -187,6 +191,9 @@
   const remove = (url) => api(url, { method:"DELETE" });
   const postShell = (value) => { if (parent !== window) parent.postMessage(value, "*"); };
   const annotations = () => parent !== window ? parent.studioAnnotations : null;
+  // This page's own surface id, from where the Studio serves it (/surfaces/<id>.html). The annotation layer reports the
+  // surface it is attached to by that id, so a hardcoded name breaks the moment the app is renamed.
+  const SELF = (location.pathname.match(/\/surfaces\/([^/]+)\.html$/) || [])[1] || "canvas";
   const waitFor = async (read, timeout = 5000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
@@ -209,7 +216,7 @@
     declareAnnotationTarget();
     const scoped = await waitFor(() => {
       const value = layer.state();
-      return value.surfaceId === "artifacts" && value.scope && (same || value.scope !== before) ? value : null;
+      return value.surfaceId === SELF && value.scope && (same || value.scope !== before) ? value : null;
     });
     const migration = await send(`/api/artifacts/annotations/migrate?artifact=${encodeURIComponent(artifactId)}`, { scope:scoped.scope });
     if (migration.migrated) {
@@ -238,16 +245,14 @@
 
   const loadArtifacts = async () => {
     state.artifacts = (await api("/api/artifacts")).artifacts;
-    els.list.innerHTML = state.artifacts.length ? state.artifacts.map((item) => `<div class="artifact-entry"><button class="artifact-row ${state.current?.id === item.id ? "active" : ""}" data-id="${esc(item.id)}"><strong>${esc(item.name)}</strong><span>${esc(item.id)}</span><span class="artifact-type">${item.type === "canvas" ? "Canvas" : "Document"}</span><span class="artifact-glyph" aria-hidden="true">${item.type === "canvas" ? "◈" : "▤"}</span></button><button class="delete-page" data-delete-page="${esc(item.id)}" title="Delete ${esc(item.name)}" aria-label="Delete ${esc(item.name)}">×</button></div>`).join("") : '<div class="empty">No artifacts yet.</div>';
+    els.list.innerHTML = state.artifacts.length ? state.artifacts.map((item) => `<div class="artifact-entry"><button class="artifact-row ${state.current?.id === item.id ? "active" : ""}" data-id="${esc(item.id)}"><strong>${esc(item.name)}</strong><span>${esc(item.id)}</span><span class="artifact-type">${item.type === "canvas" ? "Canvas" : "Document"}</span><span class="artifact-glyph" aria-hidden="true"><or-icon name="${item.type === "canvas" ? "app-canvas" : "edit"}"></or-icon></span></button><button class="delete-page" data-delete-page="${esc(item.id)}" title="Delete ${esc(item.name)}" aria-label="Delete ${esc(item.name)}"><or-icon name="trash"></or-icon></button></div>`).join("") : '<div class="empty">No artifacts yet.</div>';
   };
   const openArtifact = async (id) => {
     const payload = await api(`/api/artifacts/item?id=${encodeURIComponent(id)}`);
     state.current = { ...payload.artifact, html:payload.html };
     state.items = state.current.type === "canvas" ? (await api(`/api/artifacts/assets?artifact=${encodeURIComponent(id)}`)).items : [];
-    // WHERE YOU WERE LOOKING SURVIVES REOPENING. This reset to a fixed 24,24,0.55
-    // every time, so panning and zooming were undone by switching boards and
-    // coming back — which is what "it does not save anything" meant. Items and
-    // marks were always persisted; the VIEW was the thing being thrown away.
+    // WHERE YOU WERE LOOKING SURVIVES REOPENING, so switching boards and coming
+    // back keeps your pan and zoom.
     //
     // localStorage, not the artifact: a viewport is a fact about this person at
     // this screen, and writing it into shared project data would mean one
@@ -437,11 +442,9 @@
   };
 
   // PASTE FOLLOWS FOCUS, so this listens in both documents AND takes focus when
-  // you touch the board. It was bound here and in the artifact frame, which is
-  // right — but nothing ever focused either one, so whether a paste arrived
-  // depended on where you had last clicked. Click a header button and the event
-  // fired in the shell, where nobody was listening, and the paste vanished. That
-  // is the "works sometimes" report.
+  // you touch the board. Without the focus, whether a paste arrived would depend
+  // on where you had last clicked: after a header button the event fires in the
+  // shell, where nobody is listening.
   window.addEventListener("paste", handlePaste);
   const focusBoard = () => { try { els.frame.contentWindow?.focus(); } catch {} };
   els.frame.addEventListener("load", () => {
@@ -466,12 +469,15 @@
   });
   // Remembered per browser, not per artifact: how much room you want the library
   // to take is a fact about you, not about the board you happen to have open.
-  const setLib = (collapsed) => {
+  const setLib = (collapsed, remember = true) => {
     document.body.classList.toggle("lib-collapsed", collapsed);
     $("#libToggle").title = collapsed ? "expand the library" : "collapse the library to a strip";
-    try { localStorage.setItem("canvas.lib", collapsed ? "1" : "0"); } catch {}
+    $("#libToggle").querySelector("or-icon")?.setAttribute("name", collapsed ? "expand" : "collapse");   // the kit icon says which way it goes
+    if (remember) try { localStorage.setItem("canvas.lib", collapsed ? "1" : "0"); } catch {}
   };
-  setLib((() => { try { return localStorage.getItem("canvas.lib") === "1"; } catch { return false; } })());
+  // The person's own choice wins; without one, a phone-width screen starts with the library as a strip, and that default isn't saved as
+  // their choice.
+  setLib((() => { try { const v = localStorage.getItem("canvas.lib"); if (v !== null) return v === "1"; } catch {} return matchMedia("(max-width: 520px)").matches; })(), false);
   $("#libToggle").addEventListener("click", () => setLib(!document.body.classList.contains("lib-collapsed")));
 
   $("#newBtn").addEventListener("click", () => {

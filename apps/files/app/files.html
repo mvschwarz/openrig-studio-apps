@@ -4,135 +4,192 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Files</title>
+<!-- Copyright 2026 mvschwarz. Licensed under the Apache License, Version 2.0. -->
+<link rel="stylesheet" href="/vendor/theme16/kit-app.css?v=0f29a66a3506f8dc6e55f2f1aae304054224369a7d0f7454927f02dff8e91355">
+<script type="module" src="/vendor/kit/or-icon.mjs?v=f4161695e69b4d3148b50b248541513b51efc9ec997f131b758bd47a003e69ff"></script>
 <script src="/vendor/marked/marked.min.js"></script>
 <style>
-  /* dark value ladder  */
+  /* Files on the OpenRig UI kit (kit-app.css above, files.css below): the kit's ground, type and controls; this block is layout. */
   :root {
-    --bg:#121214; --fg:rgba(255,255,255,.95); --body:rgba(255,255,255,.68);
-    --dim:rgba(255,255,255,.52); --faint:rgba(255,255,255,.38);
-    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.16);
-    --card:rgba(255,255,255,.07); --coral:#ff6b5a; --indigo:#8b93ff;
-    --sans:Helvetica,"Helvetica Neue",Arial,sans-serif;
-    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+    --bg:var(--or-base); --fg:var(--or-text); --body:var(--or-text); --dim:var(--or-muted); --faint:var(--or-muted);
+    --line:var(--or-line); --line2:var(--or-line); --card:var(--or-panel); --coral:var(--or-danger); --indigo:var(--or-connect);
+    --sans:var(--or-sans); --mono:var(--or-mono);
   }
   * { box-sizing:border-box; }
-  body { margin:0; height:100vh; background:var(--bg); color:var(--fg);
-    font-family:var(--sans); font-size:13.5px; display:flex; flex-direction:column;
-    -webkit-font-smoothing:antialiased; overflow:hidden; }
-  body::before { content:""; position:fixed; inset:-10%; z-index:0; pointer-events:none;
-    background: radial-gradient(42% 55% at 18% 22%, rgba(139,147,255,.08), transparent 70%),
-      radial-gradient(48% 60% at 82% 18%, rgba(255,107,90,.05), transparent 70%);
-    filter:blur(56px) saturate(1.2) brightness(.9); transform:scale(1.1); }
-  body > * { position:relative; z-index:1; }
-
-  .btn { background:var(--fg); color:#111; border:none; border-radius:2px;
-    font-family:var(--sans); font-size:9px; letter-spacing:.18em; text-transform:uppercase;
-    font-weight:600; padding:7px 14px; cursor:pointer; }
-  .btn:hover { background:rgba(255,255,255,.8); }
-  .btn[disabled] { background:rgba(255,255,255,.2); cursor:default; }
-  .ghost { background:none; border:1px solid var(--line2); border-radius:2px;
-    color:var(--dim); font-family:var(--sans); font-size:9px; letter-spacing:.16em;
-    text-transform:uppercase; padding:6px 12px; cursor:pointer; }
-  .ghost:hover { color:var(--fg); border-color:rgba(255,255,255,.35); }
-  .ghost.on { background:var(--fg); color:#111; border-color:var(--fg); font-weight:600; }
+  body { margin:0; height:100vh; background:var(--or-base); color:var(--or-text);
+    font-family:var(--or-sans); font-size:var(--or-data-size); display:flex; flex-direction:column; overflow:hidden; }
 
   .body { display:grid; grid-template-columns:250px minmax(0,1fr); flex:1; min-height:0; }
   .body > * { min-height:0; min-width:0; }
-  #rail { border-right:1px solid var(--line); overflow-y:auto; padding:8px 0;
-    background:rgba(255,255,255,.02); backdrop-filter:blur(14px); }
-  .lens { display:flex; gap:6px; padding:4px 12px 10px; }
-  #rail h3 { margin:10px 12px 4px; font-size:9px; letter-spacing:.2em; color:var(--faint);
-    text-transform:uppercase; font-weight:400; }
-  .node { display:flex; align-items:center; gap:6px; padding:3px 12px; cursor:pointer;
-    color:var(--body); font-size:12px; border-left:2px solid transparent;
+  #rail { box-shadow:inset -1px 0 0 var(--or-line); overflow-y:auto; padding:8px 0; background:var(--or-base); }
+  .lens { display:flex; gap:var(--or-space-2); padding:4px 12px 10px; }
+  #rail h3 { margin:10px 12px 4px; font:var(--or-mono-label); letter-spacing:var(--or-mono-label-track); color:var(--or-muted); text-transform:uppercase; }
+  .node { width:100%; border:0; background:none; text-align:left; font-family:inherit; font-weight:inherit; line-height:inherit; display:flex; align-items:center; gap:var(--or-space-2); padding:4px 12px; cursor:pointer;
+    color:var(--or-text); font-size:var(--or-label-size); border-left:2px solid transparent;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .node:hover { color:var(--fg); }
-  .node.on { color:var(--fg); border-left-color:var(--fg); background:rgba(255,255,255,.06); }
-  .node.kbd { outline:1px solid rgba(255,255,255,.35); outline-offset:-1px; }
-  .node .tri { width:12px; color:var(--faint); flex:none; font-size:12px; }
-  .node .ic { width:14px; text-align:center; flex:none; color:var(--faint); font-size:11px; }
+  .node:hover { background:var(--or-panel); }
+  .node.on { color:var(--or-text); border-left-color:var(--or-text); background:var(--or-raised); }
+  .node.kbd { outline:var(--or-focus); outline-offset:-3px; }
+  .node:focus-visible { outline:var(--or-focus); outline-offset:-3px; }
+  .node .name { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .node .tri { width:12px; height:var(--or-label-lh); color:var(--or-muted); flex:none; display:inline-flex; align-items:center; }   /* one text line tall, so the chevron centres on the name's first line */
+  .node .ic { width:16px; height:var(--or-label-lh); text-align:center; flex:none; color:var(--or-muted); display:inline-flex; align-items:center; justify-content:center; }
   .kids { margin-left:14px; }
+  .kids-empty { margin:4px 0 8px 14px; font-size:var(--or-label-size); color:var(--or-muted); }
 
   #stage { display:flex; flex-direction:column; min-width:0; }
   #viewer { flex:1; min-height:0; overflow:auto; padding:0; }
-  #empty { display:flex; height:100%; align-items:center; justify-content:center;
-    color:var(--faint); font-size:10.5px; letter-spacing:.2em; text-transform:uppercase; }
+  #empty { display:flex; height:100%; align-items:center; justify-content:center; color:var(--or-muted); }
   #ed { width:100%; height:100%; background:transparent; border:0; resize:none;
-    color:var(--fg); font:12.5px/1.6 var(--mono); padding:18px 22px; outline:none; }
-  #md { padding:24px 34px; max-width:860px; font-size:14px; line-height:1.65; color:var(--body); }
-  #md h1,#md h2,#md h3 { color:var(--fg); letter-spacing:-.02em; line-height:1.2; }
-  #md h1 { font-size:26px; } #md h2 { font-size:19px; } #md h3 { font-size:15px; }
-  #md code { font-family:var(--mono); font-size:.9em; background:rgba(255,255,255,.07);
-    padding:1px 5px; border-radius:2px; }
-  #md pre { background:rgba(255,255,255,.05); border:1px solid var(--line);
-    border-radius:2px; padding:12px 14px; overflow-x:auto; }
-  #md pre code { background:none; padding:0; }
-  #md a { color:var(--indigo); }
-  #md blockquote { border-left:2px solid var(--line2); margin-left:0; padding-left:14px; color:var(--dim); }
-  #md table { border-collapse:collapse; } #md td,#md th { border:1px solid var(--line);
-    padding:5px 10px; font-size:12.5px; }
+    color:var(--or-text); font:13px/20px var(--or-mono); padding:18px 22px; outline:none; }
+  #md { padding:24px 34px; max-width:860px; color:var(--or-text); }
+  #md h1,#md h2,#md h3 { color:var(--or-text); font-weight:500; }
+  #md code { font-family:var(--or-mono); font-size:.9em; background:var(--or-panel); box-shadow:var(--or-edge); padding:1px 5px; border-radius:var(--or-radius-control); }
+  #md pre { background:var(--or-panel); box-shadow:var(--or-edge); border-radius:var(--or-radius-card); padding:12px 14px; overflow-x:auto; }
+  #md pre code { background:none; box-shadow:none; padding:0; }
+  #md blockquote { box-shadow:inset 2px 0 0 var(--or-line); margin-left:0; padding-left:14px; color:var(--or-muted); }
+  #md table { border-collapse:collapse; } #md td,#md th { box-shadow:var(--or-edge-bottom); padding:8px 12px; font-size:var(--or-label-size); text-align:left; }
+  #md th { font:var(--or-mono-label); letter-spacing:var(--or-mono-label-track); text-transform:uppercase; color:var(--or-muted); }
   #md img { max-width:100%; }
   #viewer img.media { max-width:100%; max-height:100%; display:block; margin:0 auto; }
-  #viewer video { width:100%; height:100%; background:#000; }
-  #viewer iframe.twin { width:100%; height:100%; border:0; background:#0a0a0c; }
+  #viewer video { width:100%; height:100%; background:var(--or-base); }
+  #viewer iframe.twin { width:100%; height:100%; border:0; background:var(--or-base); }
 </style>
 <style>
   /* dark-scheme scrollbars without color-scheme the
      browser paints LIGHT scrollbars on our dark surfaces */
   html { color-scheme: dark; }
-  * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
+  * { scrollbar-width: thin; scrollbar-color: var(--or-line) transparent; }
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 4px; border: 2px solid transparent; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.32); }
+  ::-webkit-scrollbar-thumb { background: var(--or-line); border-radius: var(--or-radius-control); border: 2px solid transparent; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--or-off); }
+</style>
+<link rel="stylesheet" href="/vendor/theme16/tokens.css?v=7faafcef935ce605a2038569c215fa8dd8383df224d769e7c6823073834a8a9f">
+<link rel="stylesheet" href="/vendor/files-page/files.css?v=d6e1053ec4749675d79a7fbe3fc8ca4a925c3bedea70b2e82085759b0728eef9">
+<style>
+  /* Readable by people: deep folders keep their names, the folder column can be widened, rows carry no icon noise, and a file the
+     browser can't show says so with a Download instead of printing its bytes. After the theme: these win. */
+  .kids { margin-left:8px; }
+  .node { white-space:normal; align-items:flex-start; }
+  .node .name { overflow:visible; text-overflow:clip; overflow-wrap:anywhere; }
+  #railGrip { cursor:col-resize; box-shadow:inset 1px 0 0 var(--or-line); background:transparent; touch-action:none; }
+  #railGrip:hover, #railGrip:focus-visible, #railGrip.drag { background:var(--line2); }
+  @media (min-width:641px) { .body { grid-template-columns:var(--rail-w, 280px) 6px minmax(0,1fr); } }
+  @media (max-width:640px) { #railGrip { display:none; } }
+  #viewer object.doc { width:100%; height:100%; border:0; display:block; background:transparent; }   /* the PDF viewer paints its own; the fallback stays on the dark page */
+  .noview { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; height:100%; padding:32px;
+    text-align:center; color:var(--dim); }
+  .noview p { margin:0; } .noview .fname { color:var(--fg); overflow-wrap:anywhere; max-width:560px; }
 </style>
 </head>
 <body>
 <!-- NO TITLE BAR HERE ON PURPOSE. The shell already draws one, and this surface
      DECLARES its half of it (contract/shell-protocol.md: the header's left half
-     belongs to the app, the right half to the shell). Drawing our own put two
-     headers on one screen, and switching surfaces flipped between one and two —
-     which reads as a set of pages rather than one application. The title, the
-     path, the save state and both buttons are all still there; they are sent,
-     not drawn. See declareHeader() below. -->
+     belongs to the app, the right half to the shell). Drawing a second one would
+     put two headers on one screen. The title, the path, the save state and the
+     buttons are sent, not drawn. See declareHeader() below. -->
+<div id="filesAccess" hidden style="padding:12px 16px;box-shadow:var(--or-edge-bottom);color:var(--or-muted)"><span id="filesStatus" role="status">Read-only Files</span> <button id="downloadFile" class="or-btn btn" hidden>Download</button></div>
 <div class="body">
   <nav id="rail">
     <div class="lens">
-      <button class="ghost on" id="lensTree">FOLDERS</button>
-      <button class="ghost" id="lensTags">TAGS</button>
+      <button class="ghost or-btn btn small on" id="lensTree">Folders</button>
+      <button class="ghost or-btn btn small" id="lensTags">Tags</button>
     </div>
-    <input id="q" placeholder="search — or paste a /path and Enter"
-      style="width:calc(100% - 24px);margin:0 12px 8px;background:rgba(255,255,255,.05);border:none;border-radius:2px;color:var(--fg);font-family:var(--sans);font-size:12px;padding:8px 10px;outline:none" />
+    <label class="or-search" id="qWrap"><or-icon class="or-icon" name="search"></or-icon><input id="q" placeholder="search — or paste a /path and Enter"
+ /></label>
     <div id="tree"></div>
   </nav>
+  <div id="railGrip" role="separator" aria-orientation="vertical" aria-label="Resize the folder column" tabindex="0"></div>
   <main id="stage">
-    <div id="viewer"><div id="empty">pick a file — markdown, code, image, video, html</div></div>
+    <div id="viewer"><div id="empty">Pick a file to read: Markdown, code, a PDF, an image or a video.</div></div>
   </main>
 </div>
 <script>
-(() => {
+(async () => {
   const $ = (id) => document.getElementById(id);
+  // A folder row's disclosure: the kit's icons by name (vendor/kit/icons.mjs), never a glyph.
+  const TRI_CLOSED = '<or-icon name="next" size="12"></or-icon>', TRI_OPEN = '<or-icon name="down" size="12"></or-icon>';
   const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  // A Markdown file is shown, never run. marked doesn't sanitize, so the preview passes raw HTML through as text, and a link or
+  // image keeps its address only for a scheme that can't execute (a relative path or #anchor resolves against this page). Every
+  // address is escaped here; marked has already escaped a link's text and title and an image's alt text. Tested by
+  // test/files-markdown-safety.test.mjs, which runs this block against the vendored marked.
+  // markdown-safety:begin
+  const safeUrl = (href, schemes) => {
+    const h = String(href ?? "").trim();
+    if (h.startsWith("#")) return h;
+    try { return schemes.includes(new URL(h, location.href).protocol) ? h : null; } catch { return null; }
+  };
+  const MARKDOWN_SAFETY = { renderer: {
+    html: (html) => esc(html),
+    link(href, title, text) {
+      const h = safeUrl(href, ["http:", "https:", "mailto:"]);
+      return h === null ? text : `<a href="${esc(h)}"${title ? ` title="${title}"` : ""}>${text}</a>`;
+    },
+    image(href, title, text) {
+      const h = safeUrl(href, ["http:", "https:"]);
+      return h === null ? text : `<img src="${esc(h)}" alt="${text}"${title ? ` title="${title}"` : ""}>`;
+    },
+  } };
+  // markdown-safety:end
+  globalThis.marked?.use(MARKDOWN_SAFETY);   // marked loads first (the script tag above); without it the preview can't render at all
   const api = async (p, opts) => { const r = await fetch(p, opts); return { status: r.status, ...(await r.json().catch(() => ({}))) }; };
-  const ICONS = { markdown:"M", text:"{}", image:"▣", video:"🎞", audio:"♪", html:"<>", other:"·" };
 
   const st = { file:null, kind:null, mtime:null, dirty:false, mode:"preview", lens:"tree", root:null, watch:null };
+  // Presentation follows the server-verified mode; server routing separately refuses writes.
+  const place = await api("/api/studio/place", { signal: AbortSignal.timeout(2500) }).catch(() => null);
+  const readOnly = place?.workspace === "files";
+  $("filesAccess").hidden = !readOnly && parent !== window;
+  $("downloadFile").onclick = downloadFile;
+
+  // ---- the folder column's width: drag the grip or use Left/Right on it; this browser remembers it ----
+  const RAIL_W = "files.railWidth", grip = $("railGrip"), bodyEl = document.querySelector?.(".body");
+  if (grip && bodyEl) {
+  const setRail = (w, keep) => {
+    const max = Math.max(220, Math.round(innerWidth * 0.6)), px = Math.max(180, Math.min(max, Math.round(w)));
+    bodyEl.style.setProperty("--rail-w", px + "px"); grip.setAttribute("aria-valuenow", String(px));
+    if (keep) try { localStorage.setItem(RAIL_W, String(px)); } catch {}
+  };
+  { let saved = null; try { saved = Number(localStorage.getItem(RAIL_W)); } catch {} if (saved) setRail(saved, false); }
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault(); grip.setPointerCapture(e.pointerId); grip.classList.add("drag");
+    const left = bodyEl.getBoundingClientRect().left;
+    const move = (m) => setRail(m.clientX - left, false);
+    const up = (u) => { grip.releasePointerCapture(u.pointerId); grip.classList.remove("drag"); grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up); setRail(u.clientX - left, true); };
+    grip.addEventListener("pointermove", move); grip.addEventListener("pointerup", up);
+  });
+  grip.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault(); e.stopPropagation();   // not the tree's arrow keys
+    setRail($("rail").getBoundingClientRect().width + (e.key === "ArrowRight" ? 24 : -24), true);
+  });
+  }
 
   // ---- rail: lazy tree ----
   async function renderRoots() {
-    // ASK THE ROOTS QUESTION OF THE ROOTS VERB. This used to read the root list
-    // out of a no-dir /api/files/tree, which made the tree verb answer two
-    // different questions depending on its arguments — and tree is a DOCUMENTED
-    // shape, so that put the provider out of conformance with the SDK.
-    const d = await api("/api/files/roots");
+    const rail = ++railVersion;
+    // The roots come from the roots verb; /api/files/tree answers one folder's contents.
+    // Only a successful read with a list may say "no folders"; a failed or dropped read says it couldn't
+    // read them, with the reason, and offers to try again (nothing here means unknown, not empty).
+    let d = null; try { d = await api("/api/files/roots"); } catch { d = null; }
+    if (rail !== railVersion) return null;
+    if (!d || d.status !== 200 || !Array.isArray(d.roots)) {
+      const why = !d ? "the Files service didn't answer" : d.error || d.reason || `the Files service answered ${d.status}`;
+      $("tree").innerHTML = `<h3>Folders</h3><p class="empty" role="status" style="color:var(--faint);padding:4px 8px">The folder list couldn't be read (${esc(why)}), so this doesn't mean there are none.</p>`
+        + `<button type="button" class="node" id="retryRoots" style="color:var(--faint);font:inherit;background:none;border:0;width:100%;text-align:left;cursor:pointer"><span class="tri" aria-hidden="true"></span><span class="ic" aria-hidden="true"><or-icon name="refresh" size="14"></or-icon></span>Try again</button>`;
+      $("retryRoots").onclick = () => renderRoots();
+      return;
+    }
     const rootRows = (d.roots || []).map((p) => ({
       path: p, name: p.split("/").slice(-2).join("/"),
     }));
-    $("tree").innerHTML = "<h3>roots</h3>" + rootRows.map((r) =>
-      `<div class="node dir" data-dir="${esc(r.path)}"><span class="tri">▸</span><span class="ic">▦</span>${esc(r.name)}</div>`).join("")
-      + `<div class="node" id="addRoot" style="color:var(--faint)"><span class="tri"></span><span class="ic">+</span>add a root…</div>`;
-    $("addRoot").onclick = async () => {
-      const p = prompt("Absolute directory to add as a root\n(inside your home; key/secret dirs refused):");
+    $("tree").innerHTML = "<h3>Folders</h3>" + (rootRows.length ? "" : `<p class="empty" style="color:var(--faint);padding:4px 8px">No folders are set up yet.${readOnly ? "" : " Add one below."}</p>`) + rootRows.map((r) =>
+      `<button type="button" class="node dir" aria-expanded="false" data-dir="${esc(r.path)}" title="${esc(r.path)}"><span class="tri" aria-hidden="true">${TRI_CLOSED}</span><span class="name">${esc(r.name)}</span></button>`).join("")
+      + (readOnly ? "" : `<button type="button" class="node" id="addRoot" style="color:var(--faint)"><span class="tri" aria-hidden="true"></span><span class="ic" aria-hidden="true"><or-icon name="add" size="14"></or-icon></span>Add a folder…</button>`);
+    if (!readOnly) $("addRoot").onclick = async () => {
+      const p = prompt("Absolute directory to add as a root\n(inside your home; folders that hold keys or credentials are refused):");
       if (!p) return;
       const r = await api("/api/files/roots", { method: "POST",
         headers: { "content-type": "application/json" }, body: JSON.stringify({ op: "add", path: p.trim() }) });
@@ -140,45 +197,73 @@
       renderRoots();
     };
     wireTree();
+    return rail;
   }
   function wireTree() {
-    for (const el of document.querySelectorAll(".node.dir")) el.onclick = async (e) => {
-      e.stopPropagation();
-      const open = el.nextElementSibling?.classList?.contains("kids");
-      if (open) { el.nextElementSibling.remove(); el.querySelector(".tri").textContent = "▸"; return; }
-      const d = await api("/api/files/tree?dir=" + encodeURIComponent(el.dataset.dir));
-      if (!d.ok) return;
-      const kids = document.createElement("div");
-      kids.className = "kids";
-      kids.innerHTML = d.dirs.map((x) =>
-          `<div class="node dir" data-dir="${esc(x.path)}"><span class="tri">▸</span><span class="ic">▦</span>${esc(x.name)}</div>`).join("")
-        + d.files.map((f) =>
-          `<div class="node file" data-path="${esc(f.path)}"><span class="tri"></span><span class="ic">${ICONS[f.kind] || "·"}</span>${esc(f.name)}</div>`).join("");
-      el.after(kids);
-      el.querySelector(".tri").textContent = "▾";
-      st.root = el.dataset.dir.split("/").slice(0, 6).join("/");
-      wireTree();
-    };
+    for (const el of document.querySelectorAll(".node.dir")) el.onclick = (e) => { e.stopPropagation(); toggleDir(el); };
     for (const el of document.querySelectorAll(".node.file")) el.onclick = () => openFile(el.dataset.path, el);
+  }
+  // Open or close one folder row; resolves once its children are drawn (a folder link waits on it, see revealDir).
+  async function toggleDir(el) {
+    const rail = railVersion;
+    const open = el.nextElementSibling?.classList?.contains("kids");
+    if (open) { el.nextElementSibling.remove(); el.setAttribute("aria-expanded", "false"); el.querySelector(".tri").innerHTML = TRI_CLOSED; return; }
+    const d = await api("/api/files/tree?dir=" + encodeURIComponent(el.dataset.dir));
+    if (rail !== railVersion) return;
+    if (!d.ok) return;
+    const kids = document.createElement("div");
+    kids.className = "kids";
+    kids.innerHTML = d.dirs.map((x) =>
+        `<button type="button" class="node dir" aria-expanded="false" data-dir="${esc(x.path)}" title="${esc(x.name)}"><span class="tri" aria-hidden="true">${TRI_CLOSED}</span><span class="name">${esc(x.name)}</span></button>`).join("")
+      + d.files.map((f) =>
+        `<button type="button" class="node file" data-path="${esc(f.path)}" title="${esc(f.name)}"><span class="tri" aria-hidden="true"></span><span class="name">${esc(f.name)}</span></button>`).join("");
+    if (!d.dirs.length && !d.files.length) kids.innerHTML = '<p class="kids-empty">This folder is empty.</p>';
+    el.after(kids);
+    el.querySelector(".tri").innerHTML = TRI_OPEN; el.setAttribute("aria-expanded", "true");
+    st.root = el.dataset.dir.split("/").slice(0, 6).join("/");
+    wireTree();
+  }
+  // A folder link (#open=<folder name>/<path>/): open the tree down to that folder and mark it, one level at a time.
+  async function revealDir(dir, version) {
+    const want = dir.replace(/\/+$/, ""), rail = railVersion;
+    for (let i = 0; i < 64; i++) {
+      if (version !== openVersion || rail !== railVersion) return false;
+      const rows = [...document.querySelectorAll("#tree .node.dir[data-dir]")];
+      const at = rows.find((x) => x.dataset.dir.replace(/\/+$/, "") === want);
+      if (at) {
+        if (at.getAttribute("aria-expanded") !== "true") await toggleDir(at);
+        if (version !== openVersion || rail !== railVersion) return false;
+        setActive(at); at.scrollIntoView({ block: "nearest" }); at.focus({ preventScroll: true });
+        return true;
+      }
+      const step = rows.filter((x) => want.startsWith(x.dataset.dir.replace(/\/+$/, "") + "/") && x.getAttribute("aria-expanded") !== "true")
+        .sort((a, b) => b.dataset.dir.length - a.dataset.dir.length)[0];
+      if (!step) return false;
+      await toggleDir(step);
+    }
+    return false;
   }
 
   async function renderTags() {
+    const rail = ++railVersion;
     const roots = (await api("/api/files/roots")).roots || [];
+    if (rail !== railVersion) return;
     const ws = roots.find((p) => /workspace/.test(p)) || roots[0];
     if (!ws) return;
     const d = await api("/api/files/tags?root=" + encodeURIComponent(ws));
+    if (rail !== railVersion) return;
     const base = d.tagsPath ? d.tagsPath.replace(/tags\.jsonl$/, "") : ws.path + "/";
     $("tree").innerHTML = "<h3>tags</h3>" + (Object.keys(d.tags || {}).length
       ? Object.entries(d.tags).map(([tag, assets]) => `
-        <div class="node dir" data-tag="${esc(tag)}"><span class="tri">▸</span><span class="ic">#</span>${esc(tag)} · ${assets.length}</div>
+        <button type="button" class="node dir" aria-expanded="false" data-tag="${esc(tag)}"><span class="tri" aria-hidden="true">${TRI_CLOSED}</span><span class="ic" aria-hidden="true">#</span><span class="name">${esc(tag)} · ${assets.length}</span></button>
         <div class="kids" style="display:none">${assets.map((a) => `
-          <div class="node file" data-path="${esc(base)}media/renders/${esc(a)}"><span class="tri"></span><span class="ic">▶</span>${esc(a)}</div>`).join("")}</div>`).join("")
+          <button type="button" class="node file" data-path="${esc(base)}media/renders/${esc(a)}"><span class="tri" aria-hidden="true"></span><span class="ic" aria-hidden="true"><or-icon name="play"></or-icon></span><span class="name">${esc(a)}</span></button>`).join("")}</div>`).join("")
       : '<div class="node" style="color:var(--faint)">no tags.jsonl in this workspace</div>');
     for (const el of document.querySelectorAll(".node[data-tag]")) el.onclick = () => {
       const kids = el.nextElementSibling;
       const open = kids.style.display !== "none";
-      kids.style.display = open ? "none" : "";
-      el.querySelector(".tri").textContent = open ? "▸" : "▾";
+      kids.style.display = open ? "none" : ""; el.setAttribute("aria-expanded", String(!open));
+      el.querySelector(".tri").innerHTML = open ? TRI_CLOSED : TRI_OPEN;
     };
     for (const el of document.querySelectorAll(".node.file")) el.onclick = () => openFile(el.dataset.path, el);
   }
@@ -187,14 +272,39 @@
   function setActive(el) {
     document.querySelectorAll(".node.on").forEach((x) => x.classList.remove("on"));
     if (el) el.classList.add("on");
+    // One row looks current: focus left on another row (a folder link focuses its folder; keyboard moves) follows the row now open.
+    document.querySelectorAll(".node.kbd").forEach((x) => { if (x !== el) x.classList.remove("kbd"); });
+    const f = document.activeElement;
+    if (f && f !== el && f.classList && f.classList.contains("node") && f.closest && f.closest("#tree")) {
+      if (el && el.isConnected !== false) el.focus({ preventScroll: true }); else f.blur();
+    }
   }
-  async function openFile(p, el) {
+  let openVersion = 0;
+  // A reload or a return keeps the document open (this tab only, and only its path).
+  const LAST_OPEN = "files.lastOpen";
+  async function openFile(p, el, restoring = false) {
     if (st.dirty && !confirm("Discard unsaved changes?")) return;
+    const version = ++openVersion;
     clearInterval(st.watch);
+    st.watch = null;
     setActive(el);
+    st.file = null; st.kind = null;
+    if (typeof p === "string" && p.endsWith("/")) {
+      Object.assign(st, { mtime:null, dirty:false, note:"", content:null });
+      try { sessionStorage.removeItem(LAST_OPEN); } catch {}
+      declareHeader();
+      parent.postMessage({ t:"header", title:"FILES", actions:[], crumb:"" }, "*");
+      say("Opening this folder…");   // the old editor goes now, so nothing typed while the tree opens is lost unasked
+      return revealOrSay(p, version);   // a folder: reveal it only after protecting the editor and clearing the old selection
+    }
+    declareHeader();
     const d = await api("/api/files/read?path=" + encodeURIComponent(p));
-    if (!d.ok) { $("viewer").innerHTML = `<div id="empty">${esc(d.error || "unreadable")}</div>`; return; }
+    if (version !== openVersion) return;
+    if (!d.ok && restoring) { try { sessionStorage.removeItem(LAST_OPEN); } catch {} return; }   // gone since: back to choosing a file, no error for something not asked for
+    // An empty crumb, not an omitted one: omitted, the top bar would keep naming the file that was open before.
+    if (!d.ok) { $("viewer").innerHTML = `<div id="empty">${esc(d.error || "unreadable")}</div>`; parent.postMessage({ t: "header", title: "FILES", actions: [], crumb: "" }, "*"); return; }
     Object.assign(st, { file:p, kind:d.kind, mtime:d.mtime, dirty:false, mode:"preview", note:"" });
+    try { sessionStorage.setItem(LAST_OPEN, p); } catch {}
     declareHeader();
     render(d);
     // agent co-editing: watch mtime; refresh view when someone else writes
@@ -203,7 +313,7 @@
       const c = await api("/api/files/read?path=" + encodeURIComponent(st.file));
       if (c.ok && c.mtime !== st.mtime) { st.mtime = c.mtime; render(c); flash("updated by agent"); }
     }, 2000);
-    try { fetch("/api/focus", { method:"POST", headers:{ "content-type":"application/json" },
+    if (!readOnly) try { fetch("/api/focus", { method:"POST", headers:{ "content-type":"application/json" },
       body: JSON.stringify({ surface:"files", selection:[p], view:st.root, ts:Date.now() }) }).catch(()=>{}); } catch {}
   }
   function render(d) {
@@ -232,12 +342,24 @@
           if ($("ed")) { $("ed").value = c.content ?? ""; st.content = c.content; wireEditor(); }
         });
       }
+    } else if (d.kind === "pdf") {
+      // The browser's own PDF viewer (same-origin raw bytes). If it can't show one, the object's fallback offers the Download.
+      v.innerHTML = `<object class="doc" type="application/pdf" data="${esc(d.raw || ("/api/files/raw?path=" + encodeURIComponent(st.file)))}" aria-label="PDF preview">${noView("This browser can't show the PDF here.")}</object>`;
+      wireNoView();
     } else {
-      v.innerHTML = `<div id="empty">no viewer for this type yet</div>`;
+      v.innerHTML = noView("This file can't be previewed here.");
+      wireNoView();
     }
   }
+  // A file the viewer can't show: its name, one sentence, and the same Download as the header's (never its bytes as text).
+  function noView(sentence) {
+    const name = (st.file || "").split("/").pop();
+    return `<div class="noview" role="status"><p class="fname">${esc(name)}</p><p>${esc(sentence)} Download it to open it on your computer.</p><button type="button" class="or-btn btn dl-here">Download</button></div>`;
+  }
+  function wireNoView() { for (const b of document.querySelectorAll("#viewer .dl-here")) b.onclick = downloadFile; }
   function wireEditor() {
-    $("ed").addEventListener("input", () => { st.dirty = true; status("unsaved"); });
+    $("ed").readOnly = readOnly;
+    if (!readOnly) $("ed").addEventListener("input", () => { st.dirty = true; status("unsaved"); });
     $("ed").addEventListener("keydown", (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); save(); }
     });
@@ -246,24 +368,24 @@
   //
   // DECLARED, never drawn. The shell renders it, which is what keeps exactly one
   // header on screen and keeps the shell from being handed markup it did not
-  // write. Everything the old <header> held is here: the title, the path, the
-  // save state, and the two buttons.
+  // write: the title, the path, the save state, and the buttons.
   //
   // Which buttons exist is a function of what is open, so this is called on
   // every state change rather than once at load. An action that is not offered
-  // is ABSENT rather than disabled — a SAVE that cannot save is worse than no
-  // SAVE, and the old bar hid them with display:none for the same reason.
+  // is ABSENT rather than disabled: a SAVE that cannot save is worse than no SAVE.
   function declareHeader() {
+    $("filesStatus").textContent = [readOnly ? "Read-only Files" : "Files", st.file, st.note].filter(Boolean).join(" · ");
+    $("downloadFile").hidden = !st.file;
     const actions = [];
+    if (st.file) actions.push({ id: "download", label: "Download" });
     if (st.kind === "markdown" || st.kind === "html") {
-      actions.push({ id: "raw", label: "RAW", on: st.mode === "raw" });
+      actions.push({ id: "raw", label: "Raw", on: st.mode === "raw" });
     }
-    if (st.kind === "markdown" || st.kind === "text") {
-      actions.push({ id: "save", label: st.dirty ? "SAVE •" : "SAVE" });
+    if (!readOnly && (st.kind === "markdown" || st.kind === "text")) {
+      actions.push({ id: "save", label: st.dirty ? "Save •" : "Save" });
     }
-    // The save state used to be its own element beside the path. It rides the
-    // crumb now, because the crumb is the app's one line of free text and two
-    // slots for one sentence is how they drift apart.
+    // The save state rides the crumb, because the crumb is the app's one line of
+    // free text and two slots for one sentence drift apart.
     //
     // With nothing open the crumb is OMITTED rather than sent empty: an absent
     // field keeps the shell's own hint from the manifest, and a blank one
@@ -275,6 +397,7 @@
   }
   window.addEventListener("message", (e) => {
     if (e.data?.t !== "header-action") return;
+    if (e.data.id === "download") downloadFile();
     if (e.data.id === "save") save();
     if (e.data.id === "raw") toggleRaw();
   });
@@ -282,7 +405,26 @@
   const status = (t) => { st.note = t; declareHeader(); };
   const flash = (t) => { status(t); setTimeout(() => !st.dirty && status(""), 2500); };
 
+  async function downloadFile() {
+    const file = st.file;
+    if (!file) return;
+    try {
+      // Read the saved bytes again through the same authorized route, not the editor buffer.
+      const response = await fetch("/api/files/raw?path=" + encodeURIComponent(file));
+      if (!response.ok) throw new Error("download refused");
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url; link.download = file.split("/").pop() || "download";
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      if (st.file === file) status("Download started");
+    } catch {
+      if (st.file === file) status("Could not download this file. Try again.");
+    }
+  }
+
   async function save() {
+    if (readOnly) return;
     const ed = $("ed"); if (!ed) return;
     const r = await api("/api/files/write", { method:"POST",
       headers:{ "content-type":"application/json" },
@@ -305,22 +447,27 @@
     declareHeader();
     api("/api/files/read?path=" + encodeURIComponent(st.file)).then(render);
   }
-  $("lensTree").onclick = () => { st.lens = "tree"; $("lensTree").classList.add("on"); $("lensTags").classList.remove("on"); renderRoots(); };
-  $("lensTags").onclick = () => { st.lens = "tags"; $("lensTags").classList.add("on"); $("lensTree").classList.remove("on"); renderTags(); };
+  $("lensTree").onclick = () => { clearTimeout(qTimer); ++railVersion; $("q").value = ""; st.lens = "tree"; $("lensTree").classList.add("on"); $("lensTags").classList.remove("on"); renderRoots(); };
+  $("lensTags").onclick = () => { clearTimeout(qTimer); ++railVersion; $("q").value = ""; st.lens = "tags"; $("lensTags").classList.add("on"); $("lensTree").classList.remove("on"); renderTags(); };
 
   // search box: /path + Enter jumps straight there; anything else searches names
-  let qTimer = null;
+  let qTimer = null, railVersion = 0;
   $("q").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && $("q").value.trim().startsWith("/")) openFile($("q").value.trim(), null);
+    if (e.key === "Enter" && $("q").value.trim().startsWith("/")) {
+      e.preventDefault();   // the reveal can focus a folder row; Enter belongs to this path, not that newly focused button
+      openFile($("q").value.trim(), null);
+    }
   });
   $("q").addEventListener("input", () => {
     clearTimeout(qTimer);
+    const search = ++railVersion;
     const q = $("q").value.trim();
     if (q.startsWith("/") || q.length < 2) { if (!q) (st.lens === "tags" ? renderTags : renderRoots)(); return; }
     qTimer = setTimeout(async () => {
       const d = await api("/api/files/search?q=" + encodeURIComponent(q));
+      if (search !== railVersion) return;
       $("tree").innerHTML = `<h3>results · ${d.hits.length}</h3>` + d.hits.map((f) => `
-        <div class="node file" data-path="${esc(f.path)}" title="${esc(f.path)}"><span class="tri"></span><span class="ic">${ICONS[f.kind] || "·"}</span>${esc(f.name)}</div>`).join("")
+        <button type="button" class="node file" data-path="${esc(f.path)}" title="${esc(f.path)}"><span class="tri" aria-hidden="true"></span><span class="name">${esc(f.name)}</span></button>`).join("")
         || '<div class="node" style="color:var(--faint)">nothing matched</div>';
       for (const el of document.querySelectorAll("#tree .node.file")) el.onclick = () => openFile(el.dataset.path, el);
     }, 250);
@@ -328,7 +475,7 @@
 
   // agent-driven navigation: an agent POSTs /api/files/goto and this view follows
   let lastGoto = Date.now();
-  setInterval(async () => {
+  if (!readOnly) setInterval(async () => {
     const d = await api("/api/files/goto").catch(() => null);
     if (d && d.goto && d.goto.ts > lastGoto) { lastGoto = d.goto.ts; openFile(d.goto.path, null); flash("opened by agent"); }
   }, 3000);
@@ -338,26 +485,28 @@
   const visNodes = () => [...document.querySelectorAll("#tree .node")].filter((n) => n.offsetParent !== null && !n.id);
   document.addEventListener("keydown", (e) => {
     if (["TEXTAREA", "INPUT"].includes(e.target.tagName)) return;
+    const focused = e.target.closest?.("#tree .node:not([id])");
+    if (!focused && e.target.closest?.("button, a")) return;
     if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"].includes(e.key)) return;
     const nodes = visNodes(); if (!nodes.length) return;
     e.preventDefault();
-    let i = nodes.findIndex((n) => n.classList.contains("kbd"));
+    let i = focused ? nodes.indexOf(focused) : nodes.findIndex((n) => n.classList.contains("kbd"));
     const setK = (j) => { nodes.forEach((n) => n.classList.remove("kbd"));
       i = Math.max(0, Math.min(nodes.length - 1, j));
-      nodes[i].classList.add("kbd"); nodes[i].scrollIntoView({ block: "nearest" }); };
+      nodes[i].classList.add("kbd"); nodes[i].focus({ preventScroll: true }); nodes[i].scrollIntoView({ block: "nearest" }); };
     if (i === -1) { setK(0); return; }
     const cur = nodes[i];
     const isDir = cur.classList.contains("dir") || cur.dataset.tag !== undefined;
-    const expanded = cur.querySelector(".tri") && cur.querySelector(".tri").textContent === "▾";
+    const expanded = cur.getAttribute("aria-expanded") === "true";
     if (e.key === "ArrowDown") setK(i + 1);
     else if (e.key === "ArrowUp") setK(i - 1);
-    else if (e.key === "Enter") { cur.click(); if (!isDir) return; setTimeout(() => setK(i), 150); }
+    else if (e.key === "Enter") cur.click();
     else if (e.key === "ArrowRight") {
-      if (isDir && !expanded) { cur.click(); setTimeout(() => setK(i), 150); }
+      if (isDir && !expanded) cur.click();
       else if (isDir && expanded) setK(i + 1);
       else cur.click();
     } else if (e.key === "ArrowLeft") {
-      if (isDir && expanded) { cur.click(); setTimeout(() => setK(i), 150); }
+      if (isDir && expanded) cur.click();
       else {
         const depth = (n) => { let d = 0, p = n.parentElement; while (p && p.id !== "tree") { if (p.classList.contains("kids")) d++; p = p.parentElement; } return d; };
         const myD = depth(cur);
@@ -366,7 +515,67 @@
     }
   });
 
-  renderRoots();
+  const rootsReady = renderRoots();
+  // Opened from a link on another page (#open=<path>, an "Open in Files" link): the same read as a click in the tree, so the read
+  // route decides; a path outside this Studio's folders is refused there and the viewer says so.
+  // Also when the page is already open and only its #open= changes (the Studio opening Files at a file from another surface).
+  // The place is "<folder name>/<path in it>" (links never carry the machine's absolute path); an old link's absolute path is still
+  // accepted, and the read route decides either way. A place that names no folder, or climbs out, opens nothing and says so.
+  // One folder's name, by the same rule over the whole list (rootNames, below).
+  const rootName = (rs, i) => rootNames(rs)[i];
+  const rootNames = (rs) => {
+    const base = (x) => x.slice(x.lastIndexOf("/") + 1), count = new Map();
+    for (const r of rs) count.set(base(r), (count.get(base(r)) || 0) + 1);
+    const taken = new Set(rs.map(base).filter((b) => count.get(b) === 1)), next = new Map();
+    return rs.map((r) => {
+      const b = base(r); if (count.get(b) === 1) return b;
+      let k = next.get(b) || 1, n; do n = `${b}~${k++}`; while (taken.has(n));
+      next.set(b, k); taken.add(n); return n;
+    });
+  };
+  const pathOfPlace = (want, roots) => {
+    if (want.startsWith("/")) return want;
+    const folder = want.endsWith("/"), [name, ...rest] = want.replace(/\/+$/, "").split("/");
+    if (folder && !rest.length) { const rs0 = roots.filter((r) => typeof r === "string" && r.startsWith("/")).map((r) => r.replace(/\/+$/, "")); const k = rs0.findIndex((_, j) => rootName(rs0, j) === name); return k < 0 ? null : rs0[k] + "/"; }
+    if (!rest.length || rest.some((s) => !s || s === "." || s === "..")) return null;
+    const rs = roots.filter((r) => typeof r === "string" && r.startsWith("/")).map((r) => r.replace(/\/+$/, ""));
+    const i = rs.findIndex((_, k) => rootName(rs, k) === name);
+    return i < 0 ? null : `${rs[i]}/${rest.join("/")}${folder ? "/" : ""}`;
+  };
+  // Only the newest place opens: a later fragment (or a cleared one) makes an earlier lookup stale. A folder list that couldn't be
+  // read says so and opens nothing; only a list that was read can say the file isn't in the folders.
+  let placeGen = 0;
+  // A folder place: the tree opens down to it; the viewer asks for a file. One the tree can't reach says so.
+  const revealOrSay = async (dir, version) => {
+    clearTimeout(qTimer); $("q").value = "";
+    await rootsReady;
+    if (version !== openVersion) return;
+    ++railVersion;
+    // Tags and search replace the tree. A folder destination restores its own tree before walking it.
+    if (st.lens !== "tree" || !document.querySelector("#tree .node.dir[data-dir]")) {
+      st.lens = "tree"; $("lensTree").classList.add("on"); $("lensTags").classList.remove("on");
+      const rendered = await renderRoots();
+      if (rendered === null || version !== openVersion) return;
+      if ($("retryRoots")) { say("The folder list couldn't be read. Try again."); return; }
+    }
+    const rail = railVersion, found = await revealDir(dir, version);
+    if (version !== openVersion || rail !== railVersion) return;
+    if (found) say("Pick a file in this folder.");
+    else say("That folder isn't in this Studio's folders.");
+  };
+  const say = (t) => { $("viewer").innerHTML = `<div id="empty">${t}</div>`; };   // only the fixed sentences below, never data
+  const openFromHash = async () => {
+    const g = ++placeGen, want = new URLSearchParams(location.hash.slice(1)).get("open"); if (!want) return;
+    if (want.startsWith("/")) return openFile(want, null);   // an old link's absolute path: the read route decides
+    let d = null; try { d = await api("/api/files/roots"); } catch { d = null; }
+    if (g !== placeGen || new URLSearchParams(location.hash.slice(1)).get("open") !== want) return;
+    if (!d || !Array.isArray(d.roots) || (d.status != null && d.status !== 200)) return say("The folder list couldn't be read, so the file couldn't be opened. Try again in a moment.");
+    const p = pathOfPlace(want, d.roots);
+    if (p) openFile(p, null); else say("That file isn't in this Studio's folders.");
+  };
+  openFromHash();
+  addEventListener("hashchange", openFromHash);
+  if (!new URLSearchParams(location.hash.slice(1)).get("open")) { let last = null; try { last = sessionStorage.getItem(LAST_OPEN); } catch {} if (last) openFile(last, null, true); }
   // Declare at load as well as on every change: without this the shell shows the
   // manifest's name and hint until the first file is opened and then swaps to
   // ours, so the header changes shape for a reason the user did nothing to cause.

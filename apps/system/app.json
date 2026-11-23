@@ -1,0 +1,25 @@
+{
+  "manifest_version": 1,
+  "id": "system",
+  "name": "Machine",
+  "summary": "How full this machine is, what's slowing it down, and safe fixes.",
+  "category": "studio",
+  "maker": { "name": "OpenRig", "url": "https://openrig.dev" },
+  "surface": {
+    "entry": "app/system.html",
+    "path": "/surfaces/system.html",
+    "glyph": "▥",
+    "icon": "machines",
+    "hint": "how full this machine is, what's slowing it down, and safe fixes"
+  },
+  "roots": {
+    "project": { "required": false }
+  },
+  "provider": { "package": "@openrig/studio-system", "required": true },
+  "vendor": ["theme16", "kit"],
+  "calls": {
+    "/api/system/status": { "required": true },
+    "/api/system/big-folders": { "required": false },
+    "/api/system/clean": { "required": false }
+  }
+}

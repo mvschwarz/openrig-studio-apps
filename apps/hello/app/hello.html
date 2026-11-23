@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hello</title>
+<!-- The smallest Studio app: one page, one call to its provider on the Studio's own origin. Copyright 2026 mvschwarz.
+     Licensed under the Apache License, Version 2.0. -->
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 24px; background: #111210; color: #eeeae2; font: 16px/1.5 system-ui, sans-serif; }
+  input, button { font: inherit; padding: 8px 12px; border-radius: 4px; border: 1px solid #34372f; background: #191b18; color: inherit; }
+  button { cursor: pointer; }
+  #answer { margin-top: 16px; min-height: 1.5em; }
+</style>
+</head>
+<body>
+<h1>Hello</h1>
+<form id="ask"><input id="name" value="Studio" aria-label="Your name"> <button>Say hello</button></form>
+<p id="answer" role="status"></p>
+<script>
+  // Relative URL: the Studio routes /api/hello to this app's provider, so the page never needs to know its port.
+  document.getElementById("ask").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const out = document.getElementById("answer");
+    try {
+      const r = await fetch(`/api/hello?name=${encodeURIComponent(document.getElementById("name").value)}`);
+      const body = await r.json();
+      out.textContent = r.ok ? body.message : `The provider said no: ${body.error}`;
+    } catch (err) {
+      out.textContent = `Couldn't reach the provider: ${err.message}`;
+    }
+  });
+</script>
+</body>
+</html>

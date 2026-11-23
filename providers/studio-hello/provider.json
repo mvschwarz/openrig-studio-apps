@@ -1,0 +1,8 @@
+{
+  "package": "@openrig/studio-hello",
+  "run": {
+    "entry": "hello-server.mjs",
+    "args": ["--port", "{{port}}"]
+  },
+  "verbs": ["/api/hello"]
+}

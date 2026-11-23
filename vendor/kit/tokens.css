@@ -1,0 +1,115 @@
+/* OpenRig UI kit: THE token file (kit/tokens.css). Every product takes a pinned byte copy of it, checked by its own sha test,
+   so change it here, copy it out again, and the sha tests say where a copy is stale. kit/tokens.mjs
+   carries the same text as a string for pages built on the server; kit/reference.html shows every token. Dark only.
+   Fonts: the design system's stacks, no web fonts. The mono stack adds ui-monospace and Menlo, so a Mac without SF Mono under
+   that name gets Menlo, not Courier. Swapping a face later means changing only --or-sans or --or-mono here.
+
+   OpenRig app theme: OpenRig's design system (as openrig.ai's home page serves it), used across
+   the whole site. Where the design system has no app screen, its rules are the principles. Plain CSS, no framework.
+
+   - Colour: his tokens (§2). Two functional colours have no counterpart in his palette, so they're kept and tuned to sit with it, and
+     status green (connected) and danger red (disconnect, errors; always paired with words). Links are ink.
+   - Type: his stacks (Helvetica Neue / Helvetica / Arial; SFMono / Consolas), no web fonts (his build rule: everything from openrig.ai, no
+     web fonts). Whole pixels; every line height a multiple of 4 (a 4px baseline); weights 400 / 500 (headings, emphasis) / 600 (buttons,
+     agent names). Roles map onto his scale: an app page title is his H2, a section heading his H3, data and tables his Body small or Small,
+     labels his mono Label. Sizes step down at his breakpoints (§9).
+   - Shape: two corner sizes, 8px for outer cards and panels and 4px for every control and everything inside a card (§6). 1px lines are
+     inset shadows, not borders (§6).
+   - Focus: exactly the served home's ring, 3px orange, offset 6px (one focus ring for the whole site).
+   - Breakpoints: 1200 and up, 1024-1199, 768-1023, under 768 (§9). Content widths 1128 / 928 / 688 / width − 48. */
+:root {
+  /* Colour (DESIGN-UPDATES §2). */
+  --or-base: #111210;      /* --bg: page */
+  --or-panel: #191b18;     /* cards and panels */
+  --or-raised: #1f211d;    /* a surface above a panel: menus, the selected tab or segment */
+  --or-text: #eeeae2;      /* --ink: primary text, arrows, outlined buttons */
+  --or-muted: #b1b3aa;     /* secondary text, nav links */
+  --or-dim: #9fa397;
+  --or-line: #34372f;      /* --edge: all 1px lines and outlines */
+  --or-signal: #ff943d;    /* --accent: the primary button, the one current thing */
+  --or-signal-hover: #ffa45b;   /* the primary button under the pointer */
+  --or-on-signal: #1a140d; /* text on the orange button */
+  --or-accent-edge: #8d6842;
+  --or-connect: var(--or-text);   /* links are ink (§7); the old blue is retired */
+  /* Functional colours (kept, tuned to the palette). */
+  --or-success: #a3c98b;
+  --or-danger: #ee7b65;
+  /* Status (dots and chips): connected, waiting, off/disconnected. */
+  --or-ok: #a3c98b;
+  --or-wait: #e2c27a;
+  --or-off: #6f6d65;
+  --or-signal-tint: rgba(255, 148, 61, 0.08);
+  --or-scrim: rgba(0, 0, 0, 0.44);   /* behind a drawer or dialog */
+
+  /* Type families (§3). */
+  --or-sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --or-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Roles: size / line height / weight / tracking, on his scale (§3, §9), desktop values first. */
+  --or-display-size: 76px; --or-display-lh: 76px; --or-display-weight: 500; --or-display-track: -2px;   /* his H1 */
+  --or-title-size: 48px;   --or-title-lh: 52px;   --or-title-weight: 500;   --or-title-track: -2px;     /* app page title = his H2 */
+  --or-subhead-size: 23px; --or-subhead-lh: 28px; --or-subhead-weight: 500; --or-subhead-track: -1px;   /* section heading = his H3 */
+  --or-numeral-size: 36px; --or-numeral-lh: 48px; --or-numeral-weight: 400; --or-numeral-track: -2px;   /* his Price */
+  --or-body-size: 17px;    --or-body-lh: 28px;    --or-body-weight: 400;    --or-body-track: 0;
+  --or-data-size: 16px;    --or-data-lh: 24px;    --or-data-weight: 400;    --or-data-track: 0;         /* his Body small */
+  --or-label-size: 14px;   --or-label-lh: 24px;   --or-label-weight: 400;   --or-label-track: 0;        /* his Small */
+  --or-meta-size: 14px;    --or-meta-lh: 24px;    --or-meta-weight: 400;    --or-meta-track: 0;
+  --or-caption-size: 13px; --or-caption-lh: 20px;
+  --or-micro-size: 12px;   --or-micro-lh: 20px;
+  --or-mono-label: 400 12px/16px var(--or-mono);  /* his Label: mono, uppercase, +1px */
+  --or-mono-label-track: 1px;
+  --or-button-size: 15px;  --or-button-lh: 24px;  --or-button-weight: 600;
+
+  /* Space (a 4px grid; §5) and shape (§6). */
+  --or-space-1: 4px; --or-space-2: 8px; --or-space-3: 12px; --or-space-4: 16px; --or-space-5: 24px; --or-space-6: 32px; --or-space-7: 40px;
+  --or-space-8: 48px; --or-space-9: 64px; --or-space-10: 88px;
+  --or-radius-card: 8px;
+  --or-radius-control: 4px;
+  --or-radius: var(--or-radius-card);
+  --or-card-pad: 24px;
+  /* 1px lines as inset shadows (§6). --or-stroke stays for the few real borders (the dashed disabled outline). */
+  --or-edge: inset 0 0 0 1px var(--or-line);
+  --or-edge-bottom: inset 0 -1px 0 var(--or-line);
+  --or-stroke: 1px solid var(--or-line);
+  /* Shadows: 1 for a menu or popover just above the page, 2 for a panel or dialog over the scrim. */
+  --or-shadow-1: 0 12px 30px rgba(0, 0, 0, 0.53);
+  --or-shadow-2: 0 24px 60px rgba(0, 0, 0, 0.53);
+
+  /* Layout (§9): his content widths and gutters; reading pages (forms, account) keep an inner measure. */
+  --or-wrap: 1128px;
+  --or-margin: max(24px, calc((100vw - var(--or-wrap)) / 2));
+  --or-measure: 760px;
+  --or-head: 96px;
+  --or-brand-w: 132px;
+
+  /* Interaction. */
+  --or-focus: 3px solid var(--or-signal);
+  --or-focus-offset: 6px;
+  --or-target: 48px;   /* his buttons are 48 tall */
+  color-scheme: dark;
+}
+@media (max-width: 1199px) {
+  :root { --or-wrap: 928px; --or-title-size: 40px; --or-title-lh: 44px; --or-title-track: -1px; --or-display-size: 64px; --or-display-lh: 64px; --or-space-10: 80px; }
+}
+@media (max-width: 1023px) {
+  :root { --or-wrap: 688px; --or-title-size: 36px; --or-title-lh: 40px; --or-display-size: 56px; --or-display-lh: 56px; --or-head: 80px; --or-space-10: 72px; }
+}
+@media (max-width: 767px) {
+  :root {
+    --or-wrap: calc(100vw - 48px); --or-margin: 24px; --or-head: 64px; --or-brand-w: 120px; --or-space-10: 56px;
+    --or-title-size: 32px; --or-title-lh: 36px; --or-display-size: 40px; --or-display-lh: 44px; --or-display-track: -1px;
+    --or-subhead-size: 21px; --or-numeral-size: 32px; --or-numeral-lh: 40px;
+    --or-body-size: 16px; --or-body-lh: 24px; --or-data-size: 15px;
+  }
+}
+:root {
+  /* The short names the Cloud app's pages already use, pointing at the tokens above. */
+  --bg: var(--or-base); --panel: var(--or-panel); --ink: var(--or-text); --muted: var(--or-muted); --line: var(--or-line);
+  --accent: var(--or-signal); --accent-ink: var(--or-on-signal); --link: var(--or-connect);
+  --warn: var(--or-signal); --warn-bg: var(--or-signal-tint); --bad: var(--or-danger);
+}
+/* Icons (kit/icons.mjs, <or-icon>): Lucide's line set drawn in the text colour (currentColor, so ink unless the words around it are muted
+   or orange) at this stroke. The rule sits every icon on the text's baseline and keeps it from shrinking in a flex row. */
+:root { --or-icon-stroke: 1.75; }
+.or-icon { display: inline-block; flex: none; vertical-align: -0.1875em; stroke: currentColor; stroke-width: var(--or-icon-stroke); }
+or-icon { display: inline-flex; vertical-align: -0.1875em; }   /* the element's own box; its <svg> inside carries .or-icon */

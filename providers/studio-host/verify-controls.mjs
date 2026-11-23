@@ -1,23 +1,12 @@
 #!/usr/bin/env node
-// CONTROL HARNESS — proves, on every run, that the checkers CAN fail.
+// CONTROL HARNESS: proves, on every run, that the checkers CAN fail.
+// Copyright 2026 mvschwarz. Licensed under the Apache License, Version 2.0.
 //
-// WHY THIS EXISTS. A checker you have only ever seen pass is an untested checker, and in a
-// security context a checker that cannot fail is counted as protection. The controls for
-// verify-containment and test-boundary were originally run by planting a violation by
-// hand, observing the failure, and reverting. That made "these checkers can fail"
-// TRUE-AS-OF-WHEN-OBSERVED — a status line, which goes stale silently and on the happy
-// path. It also meant nobody else could re-establish it without re-deriving the planting
-// steps.
+// A checker you have only ever seen pass is an untested checker. Each control copies this provider to a temp folder, plants ONE
+// violation there, and asserts the checker exits NON-ZERO. The original tree is never modified. A BASELINE case asserts the
+// unmodified copy PASSES; without it, a checker that always failed would score a perfect run here.
 //
-// So the controls are committed and self-re-establishing. Same shape as the checked BOOT
-// exemption: the control that proves itself beats the control that was proven once.
-//
-// Each control copies this provider to a temp dir, plants ONE violation there, and asserts
-// the checker exits NON-ZERO. The original tree is never modified. A BASELINE case asserts
-// the unmodified copy PASSES — without it, a checker that always failed would score a
-// perfect run here.
-//
-// Usage: npm run verify:controls   (exits non-zero if any control fails to fire)
+// Usage: node verify-controls.mjs   (exits non-zero if any control fails to fire)
 
 import fs from "node:fs";
 import os from "node:os";
@@ -37,15 +26,23 @@ const CONTROLS = [
   {
     name: "verify:containment (a) catches a SECOND containment implementation",
     checker: "verify-containment.mjs",
-    plant: (dir) => append(dir, "host-server.mjs",
-      "\nexport function sneaky(p, rootDir) { return p.startsWith(rootDir); }\n"),
+    plant: (dir) =>
+      append(
+        dir,
+        "host-server.mjs",
+        "\nexport function sneaky(p, rootDir) { return p.startsWith(rootDir); }\n",
+      ),
     expect: "fail",
   },
   {
     name: "verify:containment (b) catches a module write to an unresolved caller path",
     checker: "verify-containment.mjs",
-    plant: (dir) => append(dir, "host-backend.mjs",
-      "\nexport function unsafeWrite(callerPath, data) { fs.writeFileSync(callerPath, data); }\n"),
+    plant: (dir) =>
+      append(
+        dir,
+        "host-backend.mjs",
+        "\nexport function unsafeWrite(callerPath, data) { fs.writeFileSync(callerPath, data); }\n",
+      ),
     expect: "fail",
   },
   {
@@ -73,7 +70,8 @@ const CONTROLS = [
   return null;
 }`,
       );
-      if (broken === src) throw new Error("could not plant the resolve-only variant — anchor missed");
+      if (broken === src)
+        throw new Error("could not plant the resolve-only variant — anchor missed");
       fs.writeFileSync(p, broken);
     },
     expect: "fail",
@@ -100,14 +98,19 @@ let failures = 0;
 
 for (const c of CONTROLS) {
   const dir = freshCopy();
-  let ok, detail = "";
+  let ok, detail;
   try {
     c.plant(dir);
     const checkers = c.checker ? [c.checker] : ALL;
     const codes = checkers.map((k) => ({ k, code: run(dir, k) }));
     if (c.expect === "pass") {
       ok = codes.every((r) => r.code === 0);
-      detail = ok ? "" : `expected all to pass, got ${codes.filter((r) => r.code !== 0).map((r) => r.k).join(", ")} failing`;
+      detail = ok
+        ? ""
+        : `expected all to pass, got ${codes
+            .filter((r) => r.code !== 0)
+            .map((r) => r.k)
+            .join(", ")} failing`;
     } else {
       ok = codes.every((r) => r.code !== 0);
       detail = ok ? "" : `checker did NOT fire — ${c.checker} exited 0 with the violation planted`;
@@ -123,8 +126,10 @@ for (const c of CONTROLS) {
 }
 
 console.log(
-  `\n${failures === 0
-    ? "OK   every checker demonstrated able to fail, and the clean tree passes"
-    : `FAIL ${failures} control(s) did not behave as required`}`,
+  `\n${
+    failures === 0
+      ? "OK   every checker demonstrated able to fail, and the clean tree passes"
+      : `FAIL ${failures} control(s) did not behave as required`
+  }`,
 );
 process.exit(failures === 0 ? 0 : 1);

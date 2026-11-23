@@ -1,22 +1,17 @@
 {
   "manifest_version": 1,
   "id": "rig-designer",
-  "name": "DESIGNER",
-  "summary": "Design a rig by talking to an agent and watching the topology assemble.",
+  "name": "Rig designer",
+  "summary": "Design a rig by talking to an agent and watching the topology assemble, then save it as a rig spec and start it.",
   "category": "studio",
-  "maker": {
-    "name": "OpenRig",
-    "url": "https://github.com/mvschwarz"
-  },
+  "maker": { "name": "OpenRig", "url": "https://openrig.dev" },
   "surface": {
     "entry": "app/rig-designer.html",
     "path": "/surfaces/rig-designer.html",
     "glyph": "⬡",
-    "hint": "say what the rig should do; watch it take shape, then build it"
+    "icon": "app-rig-designer",
+    "hint": "say what the rig should do; watch it take shape, then start it"
   },
-  "_drive_note": "Uses the runtime's own drive channel (capabilities drive.read/drive.write), so there is no provider and nothing in `calls`: `calls` declares verbs a PROVIDER must answer, and naming a runtime verb there makes the box refuse to start because nothing installs a provider for it. Ops carry INTENT, never DOM instructions, per contract/drive.md: {designer:{action:'set-rig'|'add-pod'|'add-seat'|'set-seat'|'remove'|'set-spec'|'reset', ...}}. The vocabulary is this surface's alone; the runtime never interprets it.",
-  "vendor": [],
-  "requires": {
-    "binaries": []
-  }
+  "_drive_note": "Uses the runtime's own drive channel (contract/drive.md), so there is no provider and nothing in calls{}. Ops are addressed to this surface and carry intent, never DOM instructions: {surface:'rig-designer', designer:{action:'set-rig'|'add-pod'|'add-seat'|'set-seat'|'remove'|'set-spec'|'reset', ...}}.",
+  "vendor": ["rig-designer", "theme16", "kit"]
 }

@@ -1,9 +1,16 @@
+// The live rig state companion: what it writes for the Studio's observe verb, from stand-in rig answers (nothing here runs the real
+// rig command). Copyright 2026 mvschwarz. Licensed under the Apache License, Version 2.0.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildLiveState, writeLiveState, startLiveState } from "../providers/studio-host/live-state.mjs";
+import {
+  buildLiveState,
+  writeLiveState,
+  startLiveState,
+} from "../providers/studio-host/live-state.mjs";
+import { rigJson } from "../providers/lib/local-daemon.mjs";
 
 test("live state distinguishes a missing rig CLI from a rig command failure", async () => {
   const missing = await buildLiveState({
@@ -28,12 +35,8 @@ test("an answering CLI with no nodes is the only no-rig result", async () => {
   assert.equal(empty.reason, "no-rig");
 });
 
-// THE FLOOR IS ONE RIG'S FLOOR.
-//
-// This emitted every node on the box — measured on this machine as 92 seats
-// across 12 rigs, under a header reading LIVE ACTIVITY beside a green dot. The
-// sidebar next to it showed 10, because the SDK's own seat roster had already
-// been fixed; two derivations of one fact disagreed on one screen.
+// THE FLOOR IS ONE RIG'S FLOOR, resolved the same way the SDK's seat roster
+// resolves it, so the sidebar and the floor never disagree on one screen.
 //
 // Each case feeds in the SAME fleet and changes only the identity, so the count
 // is a delta rather than an absolute: a scoping that had quietly stopped
@@ -51,7 +54,7 @@ const fleetCLI = (whoami) => async (args) => {
 };
 const rigsIn = (s) => [...new Set(s.seats.map((x) => x.seat.split("@")[1]))];
 
-test("the floor is scoped to ONE rig, not to every rig on the box", async () => {
+test("the floor is scoped to ONE rig, not to every rig on the machine", async () => {
   const s = await buildLiveState({
     runRig: fleetCLI({ ok: true, value: { identity: { rigName: "ours" } } }),
   });
@@ -80,7 +83,7 @@ test("no identity and several rigs is AMBIGUOUS, and says so rather than guessin
   assert.match(s.detail, /3 rigs/);
 });
 
-test("no identity and ONE rig on the box needs no guess", async () => {
+test("no identity and ONE rig on the machine needs no guess", async () => {
   const oneRig = FLEET.filter((n) => n.rigName === "ours");
   const s = await buildLiveState({
     runRig: async (args) => {
@@ -94,150 +97,500 @@ test("no identity and ONE rig on the box needs no guess", async () => {
   assert.equal(s.seats.length, 2);
 });
 
-// WORK THAT FINISHED stays findable: a row handed to a seat
-// from outside and closed with an answer must still show, with its decision, result (the closing note) and artifact. Invented rows.
-const SEATS = [{ logicalId: "lab.impl", rigName: "lab", lifecycleState: "running", canonicalSessionName: "lab-impl@lab" },
-  { logicalId: "lab.qa", rigName: "lab", lifecycleState: "running", canonicalSessionName: "lab-qa@lab" }];
-const DONE = [
-  { qitemId: "qitem-20261023070000-aaaa", state: "done", summary: "Fix the README typo. Then report.", sourceSession: "assistant@lab", destinationSession: "lab-impl@lab",
-    tsUpdated: "2026-10-23T07:00:00.000Z", closureReason: "no-follow-on", closureTarget: null, evidenceRef: "docs/README.md@1a2b3c4", resolution: null },
-  { qitemId: "qitem-20261023065900-bbbb", state: "done", summary: "Answer a question", sourceSession: "lab-qa@lab", destinationSession: "lab-impl@lab",
-    tsUpdated: "2026-10-23T06:59:00.000Z", closureReason: "handed_off_to", closureTarget: "qitem-20261023065901-cccc" },
-  { qitemId: "qitem-20261023065800-dddd", state: "done", summary: "Another rig's work", sourceSession: "x@other", destinationSession: "y@other", tsUpdated: "2026-10-23T06:58:00.000Z" },
+const SEATS = [
+  {
+    logicalId: "lab.writer",
+    rigName: "lab",
+    lifecycleState: "running",
+    canonicalSessionName: "lab-writer@lab",
+  },
+  {
+    logicalId: "lab.checker",
+    rigName: "lab",
+    lifecycleState: "running",
+    canonicalSessionName: "lab-checker@lab",
+  },
 ];
-function labCLI({ done = DONE, notes = { "qitem-20261023070000-aaaa": "Fixed: 'recieve' -> 'receive' in README line 12." }, showFails = false } = {}) {
-  const calls = [];
-  const cli = async (args) => {
-    calls.push(args.join(" "));
-    if (args[0] === "whoami") return { ok: true, value: { identity: { rigName: "lab" } } };
-    if (args[0] === "ps") return { ok: true, value: SEATS };
-    if (args[0] === "queue" && args[1] === "list") return { ok: true, value: args.includes("done") ? done : [] };
-    if (args[0] === "queue" && args[1] === "show") {
-      if (showFails) return { ok: false, reason: "rig-error", detail: "rig queue timed out" };
-      const id = args[2], row = done.find((q) => q.qitemId === id);
-      return { ok: true, value: { ...row, closingTransition: notes[id] === undefined ? null : { transitionNote: notes[id] } } };
-    }
-    return { ok: true, value: [] };
-  };
-  return { cli, calls };
-}
 
-test("done work stays findable: this rig's done rows with decision, result (the closing note) and artifact; another rig's are not shown", async () => {
-  const { cli } = labCLI(), s = await buildLiveState({ runRig: cli, resultCache: new Map() });
-  assert.deepEqual(s.done.rows.map((r) => r.id), ["qitem-20261023070000-aaaa", "qitem-20261023065900-bbbb"]);
-  const [a, b] = s.done.rows;
-  assert.deepEqual(a.decision, { reason: "no-follow-on", target: null });
-  assert.equal(a.result, "Fixed: 'recieve' -> 'receive' in README line 12."); assert.equal(a.resultRead, true);
-  assert.equal(a.artifact, "docs/README.md@1a2b3c4"); assert.equal(a.title, "Fix the README typo."); assert.equal(a.closedAt, "2026-10-23T07:00:00.000Z");
-  assert.equal(b.result, null, "no closing note: null, never invented"); assert.equal(b.resultRead, true); assert.equal(b.artifact, null);
-  assert.deepEqual(b.decision, { reason: "handed_off_to", target: "qitem-20261023065901-cccc" });
-  assert.deepEqual(s.done.coverage, { looked: 3, ours: 2, shown: 2, limit: 100 });
-  assert.equal(s.queue.length, 0, "the open list is unchanged: done rows never join it");
-});
-
-test("the result is read once per row and read again when the row changes (keyed by tsUpdated); a failed read says so and is retried", async () => {
-  const cache = new Map(), one = labCLI();
-  await buildLiveState({ runRig: one.cli, resultCache: cache });
-  await buildLiveState({ runRig: one.cli, resultCache: cache });
-  assert.equal(one.calls.filter((c) => c.startsWith("queue show")).length, 2, "two rows, each shown once across two ticks");
-  const changed = DONE.map((q) => (q.qitemId === "qitem-20261023070000-aaaa" ? { ...q, tsUpdated: "2026-10-23T07:30:00.000Z" } : q));
-  const two = labCLI({ done: changed, notes: { "qitem-20261023070000-aaaa": "Reopened, then fixed again." } });
-  const s = await buildLiveState({ runRig: two.cli, resultCache: cache });
-  assert.deepEqual(two.calls.filter((c) => c.startsWith("queue show")), ["queue show qitem-20261023070000-aaaa --full --json"], "only the changed row is read again");
-  assert.equal(s.done.rows[0].result, "Reopened, then fixed again.");
-  assert.ok(cache.size <= 2, "the cache holds only rows on screen");
-  const bad = labCLI({ showFails: true }), c2 = new Map(), f = await buildLiveState({ runRig: bad.cli, resultCache: c2 });
-  assert.equal(f.done.rows[0].resultRead, false); assert.equal(f.done.rows[0].result, null); assert.equal(c2.size, 0, "a failed read isn't cached");
-});
-
-test("bounded: at most 10 done rows shown from the newest 100 looked at; a queue that can't be read says so", async () => {
-  const many = Array.from({ length: 30 }, (_, i) => ({ qitemId: `qitem-2026102307${String(i).padStart(4, "0")}-ee${i}`, state: "done", summary: `w${i}`,
-    sourceSession: "lab-qa@lab", destinationSession: "lab-impl@lab", tsUpdated: new Date(Date.parse("2026-10-23T07:00:00Z") - i * 60000).toISOString() }));
-  const { cli, calls } = labCLI({ done: many, notes: {} }), s = await buildLiveState({ runRig: cli, resultCache: new Map() });
-  assert.equal(s.done.rows.length, 10); assert.equal(s.done.rows[0].summary, undefined); assert.equal(s.done.rows[0].title, "w0");
-  assert.deepEqual(s.done.coverage, { looked: 30, ours: 30, shown: 10, limit: 100 });
-  assert.ok(calls.includes("queue list -a --state done --full --json --limit 100"));
-  const down = await buildLiveState({ resultCache: new Map(), runRig: async (args) => (args[0] === "ps" ? { ok: true, value: SEATS } : args[0] === "whoami" ? { ok: true, value: { identity: { rigName: "lab" } } }
-    : args.includes("done") ? { ok: false, reason: "rig-error", detail: "rig queue timed out" } : { ok: true, value: [] }) });
-  assert.deepEqual(down.done, { rows: [], coverage: { looked: 0, shown: 0, unreadable: "rig queue timed out" } });
-});
-
-// Review fixes on the first candidate. Each fails on it.
 test("open work is this rig's and active only: another rig's pending item and a canceled one of ours never show", async () => {
   const OPEN = [
-    { qitemId: "qitem-own-pending", state: "pending", summary: "ours", sourceSession: "lab-qa@lab", destinationSession: "lab-impl@lab", tsUpdated: "2026-10-23T07:10:00Z" },
-    { qitemId: "qitem-foreign-pending", state: "pending", summary: "theirs", sourceSession: "x@other", destinationSession: "y@other", tsUpdated: "2026-10-23T07:09:00Z" },
-    { qitemId: "qitem-own-canceled", state: "canceled", summary: "gone", sourceSession: "lab-qa@lab", destinationSession: "lab-impl@lab", tsUpdated: "2026-10-23T07:08:00Z" },
+    {
+      qitemId: "q-own-pending",
+      state: "pending",
+      summary: "ours",
+      sourceSession: "lab-checker@lab",
+      destinationSession: "lab-writer@lab",
+      tsUpdated: "2026-10-23T07:10:00Z",
+    },
+    {
+      qitemId: "q-foreign-pending",
+      state: "pending",
+      summary: "theirs",
+      sourceSession: "x@other",
+      destinationSession: "y@other",
+      tsUpdated: "2026-10-23T07:09:00Z",
+    },
+    {
+      qitemId: "q-own-canceled",
+      state: "canceled",
+      summary: "gone",
+      sourceSession: "lab-checker@lab",
+      destinationSession: "lab-writer@lab",
+      tsUpdated: "2026-10-23T07:08:00Z",
+    },
   ];
   const calls = [];
-  const s = await buildLiveState({ resultCache: new Map(), runRig: async (a) => { calls.push(a.join(" "));
-    if (a[0] === "ps") return { ok: true, value: SEATS }; if (a[0] === "whoami") return { ok: true, value: { identity: { rigName: "lab" } } };
-    if (a[1] === "list") return { ok: true, value: a.includes("done") ? [] : OPEN }; return { ok: true, value: [] }; } });
-  assert.deepEqual(s.queue.map((q) => q.id), ["qitem-own-pending"]);
-  assert.ok(calls.includes("queue list -a --state pending,in-progress,blocked --full --json"), "open work is asked for by state");
+  const s = await buildLiveState({
+    runRig: async (a) => {
+      calls.push(a.join(" "));
+      if (a[0] === "ps") return { ok: true, value: SEATS };
+      if (a[0] === "whoami") return { ok: true, value: { identity: { rigName: "lab" } } };
+      if (a[1] === "list") return { ok: true, value: OPEN };
+      return { ok: true, value: [] };
+    },
+  });
+  assert.deepEqual(
+    s.queue.map((q) => q.id),
+    ["q-own-pending"],
+  );
+  assert.ok(
+    calls.includes("queue list -a --state pending,in-progress,blocked --full --json"),
+    "open work is asked for by state",
+  );
 });
 
-test("a note is taken only from the same version of the row: a later close, a reopen, or an unrelated answer reads as unreadable and isn't cached", async () => {
-  const row = DONE[0];
-  for (const [why, shown] of [["closed again later", { ...row, tsUpdated: "2026-10-23T07:45:00.000Z", closingTransition: { transitionNote: "a LATER answer" } }],
-    ["reopened", { ...row, state: "pending", tsUpdated: row.tsUpdated, closingTransition: { transitionNote: "old answer" } }],
-    ["another row", { qitemId: "qitem-something-else", state: "done", tsUpdated: row.tsUpdated, closingTransition: { transitionNote: "x" } }],
-    ["not an object", "garbage"]]) {
-    const cache = new Map();
-    const s = await buildLiveState({ resultCache: cache, runRig: async (a) => {
-      if (a[0] === "ps") return { ok: true, value: SEATS }; if (a[0] === "whoami") return { ok: true, value: { identity: { rigName: "lab" } } };
-      if (a[1] === "list") return { ok: true, value: a.includes("done") ? [row] : [] }; if (a[1] === "show") return { ok: true, value: shown }; return { ok: true, value: [] }; } });
-    assert.equal(s.done.rows[0].resultRead, false, why); assert.equal(s.done.rows[0].result, null, why); assert.equal(cache.size, 0, `${why}: not cached`);
-    assert.equal(s.done.rows[0].closedAt, row.tsUpdated, "the row's own decision and time are kept");
+test("the answer is exactly the observe envelope's fields: rig, attachment, seats and open queue, nothing else", async () => {
+  const s = await buildLiveState({
+    runRig: async (a) =>
+      a[0] === "ps"
+        ? { ok: true, value: SEATS }
+        : a[0] === "whoami"
+          ? { ok: true, value: { identity: { rigName: "lab" } } }
+          : { ok: true, value: [] },
+  });
+  assert.deepEqual(Object.keys(s).sort(), ["attached", "queue", "reason", "rig", "seats"]);
+  assert.deepEqual(Object.keys(s.seats[0]).sort(), [
+    "ageMinutes",
+    "hasWork",
+    "lifecycle",
+    "member",
+    "pendingWork",
+    "pod",
+    "seat",
+    "state",
+  ]);
+});
+
+// A refresh numbered when it starts: one that started earlier and finishes later is dropped, never written over a newer answer.
+const openRow = (summary, ts) => ({
+  qitemId: `q-${ts}`,
+  state: "pending",
+  summary,
+  sourceSession: "lab-checker@lab",
+  destinationSession: "lab-writer@lab",
+  tsUpdated: ts,
+});
+const labCLI = (queue, hold) => async (a) => {
+  if (a[0] === "ps") return { ok: true, value: SEATS };
+  if (a[0] === "whoami") return { ok: true, value: { identity: { rigName: "lab" } } };
+  if (a[0] === "queue") {
+    if (hold) await hold();
+    return { ok: true, value: queue };
   }
-});
-
-test("a done-list answer that isn't a list is unreadable, not 'no finished work'", async () => {
-  for (const value of [{}, { items: [] }, null, "x"]) {
-    const s = await buildLiveState({ resultCache: new Map(), runRig: async (a) => {
-      if (a[0] === "ps") return { ok: true, value: SEATS }; if (a[0] === "whoami") return { ok: true, value: { identity: { rigName: "lab" } } };
-      if (a[1] === "list") return { ok: true, value: a.includes("done") ? value : [] }; return { ok: true, value: [] }; } });
-    assert.deepEqual(s.done, { rows: [], coverage: { looked: 0, shown: 0, unreadable: "the queue's answer wasn't a list" } }, JSON.stringify(value));
-  }
-});
-
-// NEWER WINS: a refresh that started earlier and finishes later never replaces one already written. Invented rows.
-const raceRow = { qitemId: "qitem-20261024220000-race", state: "done", summary: "Race", sourceSession: "lab-qa@lab", destinationSession: "lab-impl@lab",
-  tsUpdated: "2026-10-24T22:00:00.000Z", closureReason: "no-follow-on", closureTarget: null, resolution: "Old answer" };
-const raceCLI = (row, show) => async (a) => {
-  if (a[0] === "ps") return { ok: true, value: SEATS }; if (a[0] === "whoami") return { ok: true, value: { identity: { rigName: "lab" } } };
-  if (a[1] === "list") return { ok: true, value: a.includes("done") ? [row] : [] }; if (a[1] === "show") return show(); return { ok: true, value: [] };
+  return { ok: true, value: [] };
 };
 test("an older refresh that finishes last never writes over a newer one already written", async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "live-state-race-"));
-  let entered, release; const inShow = new Promise((r) => (entered = r)), held = new Promise((r) => (release = r));
+  let entered, release;
+  const inQueue = new Promise((r) => (entered = r)),
+    held = new Promise((r) => (release = r));
   try {
-    const older = writeLiveState(out, { resultCache: new Map(), runRig: raceCLI(raceRow, async () => { entered(); await held; return { ok: true, value: { ...raceRow, closingTransition: { transitionNote: "earlier" } } }; }) });
-    await inShow;
-    const newer = { ...raceRow, tsUpdated: "2026-10-24T22:02:00.000Z", resolution: "New answer" };
-    await writeLiveState(out, { resultCache: new Map(), runRig: raceCLI(newer, async () => ({ ok: true, value: { ...newer, closingTransition: { transitionNote: "later" } } })) });
-    release(); await older;
-    const shown = JSON.parse(fs.readFileSync(path.join(out, "factory-state.json"), "utf8")).done.rows[0];
-    assert.equal(shown.closedAt, "2026-10-24T22:02:00.000Z"); assert.equal(shown.resolution, "New answer"); assert.equal(shown.result, "later");
-  } finally { release(); fs.rmSync(out, { recursive: true, force: true }); }
+    const older = writeLiveState(out, {
+      runRig: labCLI([openRow("older", "2026-10-24T22:00:00.000Z")], async () => {
+        entered();
+        await held;
+      }),
+    });
+    await inQueue;
+    await writeLiveState(out, { runRig: labCLI([openRow("newer", "2026-10-24T22:02:00.000Z")]) });
+    release();
+    await older;
+    const shown = JSON.parse(fs.readFileSync(path.join(out, "factory-state.json"), "utf8"))
+      .queue[0];
+    assert.equal(shown.title, "newer");
+  } finally {
+    release();
+    fs.rmSync(out, { recursive: true, force: true });
+  }
 });
 
 test("the companion's scheduler runs one refresh at a time: the next is scheduled only after the current one finishes", async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "live-state-tick-"));
-  const timers = []; let builds = 0, release; const held = new Promise((r) => (release = r));
+  const timers = [];
+  let builds = 0,
+    release;
+  const held = new Promise((r) => (release = r));
   const log = { log() {}, error() {} };
   try {
-    const run = startLiveState(out, { resultCache: new Map(), runRig: async (a) => { if (a[0] === "ps") { builds++; if (builds === 1) await held; } return raceCLI(raceRow, async () => ({ ok: true, value: { ...raceRow, closingTransition: null } }))(a); } },
-      { interval: 10000, schedule: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, cancel() {}, log });
+    const run = startLiveState(
+      out,
+      {
+        runRig: async (a) => {
+          if (a[0] === "ps") {
+            builds++;
+            if (builds === 1) await held;
+          }
+          return labCLI([])(a);
+        },
+      },
+      {
+        interval: 10000,
+        schedule: (fn, ms) => {
+          timers.push({ fn, ms });
+          return timers.length;
+        },
+        cancel() {},
+        log,
+      },
+    );
     await new Promise((r) => setImmediate(r));
     assert.equal(timers.length, 0, "nothing is scheduled while the first refresh is still reading");
     assert.equal(builds, 1);
-    release(); await run.first;
-    assert.deepEqual(timers.map((t) => t.ms), [10000], "the next refresh is scheduled once, after the first finished");
+    release();
+    await run.first;
+    assert.deepEqual(
+      timers.map((t) => t.ms),
+      [10000],
+      "the next refresh is scheduled once, after the first finished",
+    );
     await timers[0].fn();
-    assert.equal(builds, 2); assert.equal(timers.length, 2);
-    run.stop(); await timers[1].fn(); assert.equal(timers.length, 2, "stopped: nothing more is scheduled");
-    const once = startLiveState(out, { resultCache: new Map(), runRig: raceCLI(raceRow, async () => ({ ok: false })) }, { interval: 0, schedule: () => assert.fail("interval 0 runs once"), log });
+    assert.equal(builds, 2);
+    assert.equal(timers.length, 2);
+    run.stop();
+    await timers[1].fn();
+    assert.equal(timers.length, 2, "stopped: nothing more is scheduled");
+    const once = startLiveState(
+      out,
+      { runRig: labCLI([]) },
+      { interval: 0, schedule: () => assert.fail("interval 0 runs once"), log },
+    );
     await once.first;
-  } finally { release(); fs.rmSync(out, { recursive: true, force: true }); }
+  } finally {
+    release();
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test("only a changed answer is written: an unchanged one leaves the file (and the runtime's watcher) alone", async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "live-state-same-"));
+  try {
+    const f = path.join(out, "factory-state.json");
+    await writeLiveState(out, { runRig: labCLI([]) });
+    const first = fs.statSync(f).mtimeMs;
+    await new Promise((r) => setTimeout(r, 20));
+    await writeLiveState(out, { runRig: labCLI([]) });
+    assert.equal(fs.statSync(f).mtimeMs, first);
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
+// A seat that has never run has no session name. It is keyed by the queue's own address for it (pod-member@rig), so a row to or
+// from it is this floor's.
+test("a never-run seat is keyed in the queue's address form, so its open rows are this floor's", async () => {
+  const nodes = [
+    {
+      logicalId: "team.lead",
+      rigName: "acme-team",
+      lifecycleState: "detached",
+      canonicalSessionName: null,
+    },
+    {
+      logicalId: "ops.caller",
+      rigName: "acme-team",
+      lifecycleState: "detached",
+      canonicalSessionName: null,
+    },
+    { logicalId: "solo", rigName: "acme-team", lifecycleState: "detached" },
+  ];
+  const row = {
+    qitemId: "q-open",
+    state: "in-progress",
+    summary: "Weekly summary",
+    sourceSession: "ops-caller@acme-team",
+    destinationSession: "team-lead@acme-team",
+    tsUpdated: "2026-10-26T10:00:00.000Z",
+  };
+  const cli = async (args) =>
+    args[0] === "whoami"
+      ? { ok: false }
+      : args[0] === "queue"
+        ? { ok: true, value: [row] }
+        : { ok: true, value: nodes };
+  const s = await buildLiveState({ runRig: cli });
+  assert.deepEqual(
+    s.seats.map((x) => x.seat),
+    ["team-lead@acme-team", "ops-caller@acme-team", "solo@acme-team"],
+    "pod-member@rig; a logicalId with no pod stays as it is",
+  );
+  assert.deepEqual(
+    s.queue.map((q) => q.id),
+    ["q-open"],
+  );
+  const named = await buildLiveState({
+    runRig: async (a) =>
+      a[0] === "queue"
+        ? { ok: true, value: [] }
+        : a[0] === "whoami"
+          ? { ok: false }
+          : {
+              ok: true,
+              value: [
+                {
+                  logicalId: "team.lead",
+                  rigName: "acme-team",
+                  canonicalSessionName: "lead@acme-team",
+                },
+              ],
+            },
+  });
+  assert.equal(named.seats[0].seat, "lead@acme-team", "a seat that HAS a session name keeps it");
+});
+
+test("the rig command helper: not installed, failed, timed out and non-JSON are each said as such; JSON comes back parsed", async () => {
+  const fake =
+    (err, stdout = "") =>
+    (bin, args, opts, cb) => {
+      assert.equal(bin, "rig");
+      assert.ok(opts.timeout > 0 && opts.maxBuffer > 0);
+      cb(err, stdout);
+    };
+  assert.deepEqual(
+    await rigJson(["ps"], { run: fake(Object.assign(new Error("x"), { code: "ENOENT" })) }),
+    { ok: false, reason: "no-rig-cli", detail: "the rig command isn't installed on this machine" },
+  );
+  assert.deepEqual(
+    await rigJson(["ps"], { run: fake(Object.assign(new Error("x"), { code: 2 })) }),
+    { ok: false, reason: "rig-error", detail: "rig ps failed with 2" },
+  );
+  assert.deepEqual(
+    await rigJson(["ps"], { run: fake(Object.assign(new Error("x"), { killed: true })) }),
+    { ok: false, reason: "rig-error", detail: "rig ps timed out" },
+  );
+  assert.deepEqual(await rigJson(["ps"], { run: fake(null, "not json") }), {
+    ok: false,
+    reason: "rig-error",
+    detail: "rig ps returned invalid JSON",
+  });
+  assert.deepEqual(await rigJson(["ps"], { run: fake(null, '[{"a":1}]') }), {
+    ok: true,
+    value: [{ a: 1 }],
+  });
+});
+
+// A DEPLOYMENT'S OWN FIELDS, through options.extend: the fields a hosted deployment adds (a mark on its customer's seat, the
+// introductions taken out of the open queue, the recently done rows it reads with the same runRig) arrive in the state, and the
+// public fields stay what they are.
+test("extend adds a deployment's own fields from the same inputs, and can't change the public ones", async () => {
+  const NODES = [
+    { logicalId: "web.writer", rigName: "ours", lifecycleState: "running" },
+    { logicalId: "docs.reader", rigName: "ours", lifecycleState: "running" },
+  ];
+  const rows = [
+    {
+      qitemId: "q1",
+      state: "pending",
+      destinationSession: "web-writer@ours",
+      sourceSession: "x@ours",
+      tags: [],
+    },
+    {
+      qitemId: "q2",
+      state: "pending",
+      destinationSession: "web-writer@ours",
+      sourceSession: "caller@ours",
+      tags: ["introduction"],
+    },
+  ];
+  const calls = [];
+  const runRig = async (args) => {
+    calls.push(args.join(" "));
+    if (args[0] === "whoami") return { ok: true, value: { identity: { rigName: "ours" } } };
+    if (args[0] === "queue" && args.includes("done"))
+      return {
+        ok: true,
+        value: [{ qitemId: "d1", state: "done", destinationSession: "docs-reader@ours" }],
+      };
+    if (args[0] === "queue") return { ok: true, value: rows };
+    return { ok: true, value: NODES };
+  };
+  const s = await buildLiveState({
+    runRig,
+    extend: async ({ state, queueRaw, ourSeats, runRig: rr }) => {
+      assert.ok(ourSeats.has("web-writer@ours"));
+      const intro = (q) => q.tags.includes("introduction");
+      const done = await rr(["queue", "list", "-a", "--state", "done", "--json"]);
+      return {
+        seats: state.seats.map((x) =>
+          x.seat === "docs-reader@ours" ? { ...x, customer: true } : x,
+        ),
+        queue: state.queue.filter((q) => !intro(rows.find((r) => r.qitemId === q.id))),
+        introductions: queueRaw.filter(intro).map((q) => ({ id: q.qitemId })),
+        done: { rows: done.value.map((q) => ({ id: q.qitemId })) },
+        rig: "someone-else",
+        attached: false,
+      };
+    },
+  });
+  assert.equal(s.rig, "ours", "a public field can't be changed");
+  assert.equal(s.attached, true);
+  assert.equal(s.seats.find((x) => x.seat === "docs-reader@ours").customer, true);
+  assert.deepEqual(
+    s.queue.map((q) => q.id),
+    ["q1"],
+  );
+  assert.deepEqual(s.introductions, [{ id: "q2" }]);
+  assert.deepEqual(s.done, { rows: [{ id: "d1" }] });
+  assert.ok(
+    calls.some((c) => c.includes("--state done")),
+    "the hook's own read used the same runRig",
+  );
+
+  // A hook that hands back a non-list for seats or queue, or throws, leaves the public state as built.
+  const bent = await buildLiveState({
+    runRig,
+    extend: () => ({ seats: "none", queue: null, note: 1 }),
+  });
+  assert.equal(bent.seats.length, 2);
+  assert.equal(bent.queue.length, 2);
+  assert.equal(bent.note, 1);
+  const errors = [];
+  const broke = await buildLiveState({
+    runRig,
+    log: { error: (m) => errors.push(m) },
+    extend: () => {
+      throw new Error("its source is down");
+    },
+  });
+  assert.equal(broke.attached, true);
+  assert.equal(broke.queue.length, 2);
+  assert.match(errors[0], /extend failed — its source is down/);
+});
+
+// A hook that never settles (its own read hangs). The companion waits for each refresh before scheduling the next,
+// so before the bound the floor stopped at its first write, with nothing logged.
+test(
+  "an extend hook that doesn't finish in time is logged and skipped, and the floor keeps refreshing",
+  { timeout: 10000 },
+  async () => {
+    let n = 0;
+    const runRig = async (args) => {
+      if (args[0] === "ps")
+        return {
+          ok: true,
+          value: [
+            {
+              rigName: "r",
+              logicalId: "dev.impl",
+              canonicalSessionName: "app-build@r",
+              lifecycleState: "running",
+            },
+          ],
+        };
+      if (args[0] === "queue")
+        return {
+          ok: true,
+          value: [
+            {
+              qitemId: `q${++n}`,
+              state: "pending",
+              destinationSession: "app-build@r",
+              sourceSession: "x@r",
+              summary: `work ${n}`,
+            },
+          ],
+        };
+      return { ok: false, reason: "x", detail: "x" };
+    };
+    const errors = [];
+    const s = await buildLiveState({
+      runRig,
+      rig: "r",
+      extendTimeoutMs: 100,
+      log: { error: (m) => errors.push(m) },
+      extend: () => new Promise(() => {}),
+    });
+    assert.equal(s.attached, true);
+    assert.equal(s.queue.length, 1);
+    assert.match(errors[0], /extend failed — it didn't finish in 0.1 s/);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "live-hang-"));
+    let calls = 0;
+    const live = startLiveState(
+      dir,
+      {
+        runRig,
+        rig: "r",
+        extendTimeoutMs: 100,
+        log: { error() {} },
+        extend: () => (++calls === 1 ? { first: true } : new Promise(() => {})),
+      },
+      { interval: 20, log: { log() {}, error() {} } },
+    );
+    await live.first;
+    const read = () => JSON.parse(fs.readFileSync(path.join(dir, "factory-state.json"), "utf8"));
+    const first = read().queue[0].id;
+    await new Promise((r) => setTimeout(r, 900));
+    live.stop();
+    assert.ok(calls >= 3, `the hook was asked again on later refreshes (${calls})`);
+    assert.notEqual(
+      read().queue[0].id,
+      first,
+      "the floor kept refreshing past the hook that never finished",
+    );
+    // The deployment's own fields from its last good run are kept, not dropped for the public reading.
+    assert.equal(read().first, true, "the hook's last fields are kept while it doesn't answer");
+    fs.rmSync(dir, { recursive: true, force: true });
+  },
+);
+
+test("OpenRig's own stuck-sweep rows aren't the floor's work; a row that only mentions one is", async () => {
+  const nodes = [
+    {
+      logicalId: "app.build",
+      rigName: "lab",
+      lifecycleState: "running",
+      agentActivity: "idle",
+      canonicalSessionName: "app-build@lab",
+    },
+  ];
+  const sweep = {
+    qitemId: "recovery-1",
+    state: "pending",
+    sourceSession: "app-check@lab",
+    destinationSession: "app-build@lab",
+    summary: "Checked on another item: its owner couldn't be woken (3 minutes)",
+    tags: ["stuck-sweep-finding", "recovery-for:item-7"],
+  };
+  const work = {
+    qitemId: "item-8",
+    state: "pending",
+    sourceSession: "app-check@lab",
+    destinationSession: "app-build@lab",
+    summary: "Look at the stuck-sweep-finding tag's docs",
+    tags: ["docs"],
+  };
+  // Its other notices too: a wake that escalated, and a row recovering another.
+  const escalation = { ...sweep, qitemId: "esc-1", tags: ["wake-escalation"] };
+  const recovery = { ...sweep, qitemId: "rec-1", tags: ["recovery-for:item-9"] };
+  const s = await buildLiveState({
+    rig: "lab",
+    runRig: async (a) =>
+      a[0] === "queue"
+        ? { ok: true, value: [sweep, escalation, recovery, work] }
+        : { ok: true, value: nodes },
+  });
+  assert.deepEqual(
+    s.queue.map((q) => q.id),
+    ["item-8"],
+  );
 });

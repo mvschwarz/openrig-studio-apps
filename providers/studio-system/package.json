@@ -1,0 +1,11 @@
+{
+  "name": "@openrig/studio-system",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "The Machine provider: this machine's storage, memory and CPU from plain file reads, and a few safe cleanups.",
+  "bin": {
+    "openrig-system": "bin/openrig-system.mjs"
+  }
+}

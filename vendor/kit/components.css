@@ -1,0 +1,378 @@
+/* OpenRig UI kit: THE component rules. One field,
+   search, table, status dot, chip, notice, menu, drawer, button, arrow link, in-text link, card, disclosure, logo tile, page head, tabs
+   and breadcrumbs, drawn to the design tokens (kit/tokens.css: the 4px grid, 4px controls, 8px
+   cards, lines as inset shadows, the orange focus ring) after the approved app design. Every
+   product takes a pinned byte copy, checked by its own sha test;
+   kit/components.mjs carries the same text as a string for pages built on the server. Needs tokens.css first. Dark only.
+   Everything is scoped to the kit's own classes, or to :where(.or-form) for a page that opts into styling its bare elements. */
+
+/* ---- Field: label, control, hint. Label to control 8px; a field to the next field or its button 16px (the form rule). ---- */
+.or-field { display: grid; gap: var(--or-space-2); margin: 0 0 var(--or-space-4); }
+.or-field > label, .or-label { font-size: var(--or-label-size); line-height: var(--or-label-lh); color: var(--or-muted); }
+.or-hint { margin: 0; font-size: 13px; line-height: 20px; color: var(--or-muted); }
+/* The 8/16 form rule: a button or actions row right after a field sits 16px below it. .or-field carries its own 16px; a bare
+   label + button in a form that isn't a .stack grid (the signed-out account form) gets it here. */
+.or-field + :is(button, .btn, .or-btn, .or-actions) { margin-top: 0; }
+:where(.or-form) form:not(.stack) > label + :is(button, .btn, .or-btn) { margin-top: var(--or-space-4); }
+.or-actions { display: flex; flex-wrap: wrap; gap: var(--or-space-2); align-items: center; }
+/* .or-form: a page whose bare controls and labels take the field look (the Cloud app sets it on <body>): exactly the app's own former
+   label / input / textarea rules, with no class on each control. All of it inside :where(), so it weighs no more than those element rules
+   and any page rule wins (a heavier scope caught .or-search and the invite page's radio cards). */
+:where(.or-form) label:where(:not(:has(> input[type="radio"], > input[type="checkbox"]))) {   /* a radio or checkbox label keeps its own line (the OAuth network chooser) */
+  display: grid; gap: var(--or-space-2); font-size: var(--or-label-size); line-height: var(--or-label-lh); font-weight: 400; color: var(--or-muted);
+}
+.or-input, :where(.or-form) :where(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="submit"], [type="button"], [type="file"], [type="range"], [type="color"]), select, textarea) {
+  box-sizing: border-box; min-height: var(--or-target); padding: 12px 14px; margin: 0;
+  background: var(--or-panel); color: var(--or-text); border: 0; border-radius: var(--or-radius-control); box-shadow: var(--or-edge);
+  font: var(--or-data-weight, 400) var(--or-data-size)/var(--or-data-lh) var(--or-sans); appearance: none;   /* the body font
+  (names and emails are words), the design system's data size, 48px tall like its buttons */
+}
+.or-input { width: 100%; }   /* a kit field fills its column; bare controls keep their own width, as the app's always did */
+:where(.or-form) :where(textarea), textarea.or-input, .or-input.prose { font: var(--or-body-size)/var(--or-body-lh) var(--or-sans); }   /* writing: the body face */
+/* Codes, keys, addresses and URLs: mono, so they read exactly as typed. A URL field is mono without a class. */
+/* The class is explicit, so this rule weighs one class plus one element: it beats the base "button, input, select, textarea { font-family:
+   inherit }" that globals.css, the OAuth page and the code page all carry after the kit (at zero weight, cf-seat.mono was sans). */
+.or-input:is(.mono, .code), :where(.or-form) input:is(.mono, .code, [type="url"]) { font-family: var(--or-mono); }
+:where(.or-form) :where(textarea), textarea.or-input { min-height: 128px; resize: vertical; }
+.or-drawer :where(.or-input, input, select, textarea) { background: var(--or-base); }   /* on the drawer's panel, a field reads as a well */
+.or-input::placeholder, :where(:where(.or-form) :where(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="submit"], [type="button"], [type="file"], [type="range"], [type="color"]), select, textarea))::placeholder { color: var(--or-off); opacity: 1; }
+.or-input:hover, :where(:where(.or-form) :where(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="submit"], [type="button"], [type="file"], [type="range"], [type="color"]), select, textarea)):hover { box-shadow: inset 0 0 0 1px var(--or-muted); }
+.or-input:focus-visible, :where(:where(.or-form) :where(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="submit"], [type="button"], [type="file"], [type="range"], [type="color"]), select, textarea)):focus-visible { outline: var(--or-focus); outline-offset: 2px; }
+.or-input:disabled, .or-input[aria-disabled="true"], :where(:where(.or-form) :where(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="submit"], [type="button"], [type="file"], [type="range"], [type="color"]), select, textarea)):disabled { color: var(--or-off); box-shadow: var(--or-edge); cursor: not-allowed; }
+.or-input[aria-invalid="true"], .or-input:user-invalid, :where(:where(.or-form) :where(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="submit"], [type="button"], [type="file"], [type="range"], [type="color"]), select, textarea)):where([aria-invalid="true"], :user-invalid) { box-shadow: inset 0 0 0 1px var(--or-danger); }
+.or-field .or-error, .or-error { margin: 0; font-size: 13px; line-height: 20px; color: var(--or-danger); }
+/* A value to copy (a code, a command): the value, then its Copy button. */
+.or-field-copy { display: flex; gap: var(--or-space-2); align-items: stretch; }
+.or-field-copy code {
+  flex: 1; min-width: 0; padding: 10px var(--or-space-3); background: var(--or-base); color: var(--or-text); border-radius: var(--or-radius-card);
+  box-shadow: var(--or-edge); font: 12.5px/20px var(--or-mono); word-break: break-all;
+}
+
+/* ---- Checkbox and radio: a checked control is a state, not an action, so its mark is ink, never orange. .or-check on the input, or
+   any checkbox or radio inside .or-form. ---- */
+input.or-check, :where(.or-form) input:is([type="checkbox"], [type="radio"]) { accent-color: var(--or-text); }
+
+/* ---- Search: a field with the search icon leading and an optional clear button. ---- */
+.or-search { position: relative; display: inline-flex; align-items: center; width: min(100%, 360px); margin: 0 0 var(--or-space-3); vertical-align: middle; }   /* inline: a count or button can sit beside it */
+.or-search > .or-icon:first-child { position: absolute; left: var(--or-space-3); color: var(--or-muted); pointer-events: none; }
+.or-search input {
+  box-sizing: border-box; width: 100%; min-height: 40px; padding: var(--or-space-2) 36px var(--or-space-2) 36px; margin: 0;
+  background: var(--or-panel); color: var(--or-text); border: 0; border-radius: var(--or-radius-card); box-shadow: var(--or-edge);
+  font: 14px/22px var(--or-sans); appearance: none;
+}
+.or-search input::placeholder { color: var(--or-off); opacity: 1; }
+.or-search input:hover { box-shadow: inset 0 0 0 1px var(--or-muted); }
+.or-search input:focus-visible { outline: var(--or-focus); outline-offset: 2px; }
+.or-search input::-webkit-search-cancel-button { display: none; }
+.or-search .or-search-clear {
+  position: absolute; right: var(--or-space-1); display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  background: none; color: var(--or-muted); border: 0; border-radius: var(--or-radius-control); cursor: pointer;
+}
+.or-search .or-search-clear:hover { color: var(--or-text); }
+.or-search .or-search-clear:focus-visible { outline: var(--or-focus); outline-offset: 0; }
+.or-search input:placeholder-shown + .or-search-clear { display: none; }
+/* After every control rule above (.or-search input sets its own 14px): a later rule of the same weight would undo it. */
+@media (max-width: 767px) { .or-input, .or-search input, :where(.or-form) :where(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="submit"], [type="button"], [type="file"], [type="range"], [type="color"]), select, textarea) { font-size: 16px; } }   /* under 16px, iOS zooms the page on focus */
+
+/* ---- Table: the flat table. Mono-label headers, inset dividers, row hover; group and nested rows for places and people. ---- */
+.or-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.or-table { width: 100%; border-collapse: collapse; font-size: var(--or-data-size); line-height: var(--or-data-lh); }
+.or-table th {
+  padding: 10px var(--or-space-2); text-align: left; vertical-align: bottom; color: var(--or-muted); white-space: nowrap;
+  font: var(--or-mono-label); letter-spacing: var(--or-mono-label-track); text-transform: uppercase; box-shadow: var(--or-edge-bottom);
+}
+.or-table td { padding: var(--or-space-3) var(--or-space-2); vertical-align: middle; color: var(--or-text); box-shadow: var(--or-edge-bottom); }
+.or-table tbody tr:hover td { background: rgba(255, 255, 255, 0.02); }
+.or-table td.num, .or-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.or-table td.mono { font: 13px/20px var(--or-mono); color: var(--or-muted); }
+.or-table td.muted { color: var(--or-muted); }
+.or-table td.nowrap { white-space: nowrap; }
+.or-table td.actions { width: 1%; white-space: nowrap; text-align: right; }
+/* A group heading row (a person, a place) and its rows nested under it. */
+.or-table tr.group td { padding-top: 22px; padding-bottom: 6px; font-weight: 500; box-shadow: none; }
+.or-table tr.group:hover td { background: none; }
+.or-table tr.place td { background: var(--or-panel); }
+.or-table tr.nested td:first-child { padding-left: 34px; }
+.or-table caption { caption-side: top; text-align: left; padding: 0 0 var(--or-space-2); color: var(--or-muted); font-size: var(--or-label-size); }
+@media (max-width: 640px) { .or-table td, .or-table th { padding-left: 6px; padding-right: 6px; } }
+/* .stack: on a phone each row becomes a card of its cells, each named by its data-label; the header stays for assistive tech only. */
+@media (max-width: 767px) {
+  .or-table.stack, .or-table.stack tbody { display: block; width: 100%; }
+  .or-table.stack thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .or-table.stack tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--or-space-3) var(--or-space-4); padding: var(--or-space-4) 0; box-shadow: var(--or-edge-bottom); }
+  .or-table.stack tr[hidden] { display: none; }
+  .or-table.stack td { display: block; min-width: 0; padding: 0; box-shadow: none; overflow-wrap: anywhere; }
+  .or-table.stack td:first-child { grid-column: 1 / -1; }
+  .or-table.stack td[data-label]::before { content: attr(data-label); display: block; color: var(--or-muted); font-size: 13px; line-height: 20px; }
+}
+
+/* ---- Status dot: 7px, always beside the word that says the state (colour alone never carries it). ---- */
+.or-status { display: inline-flex; align-items: center; gap: var(--or-space-2); color: var(--or-text); white-space: nowrap; }
+.or-dot { display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--or-ok); }
+.or-dot.ok { background: var(--or-ok); }
+.or-dot.wait { background: var(--or-wait); }
+.or-dot.off { background: var(--or-off); }
+.or-dot.bad { background: var(--or-danger); }
+.or-dot.hollow { background: none; box-shadow: inset 0 0 0 1.5px var(--or-off); }   /* not yet seen: no state to report */
+
+/* ---- Chip (or tag): a small label for a short fact (a plan, a kind, a count). The control's 4px corners, never a pill. ---- */
+.or-chip {
+  display: inline-flex; align-items: center; gap: var(--or-space-1); padding: 1px var(--or-space-2); border-radius: var(--or-radius-control);
+  box-shadow: var(--or-edge); color: var(--or-muted); font: 500 11px/18px var(--or-sans); white-space: nowrap; vertical-align: middle;
+}
+.or-chip.ok { color: var(--or-ok); box-shadow: inset 0 0 0 1px #33502f; }
+.or-chip.warn { color: var(--or-wait); box-shadow: inset 0 0 0 1px #5a4a26; }
+.or-chip.bad { color: var(--or-danger); box-shadow: inset 0 0 0 1px #5c2f26; }
+.or-chip.accent { color: var(--or-signal); box-shadow: inset 0 0 0 1px #5d3a1b; }
+.or-chip.mono { font: 400 11px/18px var(--or-mono); letter-spacing: 0.5px; text-transform: uppercase; }
+
+/* ---- Notice: a line of status or warning, with an inset left rule (the design system's lines are inset shadows). ---- */
+.or-notice {
+  --rule: var(--or-line); display: block; margin: var(--or-space-4) 0;   /* the app's former .notice: 16px above and below, the body size */
+  padding: var(--or-space-3) var(--or-space-4); background: var(--or-panel); color: var(--or-text);
+  border-radius: 0 var(--or-radius-card) var(--or-radius-card) 0; box-shadow: inset 2px 0 0 var(--rule);
+}
+/* With a leading icon: the icon, then its words in one <div>. Without one it stays a block, so paragraphs and inline links and buttons
+   flow as text (a flex notice turned each <p> into a column). */
+.or-notice:has(> .or-icon:first-child) { display: flex; gap: var(--or-space-3); align-items: flex-start; }
+.or-notice > .or-icon { margin-top: 4px; color: var(--rule); }
+.or-notice > div > :first-child, .or-notice > p:first-child { margin-top: 0; }
+.or-notice > div > :last-child, .or-notice > p:last-child { margin-bottom: 0; }
+.or-notice p { margin: 0 0 var(--or-space-2); }
+.or-notice .or-actions { margin-top: var(--or-space-3); }
+.or-notice.ok { --rule: var(--or-ok); }
+.or-notice.warn { --rule: var(--or-wait); }
+.or-notice.bad { --rule: var(--or-danger); color: var(--or-danger); }   /* the words red too, whatever holds them */
+/* .accent reads as the neutral notice (kept so existing markup still works): orange is for actions only, never an edge or a tint. */
+.or-notice.confirm { padding: var(--or-space-4); }   /* the neutral line; red stays only on its danger button */
+
+/* ---- Menu: <or-menu> (kit/menu.mjs) on a <details>, so it opens without the script. ---- */
+or-menu, .or-menu { position: relative; display: inline-block; }
+.or-menu > summary {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--or-space-1); min-width: 40px; height: 40px;
+  padding: 0 var(--or-space-2); border-radius: var(--or-radius-control); color: var(--or-text); cursor: pointer; list-style: none;
+}
+.or-menu > summary::-webkit-details-marker { display: none; }
+.or-menu > summary:hover { box-shadow: inset 0 0 0 1px var(--or-muted); }
+.or-menu > summary:focus-visible { outline: var(--or-focus); outline-offset: 2px; }
+.or-menu[open] > summary { box-shadow: inset 0 0 0 1px var(--or-muted); }
+.or-menu-panel {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; box-sizing: border-box; width: 280px; max-width: calc(100vw - 32px);
+  padding: 6px; background: var(--or-raised); border-radius: var(--or-radius-card); box-shadow: var(--or-edge), var(--or-shadow-1);
+}
+.or-menu.left .or-menu-panel, .or-menu.or-menu-flip .or-menu-panel { left: 0; right: auto; }   /* .left by choice; -flip by the element near the left edge */
+.or-menu-panel [role="menuitem"], .or-menu-panel > a, .or-menu-panel > button, .or-menu-panel > form > button {
+  display: block; box-sizing: border-box; width: 100%; padding: 9px 10px; margin: 0; background: none; color: var(--or-text);
+  border: 0; border-radius: var(--or-radius-control); font: 15px/22px var(--or-sans); text-align: left; text-decoration: none; cursor: pointer;
+}
+.or-menu-panel [role="menuitem"]:hover, .or-menu-panel [role="menuitem"]:focus-visible,
+nav.or-menu-panel > :is(a, button):is(:hover, :focus-visible), nav.or-menu-panel > form > button:is(:hover, :focus-visible) { background: var(--or-panel); outline: none; }
+.or-menu-panel :is([role="menuitem"], a, button) small { display: block; color: var(--or-muted); font-size: 12px; line-height: 18px; }
+.or-menu-panel [role="menuitem"].danger { color: var(--or-danger); }
+.or-menu-panel [role="separator"] { height: 1px; margin: 6px 4px; background: var(--or-line); }
+.or-menu-panel :is([role="menuitem"], a, button, span)[aria-disabled="true"] { color: var(--or-off); cursor: not-allowed; }
+
+/* ---- Drawer: <or-drawer> (kit/drawer.mjs), a right-hand panel over a scrim. ---- */
+.or-scrim { position: fixed; inset: 0; z-index: 30; background: var(--or-scrim); }
+.or-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 31; box-sizing: border-box; width: min(460px, 100%); display: flex; flex-direction: column;
+  padding: calc(18px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom, 0px)) 22px;
+  background: var(--or-panel); color: var(--or-text); box-shadow: inset 1px 0 0 var(--or-line); transform: translateX(100%); transition: transform 0.22s ease;
+  visibility: hidden;
+}
+.or-drawer[data-open] { transform: none; visibility: visible; }
+.or-drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--or-space-3); margin: 0 0 var(--or-space-4); }
+.or-drawer-head h2 { margin: 0; padding: 0; border: 0; box-shadow: none; font: 500 22px/28px var(--or-sans); letter-spacing: 0; }   /* the page's own h2 rules never leak in */
+.or-drawer-close {
+  flex: none; display: grid; place-items: center; width: 40px; height: 40px; margin: -8px -10px 0 0; padding: 0;
+  background: none; color: var(--or-text); border: 0; border-radius: var(--or-radius-control); cursor: pointer;
+}
+.or-drawer-close:hover { box-shadow: inset 0 0 0 1px var(--or-muted); }
+.or-drawer-close:focus-visible { outline: var(--or-focus); outline-offset: 0; }
+.or-drawer-back { display: inline-flex; align-items: center; gap: var(--or-space-1); margin: 0 0 var(--or-space-3); padding: 0; background: none; border: 0;
+  color: var(--or-muted); font: 400 14px/20px var(--or-sans); text-decoration: none; cursor: pointer; }   /* "← All choices" */
+.or-drawer-back:hover { color: var(--or-text); }
+.or-drawer-back:focus-visible { outline: var(--or-focus); outline-offset: 2px; border-radius: var(--or-radius-control); }
+.or-drawer-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.or-drawer-foot { display: flex; flex-wrap: wrap; gap: var(--or-space-2); padding-top: var(--or-space-4); box-shadow: inset 0 1px 0 var(--or-line); }
+/* Without the script (no data-enhanced): a link to #<id> opens the drawer and its close link (href="#") closes it. */
+or-drawer:not([data-enhanced]):target > .or-drawer { transform: none; visibility: visible; }
+or-drawer:not([data-enhanced]):target::before { content: ""; position: fixed; inset: 0; z-index: 30; background: var(--or-scrim); }
+.or-drawer:focus { outline: none; }
+@media (prefers-reduced-motion: reduce) { .or-drawer { transition: none; } }
+
+/* ---- Button: .or-btn, the design system's buttons: 48 tall, 4px corners. The plain button is the secondary one (.secondary says so explicitly): an
+   inset ink-grey outline with ink words. .primary is solid orange, .danger has red words, .small is 40 tall. Disabled (:disabled or
+   aria-disabled="true") is the one disabled look for every kind: a dashed 1px muted outline, no fill, muted words. Inside .or-form, the app's .btn class and bare <button>s get the same
+   look and feel, at the same weight as the app's own rules, so pages that already use them keep working. ---- */
+.or-btn, :where(.or-form) .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--or-space-1); box-sizing: border-box; margin: 0;
+  font: inherit; font-size: var(--or-button-size); line-height: var(--or-button-lh); font-weight: var(--or-button-weight); letter-spacing: 0;
+  padding: 12px 20px; min-height: var(--or-target); border: 0; border-radius: var(--or-radius-control); box-shadow: var(--or-edge);
+  background: transparent; color: var(--or-text); cursor: pointer; text-decoration: none; white-space: nowrap;   /* a label never wraps */
+}
+.or-btn:hover, :where(.or-form) .btn:hover { box-shadow: inset 0 0 0 1px var(--or-muted); color: var(--or-text); }
+.or-btn.primary, :where(.or-form) .btn.primary { background: var(--or-signal); color: var(--or-on-signal); box-shadow: inset 0 0 0 1px var(--or-signal); }
+.or-btn.primary:hover, :where(.or-form) .btn.primary:hover { background: var(--or-signal-hover); box-shadow: inset 0 0 0 1px var(--or-signal-hover); color: var(--or-on-signal); }
+.or-btn.danger, :where(.or-form) .btn.danger { color: var(--or-danger); }
+.or-btn.danger:hover, :where(.or-form) .btn.danger:hover { box-shadow: inset 0 0 0 1px var(--or-danger); color: var(--or-danger); }
+.or-btn.small, :where(.or-form) .btn.small { min-height: 40px; padding: 8px 14px; font-size: var(--or-label-size); line-height: var(--or-label-lh); }
+/* The button feel: no click may look frozen. A press lands 1px lower and about 8% darker; focus keeps the kit's ring; a button that waits
+   on the server shows a 14px spinner before its working words (aria-busy="true"; kit/button-feel.mjs sets it for native form posts and
+   button-styled links). A navigation longer than 300ms also shows a 2px top bar (.or-progress). Reduced motion: nothing moves or spins. */
+.or-btn, :where(.or-form) button, :where(.or-form) .btn { transition: background-color 80ms ease, box-shadow 80ms ease, color 80ms ease, filter 80ms ease, transform 80ms ease; }
+.or-btn:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):active, :where(.or-form) button:not(:disabled):not([aria-busy="true"]):active, :where(.or-form) .btn:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):active { transform: translateY(1px); filter: brightness(0.92); }
+.or-btn:focus-visible, :where(.or-form) button:focus-visible, :where(.or-form) .btn:focus-visible { outline: var(--or-focus); outline-offset: var(--or-focus-offset); }
+:where(.or-form) button.secondary:hover { box-shadow: inset 0 0 0 1px var(--or-muted); }
+.or-btn[aria-busy="true"], :where(.or-form) button[aria-busy="true"], :where(.or-form) .btn[aria-busy="true"] { cursor: progress; }
+.or-btn[aria-busy="true"]::before, :where(.or-form) button[aria-busy="true"]::before, :where(.or-form) .btn[aria-busy="true"]::before, .bf-ing::before {
+  content: ""; display: inline-block; flex: none; width: 14px; height: 14px; margin-inline-end: 6px; vertical-align: -2px; box-sizing: border-box;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: or-btn-spin 700ms linear infinite;
+}
+/* A page that swaps the words itself reserves the spinner in its working cell (.bf-ing), so the button's own spinner stays hidden. */
+.or-btn:has(.bf-stack)[aria-busy="true"]::before, :where(.or-form) button:has(.bf-stack)[aria-busy="true"]::before, :where(.or-form) .btn:has(.bf-stack)[aria-busy="true"]::before { display: none; }
+/* Working keeps the button's normal look: no hover, no dimming, never the disabled outline (a working button may also be disabled).
+   Its words change through the .bf-stack swap (or data-working, with kit/button-feel.mjs). */
+.or-btn[aria-busy="true"]:hover, :where(.or-form) .btn[aria-busy="true"]:hover { box-shadow: var(--or-edge); color: var(--or-text); }
+.or-btn.primary[aria-busy="true"]:hover, :where(.or-form) .btn.primary[aria-busy="true"]:hover { background: var(--or-signal); box-shadow: inset 0 0 0 1px var(--or-signal); color: var(--or-on-signal); }
+.or-btn.danger[aria-busy="true"]:hover, :where(.or-form) .btn.danger[aria-busy="true"]:hover { box-shadow: var(--or-edge); color: var(--or-danger); }
+/* Disabled: a dashed outline, the same for every kind. The 1px border replaces a pixel of padding, so the size doesn't change. */
+.or-btn:not([aria-busy="true"]):is(:disabled, [aria-disabled="true"]), .or-btn:not([aria-busy="true"]):is(:disabled, [aria-disabled="true"]):hover,
+:where(.or-form) .btn:not([aria-busy="true"]):is(:disabled, [aria-disabled="true"]), :where(.or-form) .btn:not([aria-busy="true"]):is(:disabled, [aria-disabled="true"]):hover {
+  padding: 11px 19px; background: transparent; box-shadow: none; border: 1px dashed var(--or-muted); color: var(--or-muted); cursor: not-allowed;
+}
+.or-btn.small:not([aria-busy="true"]):is(:disabled, [aria-disabled="true"]), :where(.or-form) .btn.small:not([aria-busy="true"]):is(:disabled, [aria-disabled="true"]) { padding: 7px 13px; }
+.or-btn[aria-busy="true"]:disabled:not(:focus-visible), :where(.or-form) .btn[aria-busy="true"]:disabled:not(:focus-visible) { outline: none; }
+/* The label swap: a button whose words change keeps its widest label's width. Every label sits in one grid cell; .bf-hide ones keep
+   their space, unseen. */
+.bf-stack { display: inline-grid; } .bf-stack > * { grid-area: 1 / 1; } .bf-stack > .bf-hide { visibility: hidden; }
+/* The working words, read out politely; never seen. */
+.or-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+@keyframes or-btn-spin { to { transform: rotate(360deg); } }
+.or-progress { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; height: 2px; background: var(--or-signal); transform-origin: 0 50%; pointer-events: none; animation: or-progress 8s cubic-bezier(0.1, 0.7, 0.2, 1) 300ms both; }
+@keyframes or-progress { 0% { transform: scaleX(0); } 2% { transform: scaleX(0.1); } 100% { transform: scaleX(0.92); } }
+@keyframes or-progress-show { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .or-btn, :where(.or-form) button, :where(.or-form) .btn { transition: none; }
+  .or-btn:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):active, :where(.or-form) button:not(:disabled):not([aria-busy="true"]):active, :where(.or-form) .btn:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):active { transform: none; }
+  .or-btn[aria-busy="true"]::before, :where(.or-form) button[aria-busy="true"]::before, :where(.or-form) .btn[aria-busy="true"]::before, .bf-ing::before { animation: none; }
+  .or-progress { transform: none; animation: or-progress-show 1ms linear 300ms both; }
+}
+
+/* ---- In-text link: .or-link, for a link or a text button inside a sentence. Colour alone can't mark it (ink beside muted words is
+   about 1.6:1, beside ink words 1:1), so it is underlined at rest and stays underlined on hover, where its colour also changes
+   (WCAG 1.4.1). A standalone link or a nav item doesn't need it; .or-arrow is the standalone link that leads on. Plain links inside the
+   kit's own text (hints, errors, a page head's line, a notice's words, a table caption) get the same underline. ---- */
+.or-link, :where(.or-hint, .or-error, .or-page-sub, .or-notice p, .or-table caption) a:not([class]) {
+  color: var(--or-text); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: pointer;
+}
+.or-link:hover, :where(.or-hint, .or-error, .or-page-sub, .or-notice p, .or-table caption) a:not([class]):hover { color: var(--or-muted); }
+.or-link:focus-visible { outline: var(--or-focus); outline-offset: 2px; border-radius: var(--or-radius-control); }
+button.or-link { appearance: none; margin: 0; padding: 0; border: 0; background: none; font: inherit; text-align: inherit; }
+
+/* ---- Arrow link: .or-arrow, a link that leads on ("All your places →"). Ink, no underline; the pointer turns it muted. The text arrow
+   follows the label (hidden from assistive tech); a link that carries the kit's "forward" icon instead shows no text arrow. ---- */
+.or-arrow { display: inline-flex; align-items: center; gap: var(--or-space-1); color: var(--or-text); text-decoration: none; transition: color 80ms ease; }
+.or-arrow::after { content: "→"; content: "→" / ""; }
+.or-arrow:has(> .or-icon, > or-icon)::after { content: none; }
+.or-arrow:hover { color: var(--or-muted); text-decoration: none; }
+.or-arrow:focus-visible { outline: var(--or-focus); outline-offset: 2px; border-radius: var(--or-radius-control); }
+@media (prefers-reduced-motion: reduce) { .or-arrow { transition: none; } }
+
+/* ---- Card: .or-card, the kit's panel surface: the panel colour, 8px corners, a 1px inset line, 24px in (the 4px grid). ---- */
+.or-card { box-sizing: border-box; padding: var(--or-card-pad); border-radius: var(--or-radius-card); background: var(--or-panel); box-shadow: var(--or-edge); color: var(--or-text); min-width: 0; }
+.or-card.compact { padding: var(--or-space-4); }
+.or-card > :first-child { margin-top: 0; } .or-card > :last-child { margin-bottom: 0; }
+
+/* ---- Disclosure: .or-disclosure on <details>, its <summary> a full-width row with a chevron in place of the browser's triangle. Put the
+   kit's "next" icon first in the summary (<or-icon name="next">) and it turns down when open; without one, a chevron of the same size is
+   drawn in pure CSS (two borders of a small square, turned), with no image, so a strict Content-Security-Policy allows it. ---- */
+.or-disclosure > summary { display: flex; align-items: center; gap: var(--or-space-2); min-height: 40px; padding: var(--or-space-2) 0; list-style: none; cursor: pointer; color: var(--or-text); font-weight: 500; }
+.or-disclosure > summary::-webkit-details-marker { display: none; }
+.or-disclosure > summary::marker { content: ""; }
+.or-disclosure > summary > :is(.or-icon, or-icon):first-child { color: var(--or-muted); transition: transform 80ms ease; }
+.or-disclosure[open] > summary > :is(.or-icon, or-icon):first-child { transform: rotate(90deg); }
+.or-disclosure > summary:not(:has(> .or-icon:first-child, > or-icon:first-child))::before {
+  content: ""; flex: none; box-sizing: border-box; width: 6px; height: 6px; margin: 5px; color: var(--or-muted);
+  border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: translateX(-1px) rotate(45deg); transition: transform 80ms ease;
+}
+.or-disclosure[open] > summary:not(:has(> .or-icon:first-child, > or-icon:first-child))::before { transform: translateY(-1px) rotate(135deg); }
+.or-disclosure > summary:hover { color: var(--or-text); }
+.or-disclosure > summary:hover:not(:has(> .or-icon:first-child, > or-icon:first-child))::before, .or-disclosure > summary:hover > :is(.or-icon, or-icon):first-child { color: var(--or-text); }
+.or-disclosure > summary:focus-visible { outline: var(--or-focus); outline-offset: 2px; border-radius: var(--or-radius-control); }
+.or-disclosure > :not(summary) { margin-left: calc(16px + var(--or-space-2)); }
+@media (prefers-reduced-motion: reduce) { .or-disclosure > summary::before, .or-disclosure > summary > :is(.or-icon, or-icon):first-child { transition: none; } }
+
+/* ---- Logo tile: an app's mark in a 28px tile (44px with .lg), drawn by kit/logos.mjs appLogo(). An app without a mark gets its first
+   letter (.or-letter); no name, the plain tile. OpenRig's own places get the orange ring. .bare drops the tile for a mark with its own. ---- */
+.or-logo { flex: none; width: 28px; height: 28px; border-radius: var(--or-radius-control); display: inline-grid; place-items: center; background: var(--or-panel); box-shadow: var(--or-edge); color: var(--or-text); }
+.or-logo svg { width: 17px; height: 17px; } .or-logo.lg { width: 44px; height: 44px; } .or-logo.lg svg { width: 26px; height: 26px; }
+.or-logo.or-letter, .or-logo:not(:has(*)) { color: var(--or-muted); font-weight: 600; font-size: 13px; line-height: 1; } .or-logo.lg.or-letter { font-size: 20px; }
+.or-logo.bare { background: none; box-shadow: none; } .or-logo.bare img { width: 100%; height: 100%; display: block; }
+.or-ring { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 3px var(--or-signal); display: block; } .or-logo.lg .or-ring { width: 18px; height: 18px; }
+
+/* ---- Page head: .or-page-head, the slim head of an app or view inside a shell (no hero): the title, an optional line under it
+   (.or-page-sub) and an optional actions row (.or-actions) on the right, wrapping under the title when there's no room. ---- */
+.or-page-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--or-space-3) var(--or-space-4); margin: 0 0 var(--or-space-4); padding-bottom: var(--or-space-3); box-shadow: var(--or-edge-bottom); }
+.or-page-head > :first-child { min-width: 0; flex: 1 1 auto; }
+.or-page-head :is(h1, h2) { margin: 0; font: var(--or-subhead-weight) var(--or-subhead-size)/var(--or-subhead-lh) var(--or-sans); letter-spacing: var(--or-subhead-track); color: var(--or-text); overflow-wrap: anywhere; }
+.or-page-head .or-page-sub { margin: var(--or-space-1) 0 0; color: var(--or-muted); font-size: var(--or-label-size); line-height: var(--or-label-lh); }
+.or-page-head > .or-actions { flex: none; }
+
+/* ---- Tabs: .or-tabs holding buttons (or links) with aria-selected="true" (role="tab") or aria-pressed="true", or a link with
+   aria-current="page". The on tab is ink on the raised surface with a 2px ink underline; never orange (orange is only for actions).
+   .or-tabs.segmented is a segmented control: the on segment is raised with an ink outline. ---- */
+.or-tabs { display: flex; gap: var(--or-space-1); box-shadow: var(--or-edge-bottom); overflow-x: auto; scrollbar-width: none; }
+.or-tabs > :is(button, a) {
+  display: inline-flex; align-items: center; gap: var(--or-space-2); flex: none; box-sizing: border-box; min-height: 40px; margin: 0; padding: var(--or-space-2) var(--or-space-3);
+  border: 0; border-radius: var(--or-radius-control) var(--or-radius-control) 0 0; background: none; color: var(--or-muted);
+  font: 400 var(--or-label-size)/var(--or-label-lh) var(--or-sans); white-space: nowrap; text-decoration: none; cursor: pointer; transition: color 80ms ease, background-color 80ms ease;
+}
+.or-tabs > :is(button, a):hover { color: var(--or-text); }
+.or-tabs > :is([aria-selected="true"], [aria-pressed="true"], [aria-current="page"]) { color: var(--or-text); background: var(--or-raised); box-shadow: inset 0 -2px 0 var(--or-text); font-weight: 500; }
+.or-tabs > :is(button, a):focus-visible { outline: var(--or-focus); outline-offset: -3px; }
+.or-tabs > :is(:disabled, [aria-disabled="true"]) { color: var(--or-off); cursor: not-allowed; }
+.or-tabs.segmented { display: inline-flex; max-width: 100%; padding: var(--or-space-1); border-radius: var(--or-radius-control); box-shadow: var(--or-edge); }
+.or-tabs.segmented > :is(button, a) { min-height: 32px; padding: var(--or-space-1) var(--or-space-3); border-radius: var(--or-radius-control); }
+.or-tabs.segmented > :is([aria-selected="true"], [aria-pressed="true"], [aria-current="page"]) { background: var(--or-raised); box-shadow: inset 0 0 0 1px var(--or-text); }
+@media (prefers-reduced-motion: reduce) { .or-tabs > :is(button, a) { transition: none; } }
+
+/* ---- Breadcrumbs: <nav class="or-crumbs" aria-label="…"><ol><li>…</li></ol></nav>. The separators are a chevron drawn in pure CSS
+   (no image, so a strict Content-Security-Policy allows it); never a " › " glyph. Links are muted and turn ink under the pointer; the current page (aria-current="page") is ink. ---- */
+.or-crumbs ol { display: flex; flex-wrap: wrap; align-items: center; gap: var(--or-space-1); margin: 0; padding: 0; list-style: none; }
+.or-crumbs { color: var(--or-muted); font-size: var(--or-label-size); line-height: var(--or-label-lh); }
+.or-crumbs li { display: inline-flex; align-items: center; gap: var(--or-space-1); min-width: 0; overflow-wrap: anywhere; }
+.or-crumbs li + li::before { content: ""; flex: none; box-sizing: border-box; width: 5px; height: 5px; margin: 0 4px 0 3px; color: var(--or-off); border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; transform: rotate(45deg); }
+.or-crumbs a { color: var(--or-muted); text-decoration: none; border-radius: var(--or-radius-control); }
+.or-crumbs a:hover { color: var(--or-text); }
+.or-crumbs a:focus-visible { outline: var(--or-focus); outline-offset: 2px; }
+.or-crumbs [aria-current="page"] { color: var(--or-text); font-weight: 500; }
+
+/* ---- hidden means hidden: a kit class that sets display (inline-flex, grid, block) would otherwise beat the browser's own
+   [hidden] { display: none }, and a hidden control would still show. ---- */
+:is(.or-btn, .or-arrow, .or-link, .or-chip, .or-notice, .or-field, .or-field-copy, .or-card, .or-page-head, .or-tabs, .or-logo, .or-search,
+  .or-status, .or-dot, .or-ring, .or-menu, .or-menu-panel, .or-table, .or-drawer, or-menu, or-drawer, or-icon)[hidden],
+:is(.or-menu, .or-menu-panel, .or-tabs, .or-table, .or-disclosure, .or-crumbs) [hidden],
+:where(.or-form) [hidden] { display: none !important; }
+
+/* ---- Forced colours (Windows high contrast and the like). Browsers drop box-shadow in this mode, so every inset-shadow line
+   above would vanish. Here only, real outlines and borders in system colours stand in. A boxed control's outline sits inside its
+   edge (offset -1px), so nothing moves; a focused control's own focus ring (a :focus-visible rule) still wins. ---- */
+@media (forced-colors: active) {
+  .or-input, :where(.or-form) :where(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="submit"], [type="button"], [type="file"], [type="range"], [type="color"]), select, textarea),
+  .or-field-copy code, .or-search input, .or-chip, .or-menu > summary, .or-menu-panel, .or-drawer-close,
+  .or-btn, :where(.or-form) .btn, :where(.or-form) button.secondary, .or-card, .or-logo, .or-tabs.segmented {
+    outline: 1px solid CanvasText; outline-offset: -1px;
+  }
+  .or-btn:disabled, .or-btn[aria-disabled="true"], :where(.or-form) .btn:disabled { outline: 1px dashed GrayText; color: GrayText; }
+  /* Working is distinct from unavailable, including when a disabled working button suppresses its normal outline. */
+  .or-btn[aria-busy="true"]:is(:disabled, [aria-disabled="true"]):not(:focus-visible), :where(.or-form) .btn[aria-busy="true"]:is(:disabled, [aria-disabled="true"]):not(:focus-visible) { outline: 1px solid CanvasText; color: CanvasText; }
+  .or-menu-panel :is([role="menuitem"], a, button):focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
+  .or-table th, .or-table td, .or-tabs { border-bottom: 1px solid CanvasText; }
+  .or-tabs > :is([aria-current="page"], [aria-selected="true"], [aria-pressed="true"]) { outline: 2px solid Highlight; outline-offset: -2px; }
+  .or-notice { border-left: 2px solid CanvasText; }
+  .or-drawer { border-left: 1px solid CanvasText; }
+  .or-drawer-foot { border-top: 1px solid CanvasText; }
+  .or-dot { border: 1px solid CanvasText; }   /* a status is always said in words too; the dot keeps its shape */
+  .or-ring { border: 3px solid CanvasText; box-sizing: border-box; }
+}

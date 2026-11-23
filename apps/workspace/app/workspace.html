@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Workspace</title>
+  <title>Projects</title>
+  <!-- Copyright 2026 mvschwarz. Licensed under the Apache License, Version 2.0. -->
+  <link rel="stylesheet" href="/vendor/theme16/kit-app.css?v=0f29a66a3506f8dc6e55f2f1aae304054224369a7d0f7454927f02dff8e91355">
   <style>
     /* ─────────────────────────────────────────────────────────────────────
        WORKSPACE — the reference app.
@@ -33,78 +35,70 @@
 
        3. SAY WHAT IS NOT TRUE YET. Where the runtime cannot answer something,
           this says so on the surface instead of rendering a plausible blank.
-          The files root today is a FIXTURE directory, so the workspace pane
-          announces that rather than implying your work is in it. A dashboard
-          that looks healthy while pointing at the wrong thing is the worst
-          failure available to it.
+          When the files root is the SDK's FIXTURE folder, the workspace pane
+          says so rather than implying your work is in it. A dashboard that
+          looks healthy while pointing at the wrong thing is the worst failure
+          available to it.
 
-       4. INHERIT THE LOOK. Same tokens as FLOOR, EFFECTS, SCANNER and SHELF.
-          A studio that invents a palette per app stops reading as one product.
+       4. INHERIT THE LOOK. The OpenRig UI kit's tokens and buttons (kit-app.css),
+          like every other app. A studio that invents a palette per app stops reading as one product.
        ───────────────────────────────────────────────────────────────────── */
     :root {
-      --bg:#0b0f14; --panel:#121a22; --panel2:#0f161d; --line:#1f2a35;
-      --ink:#dbe4ec; --dim:#94a5b6; --faint:#6b7c8d; --accent:#4ade9b; --flag:#d99a2b;
-      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --bg: var(--or-base); --panel: var(--or-panel); --panel2: var(--or-base); --line: var(--or-line);
+      --ink: var(--or-text); --dim: var(--or-muted); --faint: var(--or-dim); --accent: var(--or-signal); --flag: var(--or-wait);
+      --mono: var(--or-mono);
     }
-    * { box-sizing:border-box; }
-    body { margin:0; background:var(--bg); color:var(--ink);
-           font:14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-    header { padding:16px 20px 10px; border-bottom:1px solid var(--line);
-             display:flex; flex-direction:column; gap:8px; }
-    h1 { font-family:var(--mono); font-size:18px; margin:0; letter-spacing:-0.02em; font-weight:600; }
-    .eyebrow { font-family:var(--mono); font-size:10px; letter-spacing:.16em;
-               text-transform:uppercase; color:var(--accent); }
-    .status { font-family:var(--mono); font-size:11px; color:var(--faint); min-height:1.3em; }
-    .bar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
-    button, input { font-family:var(--mono); font-size:12px; padding:6px 10px; border-radius:3px;
-      border:1px solid var(--line); background:var(--panel); color:var(--dim); cursor:pointer; }
-    input { cursor:text; }
-    button:hover { border-color:var(--accent); color:var(--ink); }
-    button:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    body { margin: 0; }
+    header { padding: var(--or-space-4) var(--or-space-5) var(--or-space-3); box-shadow: var(--or-edge-bottom);
+             display: flex; flex-direction: column; gap: var(--or-space-2); }
+    h1 { font: var(--or-subhead-weight) var(--or-subhead-size)/var(--or-subhead-lh) var(--or-sans); letter-spacing: var(--or-subhead-track); margin: 0; }
+    .eyebrow { font: var(--or-mono-label); letter-spacing: var(--or-mono-label-track); text-transform: uppercase; color: var(--muted); }
+    .status { font: 13px/20px var(--or-mono); color: var(--faint); min-height: 1.3em; }
+    .bar { display: flex; flex-wrap: wrap; gap: var(--or-space-2); align-items: center; }
 
     /* THREE PANES, EQUAL WEIGHT. None of the three is the "main" one — which is
        what makes this a launchpad rather than a file browser with extras. */
-    .panes { display:grid; gap:14px; padding:16px 20px 40px;
-             grid-template-columns:repeat(auto-fit, minmax(330px, 1fr)); }
-    .pane { background:var(--panel); border:1px solid var(--line); border-radius:5px;
-            padding:13px 14px; display:flex; flex-direction:column; gap:10px; min-width:0; }
-    .pane h2 { font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase;
-               color:var(--accent); margin:0; display:flex; justify-content:space-between; gap:8px; }
-    .pane h2 .sub { color:var(--faint); letter-spacing:.06em; }
-    .rows { display:flex; flex-direction:column; gap:1px; }
-    .row { display:flex; align-items:baseline; gap:8px; padding:4px 0;
-           border-bottom:1px solid #17212b; font-family:var(--mono); font-size:11.5px; }
-    .row:last-child { border-bottom:0; }
-    .row .k { color:var(--ink); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .row .v { color:var(--faint); font-variant-numeric:tabular-nums; }
-    a.row { text-decoration:none; }
-    a.row:hover .k { color:var(--accent); }
+    .panes { display: grid; gap: var(--or-space-4); padding: var(--or-space-4) var(--or-space-5) var(--or-space-7);
+             grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+    .pane { background: var(--panel); box-shadow: var(--or-edge); border-radius: var(--or-radius-card);
+            padding: var(--or-space-4); display: flex; flex-direction: column; gap: var(--or-space-3); min-width: 0; }
+    .pane h2 { font: var(--or-mono-label); letter-spacing: var(--or-mono-label-track); text-transform: uppercase;
+               color: var(--muted); margin: 0; display: flex; justify-content: space-between; gap: 8px; }
+    .pane h2 .sub { color: var(--faint); }
+    .rows { display: flex; flex-direction: column; gap: 1px; }
+    .row { display: flex; align-items: baseline; gap: 8px; padding: 6px 0;
+           box-shadow: var(--or-edge-bottom); font: 13px/20px var(--or-mono); }
+    .row:last-child { box-shadow: none; }
+    .row .k { color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row .v { color: var(--faint); font-variant-numeric: tabular-nums; }
+    a.row { text-decoration: none; }
+    a.row:hover .k { color: #fff; }
 
     /* STATE IN FORM, NOT ONLY IN WORDS — a dot you can scan beats a word you
-       have to read, on a surface whose whole job is "is anything wrong". */
-    .dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:var(--faint); }
-    .dot.work { background:var(--accent); }
-    .dot.blocked { background:var(--flag); }
-    .dot.idle { background:#3a4a5a; }
-    .note { font-size:12px; color:var(--dim); line-height:1.45; }
-    .warn { font-size:12px; color:var(--flag); line-height:1.45; }
-    .paths { font-family:var(--mono); font-size:10.5px; color:var(--faint);
-             user-select:all; word-break:break-all; line-height:1.5; }
-    .paths b { color:var(--dim); font-weight:500; }
-    .empty { font-family:var(--mono); font-size:11px; color:var(--faint); }
-    [hidden] { display:none !important; }
+       have to read, on a surface whose whole job is "is anything wrong". The kit's status dot colours. */
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--or-off); }
+    .dot.work { background: var(--or-ok); }
+    .dot.blocked { background: var(--or-wait); }
+    .dot.idle { background: var(--or-off); }
+    .note { font-size: var(--or-label-size); color: var(--dim); line-height: var(--or-label-lh); }
+    .warn { font-size: var(--or-label-size); color: var(--flag); line-height: var(--or-label-lh); }
+    .paths { font: 12px/20px var(--or-mono); color: var(--faint);
+             user-select: all; word-break: break-all; }
+    .paths b { color: var(--dim); font-weight: 500; }
+    .empty { font: 13px/20px var(--or-mono); color: var(--faint); }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
   <header>
     <div>
       <div class="eyebrow">Studio</div>
-      <h1>Workspace</h1>
+      <h1>Projects</h1>
     </div>
     <div class="status" id="status">reading the studio…</div>
     <div class="bar">
-      <button id="refresh">refresh</button>
-      <button id="openfiles">open FILES</button>
+      <button id="refresh" class="or-btn btn small">refresh</button>
+      <button id="openfiles" class="or-btn btn small">open FILES</button>
     </div>
   </header>
 
@@ -164,9 +158,8 @@ function paintAgents(fs) {
   const seats = fs.seats || [];
   $('#agentsub').textContent = `${seats.length} seats`;
 
-  // SUMMARISE, DO NOT ENUMERATE. On this box the runtime answers with NINETY-TWO
-  // seats across every rig, and a flat list of 92 is not something anyone reads —
-  // it is the same failure as a shelf of black rectangles, just with words.
+  // SUMMARISE, DO NOT ENUMERATE. A rig can have dozens of seats, and a flat list
+  // of them is not something anyone reads.
   //
   // So: rollup by state first, then only the seats that actually want attention.
   // Rule 2 in action — read shallow, and let rig tooling be the deep view.
@@ -178,7 +171,7 @@ function paintAgents(fs) {
   if (!seats.length) host.innerHTML = '<div class="empty">no seats reported</div>';
 
   // BUSY FIRST, AND BOUNDED. A launchpad is scanned for what needs attention;
-  // sorting by name buries the one blocked seat among ninety idle ones.
+  // sorting by name buries the one blocked seat among many idle ones.
   const wants = seats.filter((s) => s.state === 'blocked' || s.pendingWork > 0)
     .sort((a, b) => (b.pendingWork || 0) - (a.pendingWork || 0));
   for (const s of wants.slice(0, 6)) {
@@ -230,25 +223,8 @@ function paintWorkspace(tree, contract) {
     $('#wspath').textContent = tree.__error || 'the runtime did not answer for files';
     return;
   }
-  // THE SAME VERB ANSWERS IN TWO SHAPES, and this is a real contract divergence
-  // rather than a quirk to paper over. The SDK runtime answers /api/files/tree
-  // with { path, dirs, files } — one root, its contents. With the FILES app
-  // installed, a PROVIDER answers the same verb with { roots: [...] } — a list
-  // of bound roots and no contents at all.
-  //
-  // An app cannot know in advance which it will get, so it has to handle both.
-  // Written out rather than normalised silently, because the divergence is the
-  // finding: one verb, two response shapes, decided by who happens to serve it.
-  if (Array.isArray(tree.roots)) {
-    $('#wssub').textContent = `${tree.roots.length} root${tree.roots.length === 1 ? '' : 's'}`;
-    for (const r of tree.roots) host.appendChild(row(r.name || r.path, '', 'idle'));
-    $('#wspath').innerHTML = tree.roots.map((r) => `<b>root</b> ${r.path}`).join('<br>');
-    const w = $('#wswarn'); w.hidden = false;
-    w.textContent = 'The provider answering /api/files/tree returns a list of ROOTS, while the '
-      + 'SDK runtime answers the same verb with a folder’s CONTENTS. One verb, two shapes — '
-      + 'so this pane shows roots here and contents on a bare runtime. Open FILES to browse.';
-    return;
-  }
+  // /api/files/tree answers one folder's contents, { path, dirs, files }, whether
+  // the runtime serves it or the Files provider does (contract/runtime-api.md).
   const dirs = tree.dirs || [], files = tree.files || [];
   $('#wssub').textContent = `${dirs.length} folders · ${files.length} files`;
   for (const d of dirs) host.appendChild(row(`${d.name}/`, '', 'idle'));
@@ -256,22 +232,16 @@ function paintWorkspace(tree, contract) {
   if (files.length > 8) host.appendChild(row(`…and ${files.length - 8} more`, ''));
   if (!dirs.length && !files.length) host.innerHTML = '<div class="empty">the root is empty</div>';
 
-  $('#wspath').innerHTML = `<b>files root</b> ${tree.path || 'unknown'}`;
+  // The path is data (a folder can be named anything), so it goes in as text, never markup.
+  const wspath = $('#wspath'), label = document.createElement('b');
+  label.textContent = 'files root';
+  wspath.replaceChildren(label, ` ${tree.path || 'unknown'}`);
 
-  // RULE 3, THE IMPORTANT ONE, AND THE REASON THIS PANE EXISTS.
-  //
-  // The runtime's files root is derived from --fixtures and cannot be rebound
-  // while it runs, so out of the box this dashboard is pointed at DEMO DATA. It
-  // would render perfectly: real folders, real files, no error anywhere. A user
-  // would reasonably conclude their workspace was empty.
-  //
-  // So it is said out loud. This is the single strongest entry on this app's
-  // cannot-do list and the argument for making the root rebindable.
-  // AN UNKNOWN ROOT MUST SAY SO. The first version of this checked for the
-  // fixture path and stayed SILENT when the path was missing entirely — which is
-  // precisely the "renders a plausible blank" failure this file has a rule
-  // against, committed three panes below where the rule is written. A dashboard
-  // that cannot name where it is pointed has to admit that, not go quiet.
+  // RULE 3, THE IMPORTANT ONE, AND THE REASON THIS PANE EXISTS. Without the Files
+  // provider, the runtime answers this verb from its own files root, which can be
+  // the SDK's fixture folder. That would render perfectly (real folders, real
+  // files, no error) and a person would conclude their workspace was empty, so it
+  // is said out loud. A root the answer doesn't name is said too.
   const w = $('#wswarn');
   if (!tree.path) {
     w.hidden = false;
@@ -308,8 +278,7 @@ async function load() {
 $('#refresh').onclick = load;
 $('#openfiles').onclick = () => window.open('/surfaces/files.html', '_blank', 'noopener');
 
-// THE AGENT SEAM. Same shape as SCANNER and SHELF: everything the surface knows,
-// callable without a pointer. A dashboard is exactly the thing an agent wants to
+// THE AGENT SEAM: everything the surface knows, callable without a pointer. A dashboard is exactly the thing an agent wants to
 // read before deciding what to do next.
 window.workspace = {
   state: () => STATE,
@@ -323,12 +292,8 @@ window.workspace = {
     STATE.tree?.path && /fixtures[\\/]files-root$/.test(STATE.tree.path)
       ? 'the files root is the SDK fixture folder and cannot be rebound at runtime'
       : null,
-    Array.isArray(STATE.tree?.roots)
-      ? '/api/files/tree answers in two different shapes — { roots } from a provider, '
-        + '{ path, dirs, files } from the runtime — so an app cannot rely on either'
-      : null,
     (STATE.factory?.seats?.length ?? 0) > 20
-      ? `factory state returns every seat on the host (${STATE.factory.seats.length}) with no `
+      ? `factory state returns all ${STATE.factory.seats.length} of the rig's seats with no `
         + 'filter or paging verb, so a dashboard has to summarise rather than list'
       : null,
     'an app built only on SDK verbs cannot declare them as required: the manifest '

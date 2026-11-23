@@ -1,0 +1,103 @@
+/* An app page on the OpenRig UI kit: the kit's tokens and components (vendor/kit/; buttons are the kit's .or-btn, the slim head is
+   its .or-page-head, tabs its .or-tabs, breadcrumbs its .or-crumbs), then the few page rules the kit leaves to each app: the page
+   ground and type, ink links, a text button that reads as a link. Dark only. A page links this file first and keeps only its own
+   layout after it; icons come from <or-icon> (vendor/kit/or-icon.mjs). */
+@import url("/vendor/kit/tokens.css?v=98052471569365b4a8b78ee792e63dc70d03cdd4143d49d2ba9469d9d326a12f");
+@import url("/vendor/kit/components.css?v=9354d77363b0dc1fc3f99d68ae02850018c531723845895c2d0df8bd8e123af5");
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  background: var(--or-base);
+  color: var(--or-text);
+}
+body {
+  font-family: var(--or-sans);
+  font-size: var(--or-data-size);
+  line-height: var(--or-data-lh);
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+b,
+strong {
+  font-weight: 500;
+}
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--or-mono);
+}
+/* Links are ink with no underline when they stand alone (nav, a row, an action). A link inside running text needs a cue besides colour
+   (WCAG 1.4.1): the kit's .or-link underline, which a plain classless link in a paragraph, list item or definition also gets here. A
+   classed link or text button inside a sentence takes .or-link itself. */
+a {
+  color: var(--or-connect);
+  text-decoration: none;
+}
+a:hover {
+  color: #fff;
+}
+:where(p, li, dd) a:not([class]) {
+  color: var(--or-text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+:where(p, li, dd) a:not([class]):hover {
+  color: var(--or-muted);
+}
+/* A checked checkbox or radio is a state, not an action: its mark is ink (the kit's .or-check, for every one on the page). */
+input:is([type="checkbox"], [type="radio"]) {
+  accent-color: var(--or-text);
+}
+:focus-visible {
+  outline: var(--or-focus);
+  outline-offset: 2px;
+}
+/* A text button that reads as a link: ink, no box. */
+.linklike {
+  font: inherit;
+  color: var(--or-connect);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.linklike:hover {
+  color: var(--or-muted);
+}
+.linklike:disabled {
+  color: var(--or-muted);
+  cursor: not-allowed;
+}
+/* A toggle button that is on, outside an .or-tabs row: the kit's selected look (raised, ink edge; never orange, which is for actions). */
+.or-btn.on,
+.or-btn[aria-pressed="true"] {
+  background: var(--or-raised);
+  box-shadow: inset 0 0 0 1px var(--or-text);
+  color: var(--or-text);
+}
+/* The words beside a page head's title: the kit's .or-page-sub, for heads whose line under the title is a plain <p> or .meta. */
+.or-page-head > p,
+.or-page-head > .meta {
+  margin: 0;
+  color: var(--or-muted);
+  font-size: var(--or-label-size);
+  line-height: var(--or-label-lh);
+}
+.muted {
+  color: var(--or-muted);
+}

@@ -1,61 +1,34 @@
 {
   "manifest_version": 1,
   "id": "files",
-  "name": "FILES",
-  "summary": "Browse, search, tag and edit — including the studio's own source, so the agent can reshape the app you are looking at.",
+  "name": "Files",
+  "summary": "Browse, search, tag and edit the folders this Studio binds. An agent can open a file here for you.",
   "category": "studio",
-  "maker": {
-    "name": "OpenRig",
-    "url": "https://github.com/mvschwarz"
-  },
+  "maker": { "name": "OpenRig", "url": "https://openrig.dev" },
   "surface": {
     "entry": "app/files.html",
     "path": "/surfaces/files.html",
     "glyph": "▤",
-    "hint": "browse, search, tag and edit your media and source — the agent can drive it"
+    "icon": "files",
+    "hint": "browse, search, tag and edit your files; the agent can drive it"
   },
   "roots": {
-    "media": {
-      "required": true
-    },
-    "project": {
-      "required": false
-    }
+    "project": { "required": false },
+    "media": { "required": false },
+    "work": { "required": false }
   },
   "calls": {
-    "/api/files/tree": {
-      "required": true
-    },
-    "/api/files/read": {
-      "required": true
-    },
-    "/api/files/write": {
-      "required": true
-    },
-    "/api/files/raw": {
-      "required": true
-    },
-    "/api/files/search": {
-      "required": true
-    },
-    "/api/files/tags": {
-      "required": true
-    },
-    "/api/files/goto": {
-      "required": true
-    },
-    "/api/files/roots": {
-      "required": true
-    }
+    "/api/files/tree": { "required": true },
+    "/api/files/read": { "required": true },
+    "/api/files/write": { "required": true },
+    "/api/files/raw": { "required": true },
+    "/api/files/search": { "required": true },
+    "/api/files/tags": { "required": true },
+    "/api/files/goto": { "required": true },
+    "/api/files/roots": { "required": true }
   },
-  "_focus_note": "/api/focus IS NOT DECLARED IN calls{} AND ITS ABSENCE IS DELIBERATE. `calls` says what this app needs a PROVIDER to answer, and no provider answers focus: it is reserved to the runtime (with /api/drive, /api/contract, /api/events, /api/factory/state) and served unconditionally. Declaring it here was harmless only while @openrig/studio-video also declared it — that declaration was itself the defect the reservation removed, and with it gone a `required: true` focus call makes the box REFUSE TO START for a verb that is always present. KNOWN GAP, NOT A CLOSED QUESTION: the resolver answers 'does an installed PROVIDER declare this?' and never asks 'does the RUNTIME serve it?', so today there is no honest way to say 'I depend on the runtime for this'. When it resolves against providers UNION runtime-owned verbs, these declarations can come back as required and mean it. See the rebind/dependency design filed with the SDK. The manifest format was never wrong here; the resolver is.",
-  "_calls_note": "What this app CALLS — a different fact from what a provider ANSWERS. It was `verbs`, a flat list doing double duty: authored by the app to mean a dependency, consumed by the composer as provider routing. That double duty is how a route could exist only because some unrelated app declared it.",
-  "vendor": [
-    "marked"
-  ],
-  "provider": {
-    "package": "@openrig/studio-host",
-    "required": true,
-    "_note": "A REFERENCE, not a run spec. How to start this backend, and the live-state companion that used to sit here, are declared by the provider itself in providers/studio-host/provider.json — the provider is authoritative about itself and an app has no standing to say otherwise. The companion moved because keeping it here pinned a bug rather than removing it: it arrived here only after being lost with the AGENTS app, and retiring FILES the same way would have lost it again."
-  }
+  "_roots_note": "No one root is required: a Studio binds whichever of these kinds it has (a hosted box binds media and work), and the page lists the folders it was given. With none bound it says so and offers to add one.",
+  "_focus_note": "The page also posts /api/focus, which the Studio runtime itself serves. It is not listed in calls{}, because calls{} names verbs a provider must answer, and a runtime-owned verb listed there as required would make the Studio refuse to start.",
+  "vendor": ["marked", "files-page", "theme16", "kit"],
+  "provider": { "package": "@openrig/studio-host", "required": true }
 }

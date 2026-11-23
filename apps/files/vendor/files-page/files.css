@@ -1,0 +1,175 @@
+/* Files adapter on the OpenRig UI kit: retain the single shell header, action protocol and selection model. */
+:root {
+  --bg: var(--or-base);
+  --fg: var(--or-text);
+  --body: var(--or-text);
+  --dim: var(--or-muted);
+  --faint: var(--or-muted);
+  --line: var(--or-line);
+  --line2: var(--or-line);
+  --card: var(--or-panel);
+  --coral: var(--or-danger);
+  --indigo: var(--or-connect);
+  --sans: var(--or-sans);
+  --mono: var(--or-mono);
+}
+body {
+  font-size: var(--or-data-size);
+  line-height: var(--or-data-lh);
+  font-weight: 400;
+}
+body::before {
+  display: none;
+}
+/* The lens toggles are kit buttons (.btn.small, .on when chosen); the Download buttons are the page's one main action: the kit's primary. */
+.ghost.btn {
+  flex: 1 1 0;
+}
+.btn.dl-here:not(:disabled),
+#downloadFile.btn:not(:disabled) {
+  background: var(--or-signal);
+  color: var(--or-on-signal);
+  box-shadow: inset 0 0 0 1px var(--or-signal);
+}
+.btn.dl-here:not(:disabled):hover,
+#downloadFile.btn:not(:disabled):hover {
+  background: var(--or-signal);
+  box-shadow: inset 0 0 0 1px var(--or-signal);
+  color: var(--or-on-signal);
+  filter: brightness(1.1);
+}
+.body {
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+#rail {
+  background: var(--or-base);
+  padding: 12px 0;
+  backdrop-filter: none;
+}
+.lens {
+  padding: 0 16px 16px;
+  gap: 8px;
+}
+#qWrap.or-search {
+  display: flex;
+  width: calc(100% - 32px);
+  margin: 0 16px 16px;
+}
+#qWrap.or-search input {
+  padding-right: 12px;
+} /* no clear button here: the words get the room */
+#rail h3 {
+  margin: 16px 16px 4px;
+}
+.node {
+  min-height: 40px;
+  padding: 8px 16px;
+  gap: 8px;
+  color: var(--or-text);
+  font-size: var(--or-label-size);
+}
+.node.on {
+  color: var(--or-text);
+  border-left-color: var(--or-text);
+  background: var(--or-raised);
+}
+.node .tri,
+.node .ic {
+  color: var(--or-muted);
+}
+.node.kbd {
+  outline: var(--or-focus);
+  outline-offset: -3px;
+}
+#empty {
+  padding: 32px;
+  font: 400 var(--or-data-size)/var(--or-data-lh) var(--or-sans);
+  text-transform: none;
+  letter-spacing: 0;
+  text-align: center;
+  color: var(--or-muted);
+}
+#ed {
+  padding: 24px;
+  font: 400 13px/20px var(--or-mono);
+}
+#md {
+  padding: var(--or-card-pad);
+  max-width: 880px;
+  font-size: var(--or-body-size);
+  line-height: var(--or-body-lh);
+}
+#md h1 {
+  font: var(--or-subhead-weight) var(--or-subhead-size)/var(--or-subhead-lh) var(--or-sans);
+  letter-spacing: var(--or-subhead-track);
+  margin: 0 0 16px;
+}
+#md h2 {
+  font: 500 var(--or-body-size)/var(--or-body-lh) var(--or-sans);
+  margin: 24px 0 8px;
+}
+#md h3 {
+  font: 500 var(--or-data-size)/var(--or-data-lh) var(--or-sans);
+}
+#md p,
+#md li {
+  overflow-wrap: break-word;
+}
+#md a {
+  color: var(--or-connect);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+#md pre {
+  padding: 16px;
+  border-radius: var(--or-radius-card);
+  background: var(--or-panel);
+}
+#md code {
+  border-radius: var(--or-radius-control);
+  font-family: var(--or-mono);
+}
+#md td,
+#md th {
+  padding: 12px;
+  font-size: var(--or-label-size);
+}
+#filesAccess {
+  padding: 16px !important;
+  background: var(--or-panel);
+  font-size: var(--or-label-size);
+}
+#filesAccess:not([hidden]) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(140px, 28vh) minmax(0, 1fr);
+  }
+  #rail {
+    box-shadow: var(--or-edge-bottom);
+    padding: 12px 0;
+  }
+  .lens {
+    padding-bottom: 12px;
+  }
+  #qWrap.or-search {
+    margin-bottom: 12px;
+  }
+  #md,
+  #ed {
+    padding: 24px 20px;
+  }
+}
+
+#filesStatus {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#downloadFile {
+  flex: none;
+}

@@ -1,0 +1,9 @@
+/* The kit's tokens (vendor/kit/tokens.css) under this folder's name, plus the few extra names some pages use, pointed at the
+   kit's values. Dark only. */
+@import url("/vendor/kit/tokens.css?v=98052471569365b4a8b78ee792e63dc70d03cdd4143d49d2ba9469d9d326a12f");
+:root {
+  --or-radius-tag: var(--or-radius-control); /* small status tags: the kit's control corner */
+  --or-pill-inset: 0.333em;
+  --or-gutter: var(--or-space-5);
+  --or-max: var(--or-wrap);
+}

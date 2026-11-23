@@ -1,0 +1,19 @@
+{
+  "manifest_version": 1,
+  "id": "hello",
+  "name": "Hello",
+  "summary": "The smallest working app: one page that asks its provider for a greeting. Copy it to start your own.",
+  "category": "example",
+  "maker": { "name": "OpenRig", "url": "https://openrig.dev" },
+  "surface": {
+    "entry": "app/hello.html",
+    "path": "/surfaces/hello.html",
+    "glyph": "✋",
+    "icon": "app-hello",
+    "hint": "say hello to this Studio's provider"
+  },
+  "calls": {
+    "/api/hello": { "required": true }
+  },
+  "provider": { "package": "@openrig/studio-hello", "required": true }
+}

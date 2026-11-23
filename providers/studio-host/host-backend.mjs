@@ -1,39 +1,23 @@
-// The studio's own backend, ported from studio-box.
+// The Files provider's file operations: the bound folders, the one containment resolver, and the read, write, search, tag
+// and go-to verbs built on it. Copyright 2026 mvschwarz. Licensed under the Apache License, Version 2.0.
 //
-// THIS BOX IS TRUSTED. It belongs to the person using it. The orchestration
-// capabilities — spawning an agent, driving a terminal, filing work into the
-// owner's own rig queue — are FEATURES here, not hazards. The whole thesis is
-// that an agent in the sidebar can run and reshape the app in front of you.
-//
-// An earlier revision of this file stripped those out and justified it with a
-// threat model in which the machine's own owner was the adversary. That model
-// was wrong and has been retracted. Nothing here is defended against the user.
-//
-// What the boundary below IS for is ROBUSTNESS — a different job, and a real
-// one. A malformed slot id from a UI bug, an agent acting on a path it misread,
-// or a forgotten symlink will corrupt an owner's disk just as effectively as
-// malice would. resolveInsideRoots stops the tool wrecking the files of the
-// person operating it. That is worth having on any box, and it is the only
-// claim it makes.
+// The resolver is for robustness, not a threat model against the machine's own user: a malformed path from a page, an agent
+// acting on a path it misread, or a forgotten symlink can damage files just as effectively as malice. Every read and every write
+// goes through resolveInsideRoots, and verify-containment.mjs checks that nothing in this provider contains paths any other way.
 
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFile } from "node:child_process";
-import { fileURLToPath } from "node:url";
 
-const REPO_ROOT = path.resolve(process.env.STUDIO_HOST_ROOT || process.cwd());
+// Where this Studio keeps its own state: the folder it runs from (the launcher starts providers there).
+const STUDIO_DIR = path.resolve(process.env.OPENRIG_STUDIO_DIR || process.cwd());
 
 // ---- roots -----------------------------------------------------------------
-// The studio's OWN SOURCE is a default root, deliberately. "Reshape it" is the
-// product: the owner, through the agent, edits the app they are looking at.
-// Removed once on the retracted threat model; restored.
+// The folders the Studio binds (studio.json's roots, passed as --root), plus any the owner added from the page. There are no
+// fallback folders: a Studio that binds none shows none, and the page says so.
 export function fileRoots(config = {}) {
   const home = os.homedir();
-  const declared = config.filesRoots?.length
-    ? config.filesRoots
-    : [REPO_ROOT, path.join(home, "openrig-videos")];
-  return [...declared, ...readOverlay()]
+  return [...(config.filesRoots ?? []), ...readOverlay()]
     .map((p) => (p.startsWith("~") ? path.join(home, p.slice(1)) : p))
     .map((p) => path.resolve(p))
     .filter((p) => fs.existsSync(p))
@@ -41,12 +25,10 @@ export function fileRoots(config = {}) {
 }
 
 // ---- THE BOUNDARY ----------------------------------------------------------
-// Both halves resolve symlinks. studio-box validated an ADDED root with
-// realpathSync but gated reads/writes with plain path.resolve, so a symlink
-// INSIDE an approved root pointing OUTSIDE it satisfied the gate and was
-// written through. That asymmetry is the sandbox escape this function exists to
-// close: one function, used by every read and every write, resolving the same
-// way on both paths.
+// Both the path and the root resolve symlinks. Checking a plain path.resolve
+// against the root would let a symlink INSIDE a root that points OUTSIDE it pass
+// the check and be written through. One function, used by every read and every
+// write, resolving the same way on both paths.
 //
 // Returns the REAL path when inside a root, else null. Callers must use the
 // returned path — never the caller's original string.
@@ -59,10 +41,8 @@ export function resolveInsideRoots(p, roots) {
   // to the deepest EXISTING ancestor, resolve THAT (defeating symlinks in the part that
   // exists), and re-attach the remaining segments.
   //
-  // Resolving only the immediate parent is not enough: routing an asset into a fresh
-  // project creates `media/captures/` on the way, so the parent does not exist either
-  // and every legitimate create was rejected. A positive control caught that — an
-  // over-restrictive boundary and a correct one look identical against an attack test.
+  // Resolving only the immediate parent is not enough: a write can create several
+  // folders on the way, so the parent may not exist either.
   let real;
   try {
     real = fs.realpathSync(target);
@@ -102,60 +82,66 @@ export function resolveInsideRoots(p, roots) {
 }
 
 // ---- read verbs ------------------------------------------------------------
-// SHAPE IS THE CONTRACT, AND IT BINDS WHOEVER ANSWERS.
-//
-// /api/files/tree is documented by the SDK's runtime-api.md as returning
-// { path, dirs, files }. A provider MAY implement a documented verb — in a real
-// studio the files ARE served by something that knows about real roots, so
-// substitution is the point rather than a defect — but implementing it means
-// answering in the documented shape.
-//
-// THIS FUNCTION USED TO BREAK THAT, and only in the zero-argument case: with no
-// dir it returned { roots: [...] } instead. The shapes with a dir agreed exactly;
-// what diverged was arity of roots. The runtime pins ONE root, so no-arg
-// unambiguously means "that root's contents". This provider binds N, so no-arg
-// had no single answer and it invented a different question to answer instead.
-//
-// That question already had a verb: /api/files/roots. Answering it from here too
-// meant one property computed in two places, and the caller could not tell which
-// shape it was about to get. Zero-arg now returns the FIRST BOUND ROOT's
-// contents, in the documented shape, always.
-//
-// "FIRST" IS ONLY ACCEPTABLE BECAUSE THE ANSWER DISCLOSES ITSELF: the response
-// carries `path`, so a caller can SEE which root it got rather than assume. An
-// arbitrary choice the caller can inspect is a documented answer; the same
-// choice made silently is a coin flip.
+// /api/files/tree answers in the runtime's documented shape, { path, dirs, files },
+// whoever serves it (contract/runtime-api.md). With no dir it lists the FIRST bound
+// root, and the answer names its `path`, so a caller can see which root it got.
+// The list of roots has its own verb, /api/files/roots.
 export function filesTree(dirPath, roots) {
   const target = dirPath || roots[0];
-  if (!target) return null;                 // no roots bound: nothing to answer with
+  if (!target) return null; // no roots bound: nothing to answer with
   const r = resolveInsideRoots(target, roots);
   if (!r) return null;
-  const dirs = [], files = [];
-  for (const name of fs.readdirSync(r).sort()) {
+  const dirs = [],
+    files = [];
+  let names;
+  try {
+    names = fs.readdirSync(r).sort();
+  } catch {
+    return null;
+  } // missing, or not a folder: the route's plain answer, not the system's error with its path
+  for (const name of names) {
     if (name.startsWith(".")) continue;
     const full = path.join(r, name);
     try {
       const st = fs.statSync(full);
       if (st.isDirectory()) dirs.push({ name, path: full });
       else files.push({ name, path: full, size: st.size, mtime: st.mtimeMs, kind: fileKind(name) });
-    } catch { /* unreadable entry is skipped, not fatal */ }
+    } catch {
+      /* unreadable entry is skipped, not fatal */
+    }
   }
   return { path: r, dirs, files };
 }
 
-// Text comes back inline; anything else comes back as a raw URL the surface
-// puts in an img/video/audio tag. Reading a video as utf8 — which the earlier
-// rewrite did — corrupts it and hangs the pane.
+// Text comes back inline; anything else comes back as a raw URL the page puts in
+// an img/video/audio tag (reading a video as utf8 would corrupt it).
 export function filesRead(p, roots) {
   const r = resolveInsideRoots(p, roots);
   if (!r || !fs.existsSync(r)) return null;
   const st = fs.statSync(r);
   if (st.isDirectory()) return null;
   const kind = fileKind(r);
-  if (kind === "markdown" || kind === "text" || (st.size < 512 * 1024 && kind === "other")) {
+  // HTML returns its content, not a raw URL: the SDK's shared viewer renders it into
+  // a sandboxed iframe through `srcdoc`, so a page from somewhere else never gets
+  // this Studio's origin or its verbs. A file of an unknown type is shown as text
+  // only when its bytes ARE text; anything with a NUL or bytes that aren't UTF-8
+  // stays "other" and comes back as a raw URL to download.
+  if (
+    kind === "markdown" ||
+    kind === "text" ||
+    kind === "html" ||
+    (kind === "other" && st.size < 512 * 1024)
+  ) {
+    const buf = fs.readFileSync(r);
+    if (looksBinary(buf))
+      return {
+        kind: "other",
+        raw: "/api/files/raw?path=" + encodeURIComponent(r),
+        mtime: st.mtimeMs,
+      };
     return {
       kind: kind === "other" ? "text" : kind,
-      content: fs.readFileSync(r, "utf8"),
+      content: buf.toString("utf8"),
       mtime: st.mtimeMs,
     };
   }
@@ -168,6 +154,13 @@ export function filesRead(p, roots) {
 export function filesWrite(p, content, baseMtime, roots) {
   const r = resolveInsideRoots(p, roots);
   if (!r) throw new Error("path outside the pinned roots");
+  if (notTextFile(r)) {
+    const err = new Error(
+      "This file isn't text, so it can't be saved from Files. Nothing was changed.",
+    );
+    err.notText = true;
+    throw err;
+  }
 
   if (fs.existsSync(r)) {
     const cur = fs.statSync(r).mtimeMs;
@@ -188,216 +181,134 @@ export function filesWrite(p, content, baseMtime, roots) {
   return fs.statSync(r).mtimeMs;
 }
 
-// ---- media library ---------------------------------------------------------
-// Extracted from studio-box's export-server. Every path decision below goes
-// through resolveInsideRoots — including the DESTINATION, which the original
-// did not validate.
-
-const MEDIA_EXT = { video: /\.(mp4|mov|webm|mkv)$/i, image: /\.(png|jpe?g|webp|gif)$/i, audio: /\.(wav|mp3|aiff?|m4a|flac)$/i };
-export function mediaKindOf(name) {
-  for (const [kind, re] of Object.entries(MEDIA_EXT)) if (re.test(name)) return kind;
-  return "unknown";
-}
-
-// Safe by construction: takes no caller path at all, walks server-derived roots.
-export function libraryList(roots, { maxDepth = 4 } = {}) {
-  const assets = [];
-  const walk = (dir, rootLabel, depth) => {
-    if (depth > maxDepth || !fs.existsSync(dir)) return;
-    for (const name of fs.readdirSync(dir)) {
-      if (name.startsWith(".") || name === "node_modules") continue;
-      const full = path.join(dir, name);
-      let stat;
-      try { stat = fs.statSync(full); } catch { continue; }
-      if (stat.isDirectory()) { walk(full, rootLabel, depth + 1); continue; }
-      const kind = mediaKindOf(name);
-      if (kind === "unknown") continue;
-      // Listing is root-checked too. studio-box listed via statSync (which follows
-      // symlinks), so a symlink out of the root appeared in the index with its
-      // target's size and mtime — a metadata leak even though serving was gated.
-      if (!resolveInsideRoots(full, roots)) continue;
-      assets.push({ name, path: full, root: rootLabel, kind, size: stat.size, mtime: stat.mtimeMs });
-    }
-  };
-  for (const root of roots) walk(root, path.basename(root), 0);
-  return assets;
-}
-
-// ROUTE A LIBRARY ASSET INTO A PROJECT.
-// The original validated the SOURCE with realpath and a root check, then built the
-// DESTINATION from an unsanitized `slot` — `slot='../../../tmp/evil'` escaped the
-// project root, creating directories on the way (measured). Defense in depth here:
-// the slot is reduced to a single segment AND the resolved destination is validated.
-// The boundary check is the load-bearing half; it holds however the name was built.
-export function libraryRoute({ assetPath, slot, projectRoot, roots }) {
-  const source = resolveInsideRoots(assetPath, roots);
-  if (!source) return { ok: false, error: "asset must live under a configured media root" };
-
-  const kind = mediaKindOf(source);
-  const destDir = kind === "image" ? "media/images" : kind === "audio" ? "media/audio" : "media/captures";
-  // Same character class studio-box already used for `slot` in /api/annotation — it
-  // preserves dots, which real slot ids need (1.1 … 3.6), and strips separators.
-  const safeSlot = String(slot || "").replace(/[^a-zA-Z0-9.]+/g, "-").replace(/^[.-]+|[.-]+$/g, "");
-  const baseName = path.basename(source).replace(/[^A-Za-z0-9._-]+/g, "-");
-  const destName = safeSlot ? `${safeSlot}-lib-${baseName}` : `lib-${baseName}`;
-
-  const destPath = path.join(projectRoot, destDir, destName);
-  // Validate the RESOLVED destination against the project root before any mkdir.
-  const destOk = resolveInsideRoots(destPath, [projectRoot]);
-  if (!destOk) return { ok: false, error: "destination escapes the project root" };
-
-  fs.mkdirSync(path.dirname(destOk), { recursive: true });
-  fs.copyFileSync(source, destOk);
-  const projReal = resolveInsideRoots(projectRoot, [projectRoot]) || projectRoot;
-  return { ok: true, dest: path.relative(projReal, destOk) };
-}
-
-// ---- live seats ------------------------------------------------------------
-// THE FIRST ORCHESTRATION VERB BACK IN. The studio asks the rig who is actually
-// seated, so the agent sidebar shows real seats instead of the SDK's fixture
-// placeholder. This shells out to `rig`, which the earlier posture forbade on
-// the theory that the box's owner was an adversary; on a trusted box, an app
-// that can see and talk to your agents is the entire point.
-//
-// Fixed argv, no caller input reaches it — not because a gate demands it, but
-// because this verb genuinely has nothing to parameterise.
-export function listSeats() {
-  return new Promise((resolve) => {
-    // FLEET-WIDE (-A) is required, not optional. Outside a managed session the CLI
-    // has no current rig to default to and exits non-zero with "no target" — and a
-    // provider is always outside a session, because it is a service. The bare form
-    // works only on a developer machine that happens to be inside one, which is why
-    // this survived until a real box showed the roster as unreadable.
-    execFile("rig", ["ps", "--nodes", "-A", "--json"], { timeout: 5000 }, (err, stdout) => {
-      if (err) return resolve({ ok: false, error: `rig ps failed: ${err.message}`, seats: [] });
-      let nodes;
-      try {
-        const parsed = JSON.parse(stdout);
-        nodes = Array.isArray(parsed) ? parsed : parsed.nodes || [];
-      } catch (e) {
-        return resolve({ ok: false, error: `could not parse rig ps: ${e.message}`, seats: [] });
-      }
-      const seats = nodes
-        .filter((n) => n.canonicalSessionName || n.logicalId)
-        .map((n) => ({
-          seat: n.canonicalSessionName || `${n.logicalId}@${n.rigName}`,
-          name: (n.logicalId || "").toUpperCase() || n.canonicalSessionName,
-          rig: n.rigName,
-          // agentActivity is an OBJECT ({state:"unknown"}) on this host, not a
-          // string — live-state.mjs already normalized it and this verb did
-          // not, so every seat row rendered a literal "[object Object]".
-          // Normalized here, once, rather than in each surface that shows it.
-          //
-          // Still reported rather than interpreted: "unknown" is the honest
-          // value for claude-code seats because the daemon-ingest link is
-          // down, and "idle" would be inventing a fact about a live seat.
-          activity: (typeof n.agentActivity === "string"
-            ? n.agentActivity
-            : n.agentActivity?.state) ?? "unknown",
-          lifecycle: n.lifecycleState,
-          pendingWork: n.pendingWorkCount ?? 0,
-        }));
-      resolve({ ok: true, seats });
-    });
-  });
-}
-
-// ---- talking to a seat -----------------------------------------------------
-// THE COLLABORATION SURFACE, RESTORED. studio-box had this as /api/demo/say
-// (tmux send-keys, inject + submit). It was deleted as an "escalation class"
-// verb under the threat model that has since been retracted — the one that
-// treated the box's own owner as the adversary. On a trusted box, a human and
-// an agent working the same surface IS the product thesis, and the SDK leaves
-// this to the consumer on purpose: its shell says "live seat attach requires a
-// seat backend, which this fixture-backed runtime does not include."
-//
-// This is that backend.
-//
-// Two deliberate choices:
-//   - `rig send` / `rig capture` rather than raw tmux send-keys. Same effect,
-//     but it is the sanctioned surface, it resolves seats across rigs, and it
-//     reports delivery instead of firing keystrokes into a pane by index.
-//   - the seat is validated against the LIVE ROSTER before it reaches argv.
-//     Not because anyone is attacking: a mistyped or stale seat name would
-//     otherwise be handed straight to a subprocess, and "which seat did that
-//     go to" is a question you never want to ask.
-
-const seatIsReal = async (seat) => {
-  const r = await listSeats();
-  if (!r.ok) return { ok: false, error: r.error };
-  return r.seats.some((s) => s.seat === seat)
-    ? { ok: true }
-    : { ok: false, error: `not a live seat: ${seat}` };
-};
-
-export async function sendSeat(seat, text) {
-  const body = String(text ?? "").trim();
-  if (!body) return { ok: false, error: "nothing to send" };
-  const real = await seatIsReal(String(seat || ""));
-  if (!real.ok) return real;
-
-  return new Promise((resolve) => {
-    // argv array, never a shell string — the message is one argument, so
-    // backticks and $(...) in what a human types stay literal text. That class
-    // has bitten four seats on two rigs in a single day through `rig send`.
-    execFile("rig", ["send", seat, body, "--verify"], { timeout: 15000 }, (err, stdout, stderr) => {
-      const out = `${stdout || ""}${stderr || ""}`;
-      if (err && !out.includes("Sent to")) {
-        return resolve({ ok: false, error: `rig send failed: ${err.message}` });
-      }
-      // `Verified: no` is NOT a failure — it is dead for claude-code targets on
-      // this host and carries real signal only for codex ones. Report what the
-      // tool said and let the surface show it; do not translate it into
-      // success or failure here.
-      resolve({
-        ok: true,
-        delivered: /Sent to/.test(out),
-        verified: /Verified:\s*yes/i.test(out),
-        detail: out.trim().split("\n").slice(0, 3).join(" · "),
-      });
-    });
-  });
-}
-
-export async function captureSeat(seat, lines = 60) {
-  const real = await seatIsReal(String(seat || ""));
-  if (!real.ok) return real;
-  const n = Math.max(10, Math.min(400, Number(lines) || 60));
-  return new Promise((resolve) => {
-    execFile("rig", ["capture", seat, "--lines", String(n)], { timeout: 15000 }, (err, stdout) => {
-      if (err) return resolve({ ok: false, error: `rig capture failed: ${err.message}` });
-      // Bounded by scrollback: absence here is weak evidence, never proof.
-      resolve({ ok: true, seat, lines: n, text: String(stdout || "") });
-    });
-  });
-}
-
 // ---- the rest of the Files app --------------------------------------------
-// Ported from studio-box serve-shell.mjs. Behaviour preserved; every path goes
-// through the one resolver, which is the only thing that changed.
-
-// The kind vocabulary is a CONTRACT with the surface — files.html maps exactly
-// these names to icons and to how it renders a file. Ported verbatim; an
-// earlier hand-rewrite of this returned "file" instead of "other" and dropped
-// markdown/html entirely, which silently broke the pane.
+// The kind vocabulary is a contract with the page: files.html maps exactly these
+// names to how it renders a file, and anything else is "other".
 const FILE_KINDS = {
-  image: /\.(png|jpe?g|gif|webp|svg)$/i, video: /\.(mp4|mov|webm)$/i,
-  audio: /\.(mp3|wav|m4a|flac)$/i, markdown: /\.(md|markdown)$/i,
+  image: /\.(png|jpe?g|gif|webp|svg)$/i,
+  video: /\.(mp4|mov|webm)$/i,
+  audio: /\.(mp3|wav|m4a|flac)$/i,
+  markdown: /\.(md|markdown)$/i,
   html: /\.html?$/i,
+  pdf: /\.pdf$/i,
   text: /\.(txt|json|jsonl|yaml|yml|mjs|js|ts|css|py|sh|toml|csv|vtt)$/i,
 };
+// A text view must decode every byte without loss, including files named .txt or .md. A sampled prefix alone can miss binary
+// data later in a file. A caller passing an incomplete prefix can explicitly keep a split UTF-8 sequence open with stream mode.
+export function looksBinary(buf, truncated = false) {
+  if (buf.includes(0)) return true;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(buf, { stream: truncated });
+    return false;
+  } catch {
+    return true;
+  }
+}
+// Never written as text from here: a media or PDF type, or an existing file whose bytes aren't text (a save over a .docx would
+// otherwise replace it with the text of its bytes).
+const NOT_TEXT = new Set(["image", "video", "audio", "pdf"]);
+export function notTextFile(r) {
+  if (NOT_TEXT.has(fileKind(r))) return true;
+  // Only a regular file is opened: opening a named pipe for reading would block this server.
+  let st;
+  try {
+    st = fs.statSync(r);
+  } catch (e) {
+    if (e.code === "ENOENT") return false;
+    throw e;
+  }
+  if (!st.isFile()) return false;
+  let fd;
+  try {
+    fd = fs.openSync(r, "r");
+  } catch (e) {
+    if (e.code === "ENOENT") return false;
+    throw e;
+  }
+  try {
+    if (!fs.fstatSync(fd).isFile()) return false;
+    const decoder = new TextDecoder("utf-8", { fatal: true }),
+      buf = Buffer.alloc(65536);
+    for (;;) {
+      const n = fs.readSync(fd, buf, 0, buf.length, null);
+      if (!n) break;
+      const chunk = buf.subarray(0, n);
+      if (chunk.includes(0)) return true;
+      try {
+        decoder.decode(chunk, { stream: true });
+      } catch {
+        return true;
+      }
+    }
+    try {
+      decoder.decode();
+      return false;
+    } catch {
+      return true;
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+}
 export const fileKind = (name) =>
   Object.entries(FILE_KINDS).find(([, re]) => re.test(name))?.[0] || "other";
 
-const MIME = {
-  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
-  ".webp": "image/webp", ".svg": "image/svg+xml", ".mp4": "video/mp4", ".mov": "video/quicktime",
-  ".webm": "video/webm", ".mkv": "video/x-matroska", ".mp3": "audio/mpeg", ".wav": "audio/wav",
-  ".m4a": "audio/mp4", ".flac": "audio/flac", ".aif": "audio/aiff", ".aiff": "audio/aiff",
-  ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
-  ".css": "text/css", ".js": "text/javascript", ".mjs": "text/javascript",
-  ".json": "application/json", ".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8",
+export const MIME = {
+  // exported for test/files-raw-guard.test.mjs: every type that can run code has a sandbox
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".mkv": "video/x-matroska",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".m4a": "audio/mp4",
+  ".flac": "audio/flac",
+  ".aif": "audio/aiff",
+  ".aiff": "audio/aiff",
+  ".html": "text/html; charset=utf-8",
+  ".htm": "text/html; charset=utf-8",
+  ".css": "text/css",
+  ".js": "text/javascript",
+  ".mjs": "text/javascript",
+  ".json": "application/json",
+  ".md": "text/plain; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  // A PDF is shown inline by the browser's own viewer; Office files are downloaded, so they keep their real type.
+  ".pdf": "application/pdf",
+  ".zip": "application/zip",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".doc": "application/msword",
+  ".xls": "application/vnd.ms-excel",
+  ".ppt": "application/vnd.ms-powerpoint",
 };
+// A file an agent or anyone wrote must never run as this Studio when its raw URL is opened. HTML keeps running its
+// own script, as Files' preview frame already allows, but in an opaque origin with no Studio access; SVG and XML run nothing, and XML
+// downloads. A PDF gets neither (the browser's viewer won't render in a sandbox); images, media and text are unchanged.
+const RAW_SANDBOX = {
+  ".html": "sandbox allow-scripts",
+  ".htm": "sandbox allow-scripts",
+  ".xhtml": "sandbox allow-scripts",
+  ".svg": "sandbox",
+  ".xml": "sandbox",
+  ".xsl": "sandbox",
+  ".xslt": "sandbox",
+};
+const RAW_DOWNLOAD = new Set([".xml", ".xsl", ".xslt"]);
+export function rawGuard(p) {
+  const ext = path.extname(p).toLowerCase(),
+    h = {};
+  if (RAW_SANDBOX[ext]) h["content-security-policy"] = RAW_SANDBOX[ext];
+  if (RAW_DOWNLOAD.has(ext)) h["content-disposition"] = "attachment";
+  return h;
+}
 export const mimeFor = (p) => MIME[path.extname(p).toLowerCase()] || "application/octet-stream";
 
 // Resolve for byte-serving. Returns the validated path plus what the front
@@ -419,13 +330,24 @@ export function filesSearch(q, roots) {
   const walk = (dir, depth) => {
     if (hits.length >= 60 || depth > 6) return;
     let names;
-    try { names = fs.readdirSync(dir); } catch { return; }
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      return;
+    }
     for (const name of names) {
       if (name.startsWith(".") || name === "node_modules" || name === "vendor") continue;
       const full = path.join(dir, name);
       let st;
-      try { st = fs.statSync(full); } catch { continue; }
-      if (st.isDirectory()) { walk(full, depth + 1); continue; }
+      try {
+        st = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) {
+        walk(full, depth + 1);
+        continue;
+      }
       if (!name.toLowerCase().includes(needle)) continue;
       if (!resolveInsideRoots(full, roots)) continue;
       hits.push({ name, path: full, kind: fileKind(name) });
@@ -440,8 +362,7 @@ export function filesSearch(q, roots) {
 export function filesTags(rootDir, roots) {
   const r = resolveInsideRoots(rootDir, roots);
   if (!r) return null;
-  const tagsPath = [path.join(r, "tags.jsonl")]
-    .find((p) => fs.existsSync(p));
+  const tagsPath = [path.join(r, "tags.jsonl")].find((p) => fs.existsSync(p));
   if (!tagsPath) return { tags: {} };
   const tags = {};
   for (const line of fs.readFileSync(tagsPath, "utf8").split("\n")) {
@@ -450,21 +371,27 @@ export function filesTags(rootDir, roots) {
       const e = JSON.parse(line);
       if (e.op === "add") (tags[e.tag] = tags[e.tag] || new Set()).add(e.asset);
       if (e.op === "remove") tags[e.tag]?.delete(e.asset);
-    } catch { /* a malformed line is skipped, not fatal */ }
+    } catch {
+      /* a malformed line is skipped, not fatal */
+    }
   }
   return {
     tagsPath,
     tags: Object.fromEntries(
-      Object.entries(tags).filter(([, v]) => v.size).map(([k, v]) => [k, [...v]]),
+      Object.entries(tags)
+        .filter(([, v]) => v.size)
+        .map(([k, v]) => [k, [...v]]),
     ),
   };
 }
 
 // ---- agent-driven navigation ----------------------------------------------
-// THIS IS THE COLLABORATION SURFACE, not a hazard: the agent in the sidebar
-// POSTs a path and the open Files surface jumps to it. In-memory, per-process.
+// The agent in the sidebar POSTs a path and the open Files page jumps to it.
+// In memory, per process.
 let FILES_GOTO = null;
-export function gotoGet() { return FILES_GOTO; }
+export function gotoGet() {
+  return FILES_GOTO;
+}
 export function gotoSet(p, roots) {
   const r = resolveInsideRoots(p, roots);
   if (!r || !fs.existsSync(r)) return null;
@@ -473,34 +400,69 @@ export function gotoSet(p, roots) {
 }
 
 // ---- root overlay ----------------------------------------------------------
-// The owner can add their own directories to the browsable set at runtime, and
-// it persists. rootAddable is NOT a threat-model gate — it stops the owner
-// accidentally exposing their own keys in a browsable pane, which is a UI
-// courtesy their own tool already had.
-const OVERLAY_PATH = path.join(REPO_ROOT, "studio.files-roots.json");
+// The owner can add their own folders to the browsable set from the page, and
+// they persist in the Studio's folder. rootAddable stops the owner exposing their
+// own keys in a browsable pane by accident; it is a courtesy, not a security gate.
+const OVERLAY_PATH = path.join(STUDIO_DIR, "studio.files-roots.json");
+// Folders, relative to the home, where well-known tools keep keys and credentials. Neither one of these nor a folder that
+// contains one (~/.config holds gcloud's) can be added.
+export const CREDENTIAL_DIRS = [
+  ".ssh",
+  ".gnupg",
+  ".aws",
+  ".azure",
+  ".kube",
+  ".docker",
+  ".config/gcloud",
+  ".config/gh",
+  ".config/rclone",
+  ".password-store",
+  ".secrets",
+];
 
 export function rootAddable(p) {
   let real, home;
-  try { real = fs.realpathSync(p); } catch { return { ok: false, error: "path does not exist" }; }
-  try { home = fs.realpathSync(os.homedir()); } catch { home = os.homedir(); }
-  if (!fs.statSync(real).isDirectory()) return { ok: false, error: "not a directory" };
-  if (real === home) return { ok: false, error: "HOME itself is too broad — add a subdirectory" };
-  if (!real.startsWith(home + path.sep)) return { ok: false, error: "roots must live inside the home directory" };
-  const denied = [path.join(home, ".ssh"), path.join(home, ".secrets"), path.join(home, ".config/rclone")];
-  if (denied.some((d) => real === d || real.startsWith(d + path.sep)))
-    return { ok: false, error: "that directory holds keys/secrets — not exposable" };
+  try {
+    real = fs.realpathSync(p);
+  } catch {
+    return { ok: false, error: "That folder doesn't exist." };
+  }
+  try {
+    home = fs.realpathSync(os.homedir());
+  } catch {
+    home = os.homedir();
+  }
+  if (!fs.statSync(real).isDirectory()) return { ok: false, error: "That's a file, not a folder." };
+  if (real === home)
+    return { ok: false, error: "Your whole home folder is too broad. Add a folder inside it." };
+  if (!real.startsWith(home + path.sep))
+    return { ok: false, error: "Add a folder inside your home folder." };
+  for (const rel of CREDENTIAL_DIRS) {
+    const d = path.join(home, rel);
+    if (real === d || real.startsWith(d + path.sep))
+      return { ok: false, error: `~/${rel} holds keys or credentials, so Files won't show it.` };
+    if (d.startsWith(real + path.sep))
+      return {
+        ok: false,
+        error: `That folder holds ~/${rel}, where keys or credentials live. Add a folder inside it instead.`,
+      };
+  }
   return { ok: true, real };
 }
 
 export function readOverlay() {
-  try { return JSON.parse(fs.readFileSync(OVERLAY_PATH, "utf8")).add || []; } catch { return []; }
+  try {
+    return JSON.parse(fs.readFileSync(OVERLAY_PATH, "utf8")).add || [];
+  } catch {
+    return [];
+  }
 }
 
-// The overlay path is server-derived and routed through the resolver anyway, so
-// claim (b) holds structurally rather than by exemption.
+// The overlay path is the provider's own, and still goes through the resolver, so
+// verify-containment's write rule holds without an exemption.
 export function rootsMutate({ op, path: p }) {
-  const dest = resolveInsideRoots(OVERLAY_PATH, [REPO_ROOT]);
-  if (!dest) return { ok: false, error: "overlay path is not inside the studio repo" };
+  const dest = resolveInsideRoots(OVERLAY_PATH, [STUDIO_DIR]);
+  if (!dest) return { ok: false, error: "the folder list isn't inside the Studio's folder" };
   const add = readOverlay();
   if (op === "add") {
     const v = rootAddable(p || "");

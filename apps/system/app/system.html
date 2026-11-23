@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Machine</title>
+<!-- Copyright 2026 mvschwarz. Licensed under the Apache License, Version 2.0. -->
+<!-- Machine: this Studio's storage, memory and CPU (GET /api/system/status), what's taking space (GET /api/system/big-folders; POST looks again) and a
+     few safe cleanups (POST /api/system/clean). Anything that couldn't be read says so; nothing is shown as 0 or healthy by default.
+     Text is set with textContent only. -->
+<link rel="stylesheet" href="/vendor/theme16/kit-app.css?v=0f29a66a3506f8dc6e55f2f1aae304054224369a7d0f7454927f02dff8e91355">
+<style>
+  /* On the OpenRig UI kit (kit-app.css: tokens, components, ground, .btn). Only this page's layout below. */
+  html, body { margin: 0; overflow-x: clip; }
+  header.or-page-head { margin: 0; padding: var(--or-space-4) var(--or-space-4) var(--or-space-3); }
+  h2 { font: 500 var(--or-body-size)/var(--or-body-lh) var(--or-sans); margin: var(--or-space-5) 0 var(--or-space-2); }
+  main { padding: var(--or-space-3) var(--or-space-4) var(--or-space-8); max-width: 900px; }
+  .sub { color: var(--or-muted); font-size: var(--or-label-size); line-height: var(--or-label-lh); margin: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--or-space-3); }
+  .card { background: var(--or-panel); box-shadow: var(--or-edge); border-radius: var(--or-radius-card); padding: var(--or-space-3) var(--or-space-4); overflow-wrap: anywhere; }
+  .card h3 { margin: 0 0 var(--or-space-2); font-size: var(--or-label-size); line-height: var(--or-label-lh); color: var(--or-muted); font-weight: 500; display: flex; justify-content: space-between; gap: var(--or-space-2); align-items: center; }
+  .bar { height: 8px; background: var(--or-line); border-radius: var(--or-radius-control); overflow: hidden; margin: var(--or-space-2) 0; } .bar > i { display: block; height: 100%; background: var(--or-ok); }
+  .bar.warn > i { background: var(--or-wait); } .bar.urgent > i { background: var(--or-danger); }
+  ul.plain { list-style: none; padding: 0; margin: 0; } ul.plain li { padding: var(--or-space-2) 0; box-shadow: var(--or-edge-bottom); }
+  .row { display: flex; flex-wrap: wrap; gap: var(--or-space-2) var(--or-space-3); align-items: center; justify-content: space-between; }
+  .size { font-variant-numeric: tabular-nums; min-width: 80px; display: inline-block; }
+</style>
+</head>
+<body>
+<header class="or-page-head">
+  <h1>Machine</h1>
+  <p class="sub" id="sub">Storage, memory and CPU for this machine, read just now.</p>
+</header>
+<main>
+  <p id="err" class="muted" hidden></p>
+  <div class="grid" id="cards"></div>
+  <p id="uptime" class="muted"></p>
+  <p id="mac" class="muted" hidden></p>
+  <h2>Why it's slow</h2>
+  <div id="slow"></div>
+  <h2>Safe to clear</h2>
+  <p class="muted">These only remove copies that download again when they're needed. Nothing in your project is touched.</p>
+  <ul class="plain" id="fixes"></ul>
+  <h2>What's taking space</h2>
+  <div class="row"><span class="muted" id="bigNote">The largest folders in this machine's home folder.</span><button class="or-btn btn small" id="bigGo">Look</button></div>
+  <ul class="plain" id="big"></ul>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const size = (b) => b == null ? "?" : b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b >= 1e6 ? `${Math.round(b / 1e6)} MB` : `${Math.round(b / 1e3)} KB`;
+  const get = async (p) => { const r = await fetch(p, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(20000) }).catch(() => null);
+    if (!r) return { ok: false, error: "Couldn't reach this machine just now. Try again in a minute." };
+    const j = await r.json().catch(() => null);
+    // A refusal that says a sign-in would let them in asks for it: the provider's own (signIn: true), or the Studio's front door
+    // (a 401, or a 403 marked x-openrig-front-door, as Terminal reads it). Any other refusal says where Machine opens.
+    const signIn = j?.signIn || r.status === 401 || (r.status === 403 && r.headers.has("x-openrig-front-door"));
+    if (signIn) return { ok: false, error: "Sign in to this machine to see its machine." };
+    if (r.status === 403) return { ok: false, error: j?.error || "Open Machine from this machine's own Studio to see it." };
+    return j || { ok: false, error: `HTTP ${r.status}` }; };
+  let steps = {};   // the steps this deployment's people can take (status.steps)
+  const notKnown = (why) => why === "read" ? "Not known: couldn't read it just now. Try again in a minute." : "Not known: this machine doesn't report it.";
+
+  function card(title, word, state, fraction, line, extra) {
+    const c = el("div", "card"), h = el("h3"); h.append(el("span", null, title), el("span", `chip ${state} or-chip ${({ ok: "ok", warn: "warn", urgent: "bad" })[state] || ""}`, word)); c.append(h);
+    if (fraction != null && state !== "unknown") { const b = el("div", `bar ${state}`), i = el("i"); i.style.width = `${Math.min(100, Math.round(fraction * 100))}%`; b.append(i); c.append(b); }
+    c.append(el("div", null, line)); if (extra) c.append(el("div", "muted", extra)); return c;
+  }
+
+  async function load(refreshFixes) {
+    const s = await get("/api/system/status" + (refreshFixes ? "?fixes=refresh" : ""));
+    steps = s.steps || {};
+    $("err").hidden = s.ok !== false; if (s.ok === false) { $("err").textContent = s.error || "Couldn't read this machine just now."; return; }
+    const cards = $("cards"); cards.replaceChildren();
+    const st = s.storage, m = s.memory, c = s.cpu;
+    if (st.state === "unknown") cards.append(card("Storage", "Not known", "unknown", null, notKnown("read")));
+    else cards.append(card("Storage", s.words.storage, st.state, st.fraction, `${size(st.usedBytes)} of ${size(st.totalBytes)} used · ${size(st.freeBytes)} free`,
+      st.tighter === "inodes" ? `${s.words.storage}: ${Math.round(st.inodes.fraction * 100)}% of the space for files is used, even though ${size(st.freeBytes)} is free. Lots of small files usually cause this.`
+        : st.lowFree ? `Only ${size(st.freeBytes)} left.` : null));
+    if (m.usedBytes == null) cards.append(card("Memory", "Not known", "unknown", null, notKnown(m.why ? "read" : "")));
+    const oomHistory = s.oom?.kills > 0 && !s.findings.some((f) => f.at) ? `Programs were stopped for using too much memory ${s.oom.kills} time${s.oom.kills === 1 ? "" : "s"} since this machine started${s.oom.seenAt ? ", none in the last day" : ""}.` : null;
+    if (m.usedBytes != null) cards.append(card("Memory", s.words.memory, m.useOnly ? "" : m.state, m.useOnly ? null : m.fraction,
+      m.scope === "workspace" ? `${size(m.usedBytes)} of this machine's ${size(m.limitBytes)} used · ${size(m.limitBytes - m.usedBytes)} available` : `${size(m.usedBytes)} of ${size(m.totalBytes)} used${m.availableBytes != null ? ` · ${size(m.availableBytes)} available` : ""}`, oomHistory));
+    if (c.state === "unknown") cards.append(card("CPU", "Not known", "unknown", null, notKnown("read")));
+    else cards.append(card("CPU", s.words.cpu, c.state, c.fraction,
+      c.usedCores != null ? `Using ${c.usedCores.toFixed(1)} of ${+(c.limitCores || c.cores).toFixed(1)} cores` : `Load ${c.load[1].toFixed(1)} on ${c.cores} cores (last 5 minutes)`));
+    const d = Math.floor(s.uptimeSeconds / 86400), hrs = Math.floor(s.uptimeSeconds / 3600);
+    $("uptime").textContent = `Running for ${d >= 1 ? `${d} day${d === 1 ? "" : "s"}` : `${hrs} hour${hrs === 1 ? "" : "s"}`}`;
+    // On Linux, the reading's own notes (e.g. a limit on this app's own service, or no cgroup); on a Mac the one Mac line covers them.
+    const lines = s.platformNote ? [s.platformNote] : (s.notes || []);
+    $("mac").hidden = !lines.length; $("mac").textContent = lines.join(" ");
+    const slow = $("slow"); slow.replaceChildren();
+    if (!s.findings.length) slow.append(el("p", "muted", s.platformNote ? "Nothing to report from what this machine shows." : "Nothing slowing it down right now."));
+    else { const ul = el("ul", "plain"); for (const f of s.findings) { const li = el("li"); const d = f.at ? new Date(f.at) : null, today = d && d.toDateString() === new Date().toDateString();
+      const at = d ? ` at ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${today ? "" : ` on ${d.toLocaleDateString([], { month: "short", day: "numeric" })}`}` : "";   // the reader's own clock
+      li.append(el("strong", null, f.title), document.createTextNode(`${at}${f.text ? ` ${f.text}` : "."}`)); ul.append(li); }
+      slow.append(ul, el("p", "muted", steps.lead ? "If it keeps happening, ask your lead to look, or clear some space below." : "If it keeps happening, clear some space below, or ask your agent to look.")); }
+    renderFixes(s.fixes);
+  }
+
+  // Each fix's latest result (and whether it's running) is kept here, so a refresh never wipes "Freed 2.1 GB." or brings back the button
+  // of a fix that's still running.
+  const results = {}, running = new Set();
+  function renderFixes(fixes) {
+    const ul = $("fixes"); ul.replaceChildren();
+    if (!fixes.length) { ul.append(el("li", "muted", "Nothing to clear on this machine.")); return; }
+    for (const f of fixes) {
+      const li = el("li", "row"), left = el("span"), msg = el("span", "muted");
+      left.append(el("strong", null, f.label));
+      if (running.has(f.id)) { msg.textContent = f.running; const b = el("button", "go or-btn btn primary small", f.label); b.disabled = true; li.append(left, msg, b); ul.append(li); continue; }
+      const before = f.frees == null ? (f.note || "") : f.frees < 1e6 ? "Nothing to clear" : `Frees about ${size(f.frees)}.${f.note ? ` ${f.note}` : ""}`;
+      msg.textContent = results[f.id] ? `${results[f.id]}${f.frees != null && f.frees >= 1e6 ? ` Now: ${before}` : ""}` : before;
+      li.append(left, msg);
+      if (!f.blocked && (f.frees == null || f.frees >= 1e6)) {
+        const b = el("button", "go or-btn btn primary small", f.label);
+        b.onclick = async () => {
+          running.add(f.id); delete results[f.id]; b.disabled = true; msg.textContent = f.running;
+          const r = await fetch("/api/system/clean", { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify({ id: f.id }), signal: AbortSignal.timeout(240000) })
+            .then((x) => x.json()).catch(() => ({ ok: false, why: "no answer from this machine", removed: "unknown" }));
+          running.delete(f.id);
+          results[f.id] = r.ok ? (r.freedBytes == null ? "Done." : r.freedBytes < 1e6 ? "Done; it freed less than 1 MB." : `Freed ${size(r.freedBytes)}.`)
+            : `Couldn't clear it: ${r.why}. ${r.removed === "none" ? "Nothing was removed." : r.freedBytes ? `Freed ${size(r.freedBytes)} before it stopped.` : "Some of it may have been removed."}`;
+          load(true);
+        };
+        li.append(b);
+      }
+      ul.append(li);
+    }
+  }
+
+  $("bigGo").onclick = async () => {
+    const b = $("bigGo"); b.disabled = true; b.textContent = "Looking…";
+    const r = await fetch("/api/system/big-folders", { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: "{}", signal: AbortSignal.timeout(20000) }).then((x) => x.json()).catch(() => ({ ok: false })); b.disabled = false; b.textContent = "Look again";
+    const ul = $("big"); ul.replaceChildren();
+    if (r.ok === false || r.failed) { ul.append(el("li", "muted", "Couldn't read the folders just now. Try again in a minute.")); return; }
+    $("bigNote").textContent = r.partial ? "Partial list: stopped looking after 10 seconds." : "The largest folders in this machine's home folder.";
+    for (const f of r.folders) {
+      const li = el("li"); li.append(el("span", "size", size(f.bytes)), el("strong", null, `~/${f.path}`));
+      if (f.inProject) li.append(el("div", "muted", `~/${f.path} is large (${size(f.bytes)}). It's part of your project, so it isn't cleared from here.${steps.lead ? " Ask your lead what can go." : ""}`));
+      ul.append(li);
+    }
+    for (const p of r.notCounted || []) { const li = el("li"); li.append(el("span", "size", "?"), el("strong", null, `~/${p}`), el("span", "muted", " too big to count in time")); ul.append(li); }
+    for (const p of r.notTried || []) { const li = el("li"); li.append(el("span", "size", "?"), el("strong", null, `~/${p}`), el("span", "muted", " not looked at in time")); ul.append(li); }
+    if (r.skipped?.length) ul.append(el("li", "muted", `~/${r.skipped.join(", ~/")} isn't looked at on a Mac.`));
+    if (!r.folders.length && !(r.notCounted || []).length && !(r.notTried || []).length) ul.append(el("li", "muted", "No folders found."));
+  };
+
+  load(); let t = setInterval(load, 15000);
+  document.addEventListener("visibilitychange", () => { clearInterval(t); if (!document.hidden) { load(); t = setInterval(load, 15000); } });
+})();
+</script>
+</body>
+</html>

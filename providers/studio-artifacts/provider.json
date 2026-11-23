@@ -2,16 +2,9 @@
   "package": "@openrig/studio-artifacts",
   "run": {
     "entry": "artifacts-server.mjs",
-    "args": [
-      "--port",
-      "{{port}}",
-      "--root",
-      "{{root:artifacts}}"
-    ]
+    "args": ["--port", "{{port}}", "--root", "{{root:artifacts}}"]
   },
-  "serves": [
-    "/artifacts/"
-  ],
+  "serves": ["/artifacts/"],
   "verbs": [
     "/api/annotations",
     "/api/artifacts",

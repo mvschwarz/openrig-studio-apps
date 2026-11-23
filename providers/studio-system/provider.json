@@ -1,0 +1,8 @@
+{
+  "package": "@openrig/studio-system",
+  "run": {
+    "entry": "system-server.mjs",
+    "args": ["--port", "{{port}}", "--project", "{{root:project}}"]
+  },
+  "verbs": ["/api/system/"]
+}

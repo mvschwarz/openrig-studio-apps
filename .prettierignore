@@ -1,0 +1,12 @@
+node_modules/
+package-lock.json
+.runtime/
+# Prose is wrapped by hand.
+*.md
+# Vendored third-party files keep their published bytes.
+apps/files/vendor/marked/
+vendor/kit/icons/
+# The HTML pages carry large inline scripts, and several tests read their structure as text.
+*.html
+# The UI kit is a pinned copy of a released kit (vendor/kit/release.json lists each file's sha256): it is never reformatted here.
+vendor/kit/
